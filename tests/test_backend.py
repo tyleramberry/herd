@@ -1,12 +1,16 @@
 """Backend tests: FastAPI TestClient against the Herd router with a temp SQLite db."""
 import json
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import herd
 from herd import tools
 from herd.dashboard import plugin_api
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
@@ -16,6 +20,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(plugin_api, "_initialized", set())
     events = []
     monkeypatch.setattr(plugin_api, "_broadcast", lambda msg: events.append(msg))
+    # Gateway identity is module state set from plugin settings; reset it per test.
+    monkeypatch.setattr(plugin_api, "_GATEWAY_ID", None)
     app = FastAPI()
     app.include_router(plugin_api.router, prefix="/api/plugins/herd")
     c = TestClient(app)
@@ -114,3 +120,83 @@ def test_agent_tools_return_json(client):
     missing = json.loads(tools.herd_post({"channel": "nowhere", "content": "x"}))
     assert missing["ok"] is False and "not found" in missing["error"]
     assert json.loads(tools.herd_post({}))["ok"] is False
+
+
+def test_gateway_id_setting_flows_through(client):
+    cid = _channel_id(client, "general")
+    url = f"/api/plugins/herd/channels/{cid}/messages"
+
+    # Unset -> "local"
+    assert client.post(url, json={"content": "a"}).json()["gateway_id"] == "local"
+
+    plugin_api.set_gateway_id("gw-b")
+    assert client.post(url, json={"content": "b"}).json()["gateway_id"] == "gw-b"
+    p = client.post("/api/plugins/herd/participants", json={"display_name": "Bo"}).json()
+    assert p["gateway_id"] == "gw-b"
+    agent = json.loads(tools.herd_post({"channel": "general", "content": "c"}))
+    assert agent["message"]["gateway_id"] == "gw-b"
+
+    # Explicit value wins over the setting
+    assert client.post(url, json={"content": "d", "gateway_id": "gw-x"}).json()["gateway_id"] == "gw-x"
+    p = client.post("/api/plugins/herd/participants", json={"display_name": "Cy", "gateway_id": "gw-x"}).json()
+    assert p["gateway_id"] == "gw-x"
+
+    # Clearing falls back to "local"
+    for cleared in (None, "", "   "):
+        plugin_api.set_gateway_id(cleared)
+        assert client.post(url, json={"content": "e"}).json()["gateway_id"] == "local"
+        p = client.post("/api/plugins/herd/participants", json={"display_name": "Di"}).json()
+        assert p["gateway_id"] == "local"
+
+
+class _Ctx:
+    def __init__(self, config=None, fail=False):
+        self.tools = []
+        self._config = config or {}
+        self._fail = fail
+
+    def register_tool(self, **kwargs):
+        self.tools.append(kwargs["name"])
+
+    def get_config(self, key):
+        if self._fail:
+            raise KeyError("plugins.entries.herd.settings")
+        return self._config.get(key)
+
+
+def test_register_picks_up_gateway_setting(monkeypatch):
+    monkeypatch.setattr(plugin_api, "_GATEWAY_ID", None)
+    ctx = _Ctx({"gateway_id": "gw-settings"})
+    herd.register(ctx)
+    assert ctx.tools == ["herd_post", "herd_list_channels"]
+    assert plugin_api._gateway_id() == "gw-settings"
+    assert plugin_api._gateway_id("explicit") == "explicit"
+
+
+def test_register_survives_missing_settings(monkeypatch):
+    monkeypatch.setattr(plugin_api, "_GATEWAY_ID", None)
+    ctx = _Ctx(fail=True)
+    herd.register(ctx)
+    assert ctx.tools == ["herd_post", "herd_list_channels"]
+    assert plugin_api._gateway_id() == "local"
+
+    class _NoConfig:
+        def __init__(self):
+            self.tools = []
+
+        def register_tool(self, **kwargs):
+            self.tools.append(kwargs["name"])
+
+    bare = _NoConfig()  # ctx without get_config at all
+    herd.register(bare)
+    assert bare.tools == ["herd_post", "herd_list_channels"]
+    assert plugin_api._gateway_id() == "local"
+
+
+def test_no_environment_reads_in_plugin_source():
+    # Split so this test file never contains the forbidden substrings itself.
+    forbidden = ["os." + "environ", "os." + "getenv", "get" + "env(", "HERMES_" + "GATEWAY_ID"]
+    for rel in ("__init__.py", "tools.py", "dashboard/plugin_api.py"):
+        text = (ROOT / rel).read_text()
+        for needle in forbidden:
+            assert needle not in text, f"{rel} contains {needle!r}"

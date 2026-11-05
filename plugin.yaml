@@ -4,5 +4,8 @@ description: A multiplayer workspace for Hermes with shared channels and direct 
 provides_tools:
   - herd_post
   - herd_list_channels
+requires_hermes: ">=0.22.0"
+config_schema:
+  gateway_id: {type: str, default: "", description: "Logical gateway identity stamped on messages and participants (used for 2-gateway fan-out); defaults to 'local' when unset."}
 license: MIT
 homepage: https://github.com/tyleramberry/herd

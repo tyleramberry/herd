@@ -5,7 +5,6 @@ run in the same gateway process, so no HTTP round-trip to localhost is needed.
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 import tempfile
 import threading
@@ -45,8 +44,21 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Logical gateway identity, set from plugin settings
+# (``plugins.entries.herd.settings.gateway_id``) by ``register()``.
+_GATEWAY_ID: str | None = None
+
+
+def set_gateway_id(value: str | None) -> None:
+    """Set the default gateway identity stamped on messages and participants."""
+    global _GATEWAY_ID
+    cleaned = str(value).strip() if value is not None else ""
+    _GATEWAY_ID = cleaned or None
+
+
 def _gateway_id(value: Any = None) -> str:
-    return str(value or os.environ.get("HERMES_GATEWAY_ID") or "local")
+    """Explicit value, else the configured setting, else ``"local"``."""
+    return str(value or _GATEWAY_ID or "local")
 
 
 _SCHEMA = """
