@@ -1,0 +1,303 @@
+"""Core store + two-gateway sync, simulated in-process (stdlib only; runs under pytest or unittest).
+
+Gateway A has the peer configured (Tyler adds Riley); gateway B is the passive side. The transport
+switches the store's database/settings to B's, runs B's server handler, and switches back, which is
+exactly what B's ``POST /herd/v1/sync`` does over HTTP.
+"""
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+import _pkg  # noqa: E402
+
+_, store, tools = _pkg.load()
+
+
+class Gateway:
+    def __init__(self, root: Path, name: str, peer=None):
+        self.db = root / f"{name}.db"
+        self.settings = {"display_name": name, "__secrets__": {}}
+        if peer:
+            self.settings.update({"peer_name": peer, "peer_url": f"http://{peer}.test:8642"})
+            self.settings["__secrets__"]["HERD_PEER_KEY"] = "k-" + peer
+
+    def __enter__(self):
+        self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE)
+        store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = self.db, self.settings
+        return self
+
+    def __exit__(self, *exc):
+        store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = self._saved
+
+
+class TwoGatewayTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.A = Gateway(root, "tyler", peer="riley")
+        self.B = Gateway(root, "riley")
+        self.calls = []
+        self.down = False
+        store.AUTO_SYNC = False
+
+        def transport(peer, body):
+            self.calls.append((peer["url"], peer["key"]))
+            if self.down:
+                raise ConnectionError("unreachable")
+            with self.B:
+                # Round-trip through JSON like the wire does.
+                return json.loads(json.dumps(store.handle_peer_sync(json.loads(json.dumps(body)))))
+
+        store.TRANSPORT = transport
+
+    def tearDown(self):
+        store.TRANSPORT = None
+        store.DB_PATH_OVERRIDE = None
+        store.SETTINGS_OVERRIDE = None
+        self.tmp.cleanup()
+
+    def sync(self):
+        with self.A:
+            return store.sync_all()
+
+    def texts(self, gw, channel="general"):
+        with gw:
+            return [m["content"] for m in store.list_messages(channel)]
+
+    # --- TC-1: local round trip -------------------------------------------------------------
+
+    def test_general_seeded_and_post_read(self):
+        with self.A:
+            self.assertEqual([c["id"] for c in store.list_channels()], ["general"])
+            m = store.post_message("#general", "hello")
+            self.assertEqual(m["author_type"], "human")
+            self.assertEqual(m["author_name"], "tyler")
+        self.assertEqual(self.texts(self.A), ["hello"])
+
+    def test_validation_errors(self):
+        with self.A:
+            with self.assertRaises(store.HerdError) as e:
+                store.post_message("general", "   ")
+            self.assertEqual(e.exception.status, 422)
+            with self.assertRaises(store.HerdError) as e:
+                store.post_message("nope", "hi")
+            self.assertEqual(e.exception.status, 404)
+            store.create_channel("Design Review")
+            with self.assertRaises(store.HerdError) as e:
+                store.create_channel("design-review")
+            self.assertEqual(e.exception.status, 409)
+            with self.assertRaises(store.HerdError) as e:
+                store.create_channel("bad/name")
+            self.assertEqual(e.exception.status, 422)
+            with self.assertRaises(store.HerdError):
+                store.post_message("general", "x" * (store.MAX_CONTENT + 1))
+
+    def test_long_unicode_message(self):
+        text = "héllo 🐄 " * 1000
+        with self.A:
+            store.post_message("general", text)
+        self.assertEqual(self.texts(self.A), [text])
+
+    # --- TC-2: the SPINE ---------------------------------------------------------------------
+
+    def test_a_to_b(self):
+        with self.A:
+            store.post_message("general", "from tyler")
+        results = self.sync()
+        self.assertTrue(results[0]["ok"], results)
+        self.assertEqual(self.texts(self.B), ["from tyler"])
+        with self.B:
+            m = store.list_messages("general")[0]
+        self.assertEqual(m["gateway_name"], "tyler")
+        self.assertEqual(self.calls[0], ("http://riley.test:8642", "k-riley"))
+
+    def test_b_to_a_with_one_sided_link(self):
+        with self.B:
+            self.assertEqual(store.configured_peers(), [])  # B has no peer configured
+            store.post_message("general", "from riley")
+        self.sync()
+        self.assertEqual(self.texts(self.A), ["from riley"])
+
+    def test_both_directions_converge_without_duplicates(self):
+        with self.A:
+            store.post_message("general", "a1")
+        with self.B:
+            store.post_message("general", "b1")
+        self.sync()
+        self.sync()
+        self.sync()
+        self.assertEqual(sorted(self.texts(self.A)), ["a1", "b1"])
+        self.assertEqual(sorted(self.texts(self.B)), ["a1", "b1"])
+
+    def test_agent_post_reaches_other_gateway(self):
+        with self.A:
+            out = json.loads(tools.herd_post({"channel": "general", "content": "done: build is green"}))
+        self.assertTrue(out["ok"], out)
+        self.sync()
+        with self.B:
+            m = store.list_messages("general")[0]
+        self.assertEqual((m["author_type"], m["author_name"]), ("agent", "tyler's Hermes"))
+
+    def test_ordering(self):
+        with self.A:
+            for i in (1, 2, 3):
+                store.post_message("general", str(i))
+        self.sync()
+        self.assertEqual(self.texts(self.B), ["1", "2", "3"])
+
+    def test_duplicate_delivery_is_one_row(self):
+        with self.A:
+            store.post_message("general", "once", message_id="fixed-uuid")
+            store.post_message("general", "once", message_id="fixed-uuid")
+        with self.B:
+            store.post_message("general", "once", message_id="fixed-uuid")
+        self.sync()
+        self.assertEqual(self.texts(self.A), ["once"])
+        self.assertEqual(self.texts(self.B), ["once"])
+
+    def test_peer_down_then_catches_up(self):
+        self.down = True
+        with self.A:
+            store.post_message("general", "queued")
+        res = self.sync()
+        self.assertFalse(res[0]["ok"])
+        self.assertIn("reach", res[0]["error"])
+        with self.A:
+            st = store.status()["peers"][0]
+        self.assertFalse(st["connected"])
+        self.down = False
+        self.sync()
+        self.assertEqual(self.texts(self.B), ["queued"])
+        with self.A:
+            self.assertTrue(store.status()["peers"][0]["connected"])
+
+    def test_no_key_is_reported_not_sent(self):
+        self.A.settings["__secrets__"] = {}
+        res = self.sync()
+        self.assertFalse(res[0]["ok"])
+        self.assertEqual(self.calls, [])
+
+    def test_large_backlog_drains_in_batches(self):
+        with self.A:
+            for i in range(store.BATCH_LIMIT + 25):
+                store.post_message("general", f"m{i}")
+        self.sync()
+        with self.B:
+            self.assertEqual(len(store.list_messages("general", limit=500)), store.BATCH_LIMIT + 25)
+
+    def test_new_channel_syncs_both_ways(self):
+        with self.A:
+            store.create_channel("design")
+        with self.B:
+            store.create_channel("ops")
+            store.post_message("ops", "pager is quiet")
+        self.sync()
+        with self.A:
+            self.assertEqual({c["id"] for c in store.list_channels()}, {"general", "design", "ops"})
+        with self.B:
+            self.assertEqual({c["id"] for c in store.list_channels()}, {"general", "design", "ops"})
+        self.assertEqual(self.texts(self.A, "ops"), ["pager is quiet"])
+
+    def test_participants_and_dm(self):
+        self.sync()  # first contact: each side learns the other
+        with self.A:
+            others = [p for p in store.list_participants() if not p["is_self"]]
+            self.assertEqual([p["display_name"] for p in others], ["riley"])
+            dm = store.open_dm(others[0]["id"])
+            self.assertTrue(dm["is_dm"])
+            self.assertEqual(len(dm["members"]), 2)
+            store.post_message(dm["id"], "psst")
+        with self.B:
+            tyler = [p for p in store.list_participants() if not p["is_self"]][0]
+            self.assertEqual(tyler["display_name"], "tyler")
+        self.sync()
+        with self.B:
+            dms = [c for c in store.list_channels() if c["is_dm"]]
+            self.assertEqual(len(dms), 1)
+            self.assertEqual(dms[0]["id"], dm["id"])
+            self.assertEqual([m["content"] for m in store.list_messages(dms[0]["id"])], ["psst"])
+            # B's side opening "the DM with tyler" lands in the same channel, not a second one.
+            self.assertEqual(store.open_dm(tyler["id"])["id"], dm["id"])
+            # The agent tool can address a DM by the other person's name.
+            out = json.loads(tools.herd_read_channel({"channel": "tyler"}))
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["messages"][0]["text"], "psst")
+
+    def test_dm_with_unknown_participant(self):
+        with self.A:
+            with self.assertRaises(store.HerdError) as e:
+                store.open_dm("not-a-peer")
+            self.assertEqual(e.exception.status, 404)
+
+    # --- Peer input is untrusted ----------------------------------------------------------
+
+    def test_ingest_rejects_malformed_rows(self):
+        with self.B:
+            n = store.ingest({
+                "from": {"gateway_id": "x", "display_name": "x"},
+                "channels": [{"id": "../etc"}, {"id": "dm:a+b", "is_dm": True, "members": [{"id": "a"}]},
+                             "junk", {"id": "ok-chan"}],
+                "messages": [
+                    {"id": "1", "channel_id": "general", "content": ""},
+                    {"id": "2", "channel_id": "nowhere", "content": "x"},
+                    {"id": "3", "channel_id": "general", "content": "x", "author_type": "root"},
+                    {"channel_id": "general", "content": "no id"},
+                    "junk",
+                    {"id": "4", "channel_id": "ok-chan", "content": "fine"},
+                ],
+            })
+            self.assertEqual(n, 1)
+            self.assertEqual({c["id"] for c in store.list_channels()}, {"general", "ok-chan"})
+
+    def test_handle_peer_sync_rejects_non_object(self):
+        with self.B:
+            with self.assertRaises(store.HerdError):
+                store.handle_peer_sync([1, 2])
+            with self.assertRaises(store.HerdError):
+                store.handle_peer_sync({"after_seq": "abc"})
+
+
+class ToolsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        store.AUTO_SYNC = False
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "t.db"
+        store.SETTINGS_OVERRIDE = {"display_name": "tyler"}
+
+    def tearDown(self):
+        store.DB_PATH_OVERRIDE = None
+        store.SETTINGS_OVERRIDE = None
+        self.tmp.cleanup()
+
+    def test_list_post_read(self):
+        out = json.loads(tools.herd_list_channels({}))
+        self.assertEqual(out["channels"][0]["name"], "general")
+        self.assertEqual(out["you_are"], "tyler")
+        self.assertTrue(json.loads(tools.herd_post({"channel": "#general", "content": "hi"}))["ok"])
+        read = json.loads(tools.herd_read_channel({"channel": "general", "limit": 5}))
+        self.assertEqual([m["text"] for m in read["messages"]], ["hi"])
+        self.assertEqual(read["messages"][0]["author_type"], "agent")
+
+    def test_errors_are_json_not_exceptions(self):
+        for fn, args in [(tools.herd_post, {"channel": "nope", "content": "x"}),
+                         (tools.herd_post, {"channel": "general", "content": " "}),
+                         (tools.herd_post, None),
+                         (tools.herd_read_channel, {"channel": "nope"}),
+                         (tools.herd_read_channel, {"channel": "general", "limit": "lots"})]:
+            out = json.loads(fn(args, task_id="t1"))
+            self.assertIn("ok", out)
+        self.assertFalse(json.loads(tools.herd_post({"channel": "nope", "content": "x"}))["ok"])
+
+    def test_read_limit_returns_newest(self):
+        for i in range(30):
+            tools.herd_post({"channel": "general", "content": str(i)})
+        read = json.loads(tools.herd_read_channel({"channel": "general", "limit": 3}))
+        self.assertEqual([m["text"] for m in read["messages"]], ["27", "28", "29"])
+
+
+if __name__ == "__main__":
+    unittest.main()

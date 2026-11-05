@@ -156,7 +156,8 @@ def test_binary_and_pyc_fail(tmp_path):
 
 
 def test_secret_literal_fails(tmp_path):
-    init = GOOD_INIT + 'API_SERVER_KEY = "abcd1234efgh5678ijkl"\n'
+    fake = "abcd1234" + "efgh5678ijkl"  # built at runtime so this file doesn't trip the scan itself
+    init = GOOD_INIT + 'API_SERVER_KEY = "' + fake + '"\n'
     rc, f = run(make_tree(tmp_path, init=init))
     assert any(x.rule == "11" for x in fails(f))
 

@@ -1,0 +1,35 @@
+name: herd
+version: 0.1.0
+description: Channels and DMs shared between two Hermes gateways, for humans and agents.
+author: Tyler Amberry
+license: MIT
+homepage: https://github.com/tyleramberry/herd
+requires_hermes: ">=0.22.0"
+manifest_version: 2
+api_version: 1
+tags: [multiplayer, chat, peers, desktop]
+provides_tools:
+  - herd_list_channels
+  - herd_post
+  - herd_read_channel
+config_schema:
+  display_name:
+    type: str
+    default: ""
+    label: Your name
+    description: How you appear to your teammate in Herd. Defaults to this computer's name.
+  peer_name:
+    type: str
+    default: ""
+    label: Teammate's name
+    description: A label for the other Hermes, e.g. brooklyn.
+  peer_url:
+    type: str
+    default: ""
+    label: Teammate's gateway URL
+    description: Their Hermes API server address, e.g. http://brooklyn-mac.local:8642
+  peer_key:
+    type: secret
+    env: HERD_PEER_KEY
+    label: Teammate's API key
+    description: The API_SERVER_KEY of their gateway. Stored in Hermes's secret store, never in config.yaml.
