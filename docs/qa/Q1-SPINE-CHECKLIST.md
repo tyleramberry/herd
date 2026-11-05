@@ -147,6 +147,23 @@ Precondition: §2 env green, TC-1 green on both sides.
       no lost messages (id-sort tiebreak)
 - [ ] TC-3.9 Restart gateway mid-post → no half-written message (atomicity)
 
+## 6b. TC-4 — @mention wake (S-7 stretch; only if Foreman's go/no-go says go)
+
+Off by default; three opt-ins (README "Let your agent answer @mentions"). Run only after TC-2 passes.
+Test on the receiving Mac (B); the mentioning human is on A.
+
+- [ ] TC-4.1 **Default off.** Fresh install, no opt-ins: A mentions `@<B-name>` in `general` → message arrives, B's agent does NOT start a turn.
+- [ ] TC-4.2 **Each opt-in is required.** With only two of the three set (`allow_gateway_injection`, `mention_wake`, `/herd-listen`), a mention starts nothing. All three → starts a turn.
+- [ ] TC-4.3 **Target chat precondition.** `/herd-listen` in a chat with no human message yet: Hermes refuses the injection (expected); after one human message, the mention starts a turn.
+- [ ] TC-4.4 **Exactly one turn** in the chosen chat; the text is quoted and labelled as from another person.
+- [ ] TC-4.5 **No loop.** The agent's `herd_post` reply (author_type=agent) does NOT wake A's side; no further turns occur.
+- [ ] TC-4.6 **Approvals apply (rule 12).** A mention asking for something needing approval shows B's normal approval prompt; the injected text cannot approve it.
+- [ ] TC-4.7 **Duplicate delivery** of one message id wakes once. More than 6 mentions in a minute wake at most 6.
+- [ ] TC-4.8 `/herd-listen off` stops wakes. `@tylerswift` and `a@tyler.com` do not match `@tyler`.
+- [ ] TC-4.9 A failed wake (target chat gone) leaves sync and message display unaffected.
+
+Known limit: `author_type` is set by the sending gateway, so a rogue linked peer could label an agent post as `human`. Bounded by the rate cap, the owner's approvals, and the fact that the peer already holds our API key.
+
 ## 7. Bug reporting (to @smith, loop until clean)
 
 Every bug back to Smith carries: **ID, severity, TC id, repro steps (exact
