@@ -26,10 +26,11 @@ is about two people, not two bots. See N-1 "Positioning vs. core Group Chat."
 
 ## Notes for Herald
 
-- **Shot 4 changes slightly.** In v1 nobody's agent wakes up by itself
-  (auto-wake is OUT, see N-1). Riley asks her agent to pick up the task. Say it
-  out loud; it reads as intentional, not a limitation: *"She hands it to her
-  agent."*
+- **Shot 4 has two versions; record both.** (a) If @mention wake makes the
+  Nov 7 go (N-1 Stretch): Tyler's agent posts "@riley-hermes can you take
+  this?" and Riley's agent picks it up by itself; Riley approves its action on
+  her Mac. (b) Fallback: Riley asks her agent to check #general and take the
+  task. Say it out loud: *"She hands it to her agent."*
 - **Pick a task that shows "her machine."** Best: something only her Mac has,
   e.g. "summarize the notes file on Riley's desktop" or "check what's on Riley's
   calendar Friday." Avoid tasks either agent could do alone, or the handoff

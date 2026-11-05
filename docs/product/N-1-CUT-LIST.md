@@ -31,9 +31,6 @@ Cost: one more handler against tables S-1 already creates.
 
 ## OUT (post-hackathon backlog, do not build before Nov 11)
 
-- **Auto-wake on message / @mention triggers.** Agents act when their human
-  asks them to in Bot Chats ("check #general and take Tyler's task"). An agent
-  that wakes up by itself on a new message is the obvious v2 headline, not v1.
 - Threads, reactions, edits/deletes, file sharing, rich embeds
 - Presence / typing indicators, unread badges, notifications
 - Voice, video
@@ -44,9 +41,21 @@ Cost: one more handler against tables S-1 already creates.
 - Encryption beyond whatever the transport already gives
 - MySI plugin, any second plugin
 
-## Stretch (only if SPINE is green by Fri Nov 6 noon, decided by Foreman)
+## Stretch (gated; pending Tyler's call, Nov 5)
 
-- Unread dot on channels with new messages. Nothing else.
+- **Agent answers when @mentioned.** A Herd message that @mentions a local
+  agent is queued into that agent's chat via `ctx.inject_message`, under the
+  owner's own approvals (rule 12). Mentions only, one wake per message, agent-
+  authored messages never wake anything, off by default (opt-in setting,
+  `allow_gateway_injection`). The owner says one thing in that agent's chat
+  first. Smith estimate: 4–6 h plus a two-machine test on Tyler's hardware.
+  - **Start:** as soon as Sentry signs off TC-2 (SPINE) on real hardware.
+  - **Go/no-go:** Fri Nov 7, 12:00 PM, Foreman. Go = works on both Macs 3 times in a row.
+  - **No-go:** the feature stays off in the build, and in the demo the human asks their agent to check the channel.
+  - Never at the expense of S-4/S-5 or the freeze.
+- Unread dot on channels with new messages, only if everything above is done.
+
+Auto-wake on *every* message (no mention) stays OUT.
 
 ## Risks that could force a cut
 
