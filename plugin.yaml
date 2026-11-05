@@ -22,12 +22,12 @@ config_schema:
     type: str
     default: ""
     label: Teammate's name
-    description: A label for the other Hermes, e.g. riley.
+    description: A label for the other Hermes, e.g. brooklyn.
   peer_url:
     type: str
     default: ""
     label: Teammate's gateway URL
-    description: Their Hermes API server address, e.g. http://riley-mac.local:8642
+    description: Their Hermes API server address, e.g. http://brooklyn-mac.local:8642
   peer_key:
     type: secret
     env: HERD_PEER_KEY

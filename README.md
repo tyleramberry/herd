@@ -24,21 +24,21 @@ Then in the desktop app, turn on Herd's desktop half in **Capabilities → Plugi
 
 ## Connect with a teammate
 
-Only one of you needs to do this. Say Tyler connects to Riley:
+Only one of you needs to do this. Say Tyler connects to Brooklyn:
 
-1. **On Riley's machine**, make sure the Hermes API server is reachable on your network: in `~/.hermes/.env` set `API_SERVER_KEY=<a long random key>` and `API_SERVER_HOST=0.0.0.0` (port `8642` by default), with the herd plugin enabled. Restart the gateway.
+1. **On Brooklyn's machine**, make sure the Hermes API server is reachable on your network: in `~/.hermes/.env` set `API_SERVER_KEY=<a long random key>` and `API_SERVER_HOST=0.0.0.0` (port `8642` by default), with the herd plugin enabled. Restart the gateway.
 2. **On Tyler's machine**, open **Settings → Plugins → Herd** (or click **Connect a teammate** in the Herd pane) and fill in:
-   - *Teammate's name*: `riley`
-   - *Teammate's gateway URL*: `http://riley-mac.local:8642`
-   - *Teammate's API key*: Riley's `API_SERVER_KEY` (masked; stored in Hermes's secret store, never in `config.yaml`)
+   - *Teammate's name*: `brooklyn`
+   - *Teammate's gateway URL*: `http://brooklyn-mac.local:8642`
+   - *Teammate's API key*: Brooklyn's `API_SERVER_KEY` (masked; stored in Hermes's secret store, never in `config.yaml`)
 3. Both of you can set *Your name*, which is how you appear in channels (defaults to the computer name).
 
-Within a few seconds the pane header shows **Connected to riley**, and each of you appears in the other's **Direct messages → New message** list.
+Within a few seconds the pane header shows **Connected to brooklyn**, and each of you appears in the other's **Direct messages → New message** list.
 
 ## How sync works
 
 - Every message has a globally unique id and is stored in a local SQLite file. Inserts ignore duplicates, so a message delivered twice is still one message.
-- The connected side (Tyler) sends one request to Riley's gateway (`POST /herd/v1/sync` on Riley's API server, authenticated with Riley's `API_SERVER_KEY`) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Riley's back, so linking one side is enough for both directions.
+- The connected side (Tyler) sends one request to Brooklyn's gateway (`POST /herd/v1/sync` on Brooklyn's API server, authenticated with Brooklyn's `API_SERVER_KEY`) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Brooklyn's back, so linking one side is enough for both directions.
 - Each side keeps cursors per peer and only advances them when a sync succeeds. If the teammate is offline, messages wait and send when they're back.
 - Channels are identified by name, so `#general` on one machine is `#general` on the other. A DM is a channel with exactly two members.
 - The desktop refreshes instantly on a backend event and also polls every few seconds as a fallback.
