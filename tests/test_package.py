@@ -23,13 +23,20 @@ def _manifest():
 
 class FakeCtx:
     def __init__(self):
-        self.tools, self.platform = {}, {}
+        self.tools, self.platform, self.commands, self.injected = {}, {}, {}, []
 
     def register_tool(self, name, toolset, schema, handler, **kw):
         self.tools[name] = (toolset, schema, handler)
 
     def register_platform_handler(self, platform, factory):
         self.platform[platform] = factory
+
+    def register_command(self, name, handler, description="", args_hint="", **kw):
+        self.commands[name] = handler
+
+    def inject_message(self, content, role="user", *, session_key=None, origin=None):
+        self.injected.append((session_key, content))
+        return True
 
 
 class ManifestTest(unittest.TestCase):

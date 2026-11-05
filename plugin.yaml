@@ -33,3 +33,8 @@ config_schema:
     env: HERD_PEER_KEY
     label: Teammate's API key
     description: The API_SERVER_KEY of their gateway. Stored in Hermes's secret store, never in config.yaml.
+  mention_wake:
+    type: bool
+    default: false
+    label: Let my agent answer @mentions
+    description: When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you picked with /herd-listen. Also needs allow_gateway_injection (see README). Off by default.
