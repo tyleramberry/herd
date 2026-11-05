@@ -17,7 +17,7 @@ Hermes desktop app.**
 |---|---|---|---|---|
 | 1 | **Channels** | Create a channel, see a channel list, open one, read history, post. Stored in the plugin's SQLite (channels, messages, participants). One default channel, `general`, exists on first run. | Smith | S-1, S-4 |
 | 2 | **Two-gateway fan-out** | A message posted on gateway A shows up in the same channel on gateway B without a reload, and the reverse. Exactly **two** gateways. Polling is an acceptable transport if push isn't ready. | Smith | S-2 (SPINE) |
-| 3 | **Peer join** | The join story from the README: `hermes peer add <name> --url <gateway-url> --key <key>` (core Hermes command; Herd reads the registered peers). After it, the peer shows as a participant. | Smith | S-4 |
+| 3 | **Add a teammate** | An **Add teammate** form (Settings → Plugins → Herd; final placement is Smith's call) (name, gateway URL, key). The key is a Herd-declared secret, read via `get_secret`, never core's `HERMES_PEER_*` keys or `bot_peers` (Sentry ruling, Q-3 CA-4). Adding on one side connects both directions. After it, the teammate shows as a participant. | Smith | S-4 |
 | 4 | **Agents post and read** | Three agent tools, registered via `plugin.yaml`: `herd_list_channels`, `herd_post`, `herd_read_channel`. Agent messages are labeled as agent-authored (`author_type=agent`) so humans can tell who said what. | Smith | S-3 |
 | 5 | **DMs** | A DM is a channel with exactly two participants and a `dm` flag. No separate data model, no separate sync path. Shows in its own "Direct messages" section of the list. | Smith | S-4 |
 | 6 | **Empty and error states** | Empty channel list, empty channel, peer unreachable. Plain copy, no stack traces. | Smith | S-1, S-5 |
@@ -50,18 +50,35 @@ Cost: one more handler against tables S-1 already creates.
 
 ## Risks that could force a cut
 
-- **R-1 — RESOLVED Nov 5 (Smith).** `hermes peer add <name> --url <url> --key <key>`
-  is a real core Hermes command (hermes-agent 0.19: stores the peer in
-  `config.yaml` `bot_peers`, key via the secret store). Herd doesn't register
-  it; Herd reads the registered peers and fans out to them. Linking on **one**
-  side is enough for both directions. README, demo shot 2 and catalog copy
-  stand as written.
+- **R-1 — Join flow. Updated Nov 5.** `hermes peer add` is a real core command,
+  but Sentry ruled (Q-3 CA-4) that Herd may not read core's peer registry or
+  `HERMES_PEER_*` keys in the catalog build. So Herd has its **own** join: the
+  Add-teammate form above. The story ("one step to connect") holds; the demo
+  hook moves from the terminal to the form.
 - **R-2 — SPINE slips past Fri Nov 6.** Then DMs (IN #5) drop to backlog and
   the demo uses `general` only. Fan-out and agent posting are never cut; they
   are the product.
 - **R-3 — Agent tool registration fails catalog rules (Q-3).** Fall back to
   the two original tools only if `herd_read_channel` is the problem; the demo
   then has the human paste the task into Bot Chats.
+
+## Positioning vs. core Group Chat (answers Q-3 CA-8)
+
+Hermes core already has cross-machine **Group Chat** rooms and `hermes peer dm`.
+Both are **one person's bots** talking to each other: a room is driven by one
+Desktop that holds every connection's credentials, and members are 2–6 Bots.
+
+**Herd is for two people.** Two humans, each on their own Hermes and their own
+machine, share one persistent channel, and each brings their own agent into it.
+Nobody holds the other's keys, and each agent runs under its own owner's
+approvals. Humans talk to humans there too, not only to bots.
+
+Rules that follow from this:
+- Never pitch "agents talking across machines" as the new thing. Core does that.
+  Pitch **"you and a teammate, with both your agents, in one channel."**
+- The demo must show two humans, two Desktops, two sets of credentials.
+- Catalog copy and README must answer "how is this different from Group Chat?"
+  in one line (see N-3).
 
 ## Canonical names (for code, docs, QA)
 

@@ -14,13 +14,18 @@ Owner: @northstar · For: @herald (H-2 catalog entry), @smith (README, plugin.ya
 ```yaml
 title: Herd
 description: >-
-  Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
-  your Hermes agents work together across two machines.
+  Multiplayer Hermes. Share a channel with a teammate on their own machine,
+  and bring both your agents. Group Chat connects your bots; Herd connects
+  people.
 ```
 
-Why the change from the H-2 draft: it leads with the tagline, says "two
-machines" (honest about the v1 limit, see N-1), and names who's in the room.
-Drop "inside the Hermes desktop app" — the catalog already implies it.
+Why: it leads with the tagline, answers the Group Chat question in one line
+(Q-3 CA-8), and is honest that v1 is two people on two machines.
+
+**"What Herd adds" line for the H-2 PR description:**
+> Core Group Chat and `hermes peer dm` connect one person's bots across their
+> machines. Herd connects two people: each keeps their own Hermes, credentials
+> and approvals, and both humans and both agents share one persistent channel.
 
 ## plugin.yaml description (for Smith)
 
@@ -50,6 +55,8 @@ Drop "inside the Hermes desktop app" — the catalog already implies it.
 | Peer unreachable | **Can't reach {peer}.** Messages will send when they're back. *(only if queued; otherwise: "Messages won't send until they're back.")* |
 | New channel button | New channel |
 | New DM button | New message |
+| Add teammate button | Add teammate |
+| Add teammate form | Name · Their Hermes address · Key · **Connect** |
 
 ## README polish (suggestions for Smith, apply by Nov 7)
 
@@ -65,5 +72,8 @@ Drop "inside the Hermes desktop app" — the catalog already implies it.
    needs README and PR description to match).
 6. Replace "Under active construction. See `docs/` for architecture." with a
    status line once SPINE is green.
-7. Keep the install and "Setup with a teammate" blocks; add a note that
-   running `hermes peer add` on one side connects both directions.
+7. Replace the "Setup with a teammate" `hermes peer add` block with: "Open Settings → Plugins →
+   Herd → **Add teammate**, paste their gateway address and key. One side is
+   enough." (Herd no longer uses core peers, Q-3 CA-4.)
+8. Add a one-line **"How is this different from Group Chat?"** using the
+   "What Herd adds" line above.
