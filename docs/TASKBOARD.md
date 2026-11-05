@@ -43,8 +43,8 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @herald — Submission
 
-- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v1 done (workspace/H-1-demo-script.md) — 78s shot-by-shot, hook + jaw-drop + X copy + Sentry rehearsal checklist. Awaiting Northstar N-2 narrative beats; final pass Nov 7.**
-- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v1 done (workspace/H-2-catalog-pr-package.md) — herd.yaml per live entry-schema docs, quoted version "0.1.0", rule-13 disclosures drafted; capabilities + version pending Smith's plugin.yaml (S-1).**
+- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v6 (docs/submission/H-1-demo-script.md) — ~80s. People-first hook ("Hermes is single-player. We made it multiplayer."), shot 2 = Add-teammate form, Brooklyn approves her agent on camera. Shot 5 recorded both ways (5A baseline, 5B @mention); Foreman go/no-go Fri noon. Final pass Nov 7.**
+- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v2 (docs/submission/H-2-catalog-pr-package.md) — checked against live catalog README: fixed capability keys (`provides_*`), category → desktop, added image/screenshots. Capabilities from Smith; requires_hermes ">=0.22.7" per Sentry Q-3; rule-11 Q1 resolved (strip use_hermes_peers).**
 - [ ] ⬜ **H-3 (due Nov 8): Catalog PR opened** (post-approval) · demo video recorded.
 - [ ] ⬜ **H-4 (due Nov 10): Video posted to X tagged @NousResearch · entry form submitted with both links** · report form confirmation to Foreman.
 
