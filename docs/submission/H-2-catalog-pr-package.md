@@ -9,8 +9,8 @@
 name: herd
 title: Herd
 description: >-
-  Multiplayer Hermes — shared channels and DMs where humans and their agents
-  work together across machines, inside the Hermes desktop app.
+  Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
+  your Hermes agents work together across two machines.  # N-3 copy
 repo: https://github.com/tyleramberry/herd
 sha: 0000000000000000000000000000000000000000  # PLACEHOLDER — the Nov 8 freeze commit, full 40-hex (`git rev-parse HEAD` at pin time)
 tier: community
@@ -28,7 +28,7 @@ screenshots:  # up to 6, GitHub hosts only, pinned to the same sha
 capabilities:
   # Key names per the live entry schema: provides_tools / provides_hooks / provides_middleware / requires_env
   # (draft v1 used tools/hooks/middleware, which is wrong). Must match what the plugin registers at the pin (rule 6).
-  provides_tools: [herd_post_message, herd_list_channels]  # from S-3; confirm against plugin.yaml at freeze
+  provides_tools: [herd_post, herd_read_channel, herd_list_channels]  # names per N-3; confirm against plugin.yaml at freeze
   provides_hooks: []        # FILL FROM plugin.yaml
   provides_middleware: []   # FILL FROM plugin.yaml
   requires_env: []          # see open question Q1 below re: peer keys
@@ -51,7 +51,7 @@ Hermes Agent Plugin Hackathon (Nov 2026).
 
 ### Hermes surfaces used
 <!-- FILL AT FREEZE — enumerate exactly what the pinned tree registers, e.g.: -->
-- Agent tools: `herd_post_message`, `herd_list_channels` (exact names from plugin.yaml)
+- Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels` (exact names from plugin.yaml)
 - Builds on core `hermes peer` (peers are registered with the core CLI; Herd does not add CLI commands)
 - Hooks/middleware: TBD
 - Desktop plugin surface (desktop/plugin.js) via the plugin SDK only

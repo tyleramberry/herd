@@ -1,29 +1,38 @@
-# H-1 — Demo Video Script: Herd (DRAFT v2, Nov 5)
+# H-1 — Demo Video Script: Herd (DRAFT v3, Nov 5)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
 **Record date: Nov 8 — code freeze. Rehearse with Sentry before recording.**
-**All timings sum to ~78s, leaving ~10s buffer under the 90s cap.**
+**Timings sum to ~80s, leaving ~10s buffer under the 90s cap.**
 
-## Shot-by-shot
+## Shot-by-shot (v3, follows Northstar N-2 beats, PR #5)
 
-| # | Time | Screen | VO / on-screen |
-|---|------|--------|----------------|
-| 1 | 0:00–0:05 | SPLIT: two Macs, two desktop apps | **HOOK:** "This is one agent. This is another. They've never met." (pause — no dead air, beat is intentional) |
-| 2 | 0:05–0:15 | Left Mac, terminal | "Hermes connects them with one command:" on-screen: `hermes peer add riley --url <gateway-url> --key ****` |
-| 3 | 0:15–0:25 | Left desktop app, Herd pane | Herd picks up the peer — it appears in the channel member list. "Hermes already lets gateways peer. Herd turns that into a shared room." |
-| 4 | 0:25–0:45 | Both screens, side by side | **THE JAW-DROP:** Tyler types a task into a Herd channel; it appears on *her* screen too, her agent picks it up, does the work on her Mac, and posts the result back into the same channel (via `herd_post_message`). "Her agent did the work. On her machine. We both watched." |
-| 5 | 0:45–0:60 | Right Mac | Wife replies / pushes a result back; Tyler's agent receives it. Two-way, both humans see the same thread. |
-| 6 | 0:60–0:75 | Wide, both Macs | "Herd — multiplayer Hermes. Channels and DMs where humans and their agents work together across machines." |
-| 7 | 0:75–0:78 | End card | On-screen: repo/install one-liner + @NousResearch tag |
+| # | Time | Beat | Screen | VO / on-screen |
+|---|------|------|--------|----------------|
+| 1 | 0:00–0:05 | Alone | SPLIT: two Macs, two Hermes apps | **HOOK:** "This is one agent. This is another. They've never met." |
+| 2 | 0:05–0:13 | One step | Left Mac, terminal (or in-app Add-peer form if Smith lands it, N-1 R-1) | "Connect them:" on-screen `hermes peer add riley --url … --key ****` |
+| 3 | 0:13–0:20 | One step | Both screens, Herd pane | Riley appears in `#general` on **both** screens. "That's it. Now they share a room." |
+| 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Riley replies → lands on the left. No VO, let it land. |
+| 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Riley: "check #general and take Tyler's task." Her agent reads the channel, does it **on her Mac**, posts the result back. VO: "She hands it to her agent. Her agent did the work, on her machine." |
+| 6 | 0:50–0:62 | Back to him | Left, then wide | Tyler's agent reads the result from the channel and uses it. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
+| 7 | 0:62–0:75 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
+| 8 | 0:75–0:80 | End card | Static | Install one-liner + repo + @NousResearch |
+
+**Total ~80s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
+
+**Task for shot 5 (must need *her* Mac):** "summarize the notes file on Riley's desktop" or "what's on Riley's calendar Friday?". Never a task either agent could do alone.
+
+**Word rules (N-2):** say channel / connect / her agent / his agent. Never say peer-to-peer, gateway, fan-out, SQLite. Agent pills visible in every shot from 5 on.
+
+**Fallback:** if shot 5 flakes live, cut in Sentry's pre-recorded take of shot 5 only. Shots 2–4 must be live.
 
 ## Copy
 
 **Post copy (short, punchy):**
-> Two Macs. Two Hermes agents. One command to connect them — then they just… work together. Herd is multiplayer Hermes: channels + DMs for humans and agents across machines. Built for the @NousResearch Hermes hackathon. 🐄
+> My agent just handed a job to my wife's agent. Herd is multiplayer Hermes: channels and DMs where you, a teammate, and both of your agents work together across two machines. Built for the @NousResearch Hermes hackathon. 🐄
 
 **Alt hooks (test at rehearsal):**
-- "My agent just hired my wife's agent."
+- "My agent just handed a job to my wife's agent." (Northstar's pick for the X post)
 - "Watch one agent do a job on a computer it's never touched."
 
 ## Rehearsal checklist (for @sentry)
@@ -44,8 +53,9 @@ notice. What Herd adds, and what the video must spend its seconds on: the
 post to. Shot 4 should be shot so it is obviously not a terminal DM.
 
 ## Open items
-- **Northstar (N-2):** confirm the "what Herd adds over core peer DMs" line; it drives shots 3–6
-- **Smith:** shot 4 needs S-2 (fan-out) + S-3 (agent posts to channel) working on two real Macs; shot 3 needs S-4 (Herd UI showing registered peers)
+- ~~Northstar N-2 beats~~ merged into v3 (PR #5)
+- **Smith (by Nov 6):** shot 2 terminal vs in-app Add-peer form (N-1 R-1)
+- **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
 - Confirm gateway URL + API_SERVER_KEY handling for the two-Mac demo (Foreman/Smith)
 - Confirm wife's instance name for the script (`riley` placeholder)
 - Screenshots for H-2 package can be pulled from this same session
