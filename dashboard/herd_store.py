@@ -391,11 +391,19 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
     }
     with connect() as conn:
         _touch_participant(conn, me["gateway_id"], me["display_name"], True)
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
             "gateway_name, content, created_at) VALUES (:id, :channel_id, :author_type, :author_name, "
             ":gateway_id, :gateway_name, :content, :created_at)", row)
+        inserted = bool(cur.rowcount)
         stored = dict(conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (mid,)).fetchone())
+    if not inserted:
+        # A row with this id already exists. Replaying it into the SAME channel is
+        # the cross-gateway convergence path (INSERT OR IGNORE): return it silently.
+        # A different channel means the caller is reusing a global message id — refuse.
+        if stored["channel_id"] != channel["id"]:
+            raise HerdError(409, f"Message id '{mid}' already exists in another channel.")
+        return stored
     _notify("message.created", {"channel_id": stored["channel_id"], "id": stored["id"]})
     request_sync()
     return stored
