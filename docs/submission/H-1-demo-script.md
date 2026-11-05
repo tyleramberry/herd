@@ -1,11 +1,11 @@
-# H-1 — Demo Video Script: Herd (DRAFT v6, Nov 5)
+# H-1 — Demo Video Script: Herd (v7 FINAL PASS, Nov 5)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
 **Record date: Nov 8 — code freeze. Rehearse with Sentry before recording.**
 **Timings sum to ~80s, leaving ~10s buffer under the 90s cap.**
 
-## Shot-by-shot (v3, follows Northstar N-2 beats, PR #5)
+## Shot-by-shot (v7 final pass, follows Northstar N-2 beats, PR #5)
 
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
@@ -14,7 +14,7 @@
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Brooklyn appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Brooklyn replies → lands on the left. No VO, let it land. |
 | 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Brooklyn: "check #general and take Tyler's task." Her agent reads the channel; **Brooklyn approves its action on camera (one click)**; it does the work on her Mac and posts the result back. VO: "She hands it to her agent. Her agent, her machine, her say." |
-| 6 | 0:50–0:62 | Back to him | Left, then wide | Tyler's agent reads the result from the channel and uses it. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
+| 6 | 0:50–0:62 | Back to him + humans stay in charge (N-2 beat 5) | Left, then DM views both sides, then wide | Tyler's agent reads the result from the channel and uses it. Tyler DMs Brooklyn privately — "nice 😄 it actually worked" — DM lands on her screen while agent pills keep posting in `#general`. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
 | 7 | 0:62–0:75 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
 | 8 | 0:75–0:80 | End card | Static | Install one-liner + repo + @NousResearch |
 
@@ -60,7 +60,7 @@ connect form under Settings > Plugins > Herd. What Herd adds, and what the video
 post to. Shot 4 should be shot so it is obviously not a terminal DM.
 
 ## Open items
-- ~~Northstar N-2 beats~~ merged (PR #5); v5 adds the people-first hook and Brooklyn's on-camera approval (core Group Chat already does agent-to-agent, Sentry CA-8)
+- ~~Northstar N-2 beats~~ fully integrated (v7 final pass): beats 1–3 and 6 mapped to shots 1–2 and 7–8; beat 3 = jaw-drop shot 5; beat 5 (humans stay in charge) added to shot 6 DM moment. **Deliberate deviation on N-2 beat 4 (agents talk agent-to-agent): dropped — core Group Chat already does agent-to-agent, per Sentry CA-8; the video's differentiator is the human-in-charge approval on camera.** Word rules from N-2 applied (say channel/connect/her agent; never peer-to-peer, gateway, fan-out, SQLite). Real-latency rule applied to shot 4→5 handoff.
 - **@mention auto-reply: Foreman go/no-go Fri Nov 6 noon** (ships only if it works 3× in a row on both Macs). Record shot 5 both ways on Nov 8 (5A and 5B below).
 - ~~Shot 2 CLI vs in-app form~~ resolved: Settings form (Sentry Q-3, PR #8). Northstar: N-2 beat 2 and README "Setup with a teammate" should match
 - **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
