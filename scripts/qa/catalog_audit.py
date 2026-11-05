@@ -171,8 +171,21 @@ MAGIC = {
 }
 
 
+def tracked_files(root: Path):
+    """Files a reviewer sees at the pin: git-tracked ones (incl. __pycache__), else everything."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True)
+        names = [n for n in out.stdout.decode().split("\0") if n]
+        if names:
+            return [root / n for n in names if (root / n).is_file()]
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return [p for p in root.rglob("*") if p.is_file() and ".git" not in p.relative_to(root).parts]
+
+
 def check_binaries(root: Path):
-    for p in iter_files(root):
+    for p in tracked_files(root):
         if p.suffix in (".pyc", ".pyo"):
             add("FAIL", "17", rel(root, p), "committed Python bytecode")
             continue

@@ -186,3 +186,11 @@ def test_non_secret_env_read_only_warns(tmp_path):
     rc, f = run(make_tree(tmp_path, init=init))
     assert rc == 0
     assert any(x.rule == "11" and x.level == "WARN" for x in f)
+
+
+def test_pyc_inside_pycache_fails(tmp_path):
+    t = make_tree(tmp_path)
+    (t / "__pycache__").mkdir()
+    (t / "__pycache__/tools.cpython-313.pyc").write_bytes(b"\0" * 8)
+    rc, f = run(t)
+    assert any(x.rule == "17" and "__pycache__" in x.where for x in fails(f))
