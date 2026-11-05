@@ -1,0 +1,8 @@
+name: herd
+version: 0.1.0
+description: A multiplayer workspace for Hermes with shared channels and direct messages.
+provides_tools:
+  - herd_post
+  - herd_list_channels
+license: MIT
+homepage: https://github.com/tyleramberry/herd
