@@ -20,12 +20,13 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @smith — Engineering
 
-- [ ] 🔵 **S-1 (due Nov 4 EOD): Scaffold unified package** — plugin.yaml, __init__.py, schemas.py, tools.py, plugin_api.py (SQLite: channels, messages, participants), desktop/plugin.js. Pane + route render live from backend, empty state visible. Read Desktop Plugin SDK + "One package, both SDKs" first. Implement via Claude Code Opus 5.5, verify its output. PR to main.
-- [ ] ⬜ **S-2 (due Nov 5): Two-gateway fan-out** — message posted on gateway A appears in channel view on gateway B. THE milestone; escalate to Foreman same night if slipping.
-- [ ] ⬜ **S-3 (due Nov 5): Agent-side tools** — herd_post, herd_list_channels, herd_read_channel (names locked in N-1) (agents post to channels from Bot Chats); register via plugin.yaml per catalog rules.
-- [ ] ⬜ **S-4 (due Nov 6): Join/onboarding flow** — "hermes peer add" story in UI; channel-create + DM flows.
+- [ ] 🔵 **S-1 (due Nov 4 EOD): Scaffold unified package** — **Status (Nov 5): built in the fan-out PR.** plugin.yaml (3 tools, config_schema join form, requires_hermes ">=0.22.7"), `dashboard/herd_store.py` (SQLite: channels, messages, participants, peer_state), `dashboard/plugin_api.py`, `desktop/plugin.js` (route `/herd`, sidebar nav, right pane, empty states). Supersedes PR #4. Awaiting Sentry TC-0 + live `hermes plugins validate`/`doctor`.
+- [ ] 🔵 **S-2 (due Nov 5): Two-gateway fan-out** — **Status: implemented, needs live 2-gateway run.** Linked side runs one `POST <peer>/herd/v1/sync` every 3 s (push its new messages, pull the peer's) on the peer's api_server, auth = peer's API_SERVER_KEY. One-sided link carries both directions. Simulated 2-gateway + real-HTTP tests green (ordering, dup convergence, offline catch-up, DMs). THE milestone: Sentry TC-2.1/2.2 on two real gateways is the gate.
+- [ ] 🔵 **S-3 (due Nov 5): Agent-side tools** — **Status: done pending QA.** `herd_list_channels`, `herd_post`, `herd_read_channel` (N-1/N-3 copy), registered in plugin.yaml `provides_tools`; agent posts carry `author_type=agent`.
+- [ ] 🔵 **S-4 (due Nov 6): Join/onboarding flow** — **Status: done pending QA.** Join = Settings → Plugins → Herd form (peer name, URL, masked key via config_schema secret; Sentry CA-4 / rule 11), "Connect a teammate" button in the pane, New channel, New message (DM = dm-flagged 2-member channel).
 - [ ] ⬜ **S-5 (due Nov 7): Fix Sentry's QA round-1 bugs**; `hermes plugins validate` + `doctor` clean; screenshots for catalog PR.
 - [ ] ⬜ **S-6 (Nov 8): Freeze** — bug fixes only.
+- [ ] ⬜ **S-7 (stretch, gated): @mention wake** — only after TC-2 passes on real hardware and Tyler says go; Foreman go/no-go Fri Nov 7 noon; default off (ctx.inject_message + allow_gateway_injection).
 
 ## @sentry — QA
 
