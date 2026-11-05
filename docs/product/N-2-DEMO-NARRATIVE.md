@@ -18,21 +18,21 @@ is about two people, not two bots. See N-1 "Positioning vs. core Group Chat."
 | Beat | What the viewer must feel | What's on screen | Maps to H-1 |
 |---|---|---|---|
 | 1. **Two people, two Hermes** | "Huh, we can't share these." | Two Macs, two people, two Hermes apps. Each person's agent only knows its own person. | Shot 1 (hook) |
-| 2. **One step** | "That's it?" | Tyler opens **Settings → Plugins → Herd → Add teammate**, pastes Riley's address and key. Riley appears in `#general` on **both** screens. One side is enough. | Shots 2–3 |
-| 3. **Same room** | "It's real, it's live." | Tyler types in `#general` on the left; it lands on the right instantly. Riley replies; it lands on the left. Humans first, so the viewer trusts the pipe. | New, ~5s, before shot 4 |
-| 4. **The handoff (jaw-drop)** | "His agent and her agent are on the same team, and each still answers to its own person." | Tyler asks *his* agent in Bot Chats to post a task to `#general`. The agent's message appears on both screens, tagged as an agent. Riley tells *her* agent "check #general and take Tyler's task." Her agent reads the channel, does it on her Mac, and posts the result back. | Shot 4 |
+| 2. **One step** | "That's it?" | Tyler opens **Settings → Plugins → Herd → Add teammate**, pastes Brooklyn's address and key. Brooklyn appears in `#general` on **both** screens. One side is enough. | Shots 2–3 |
+| 3. **Same room** | "It's real, it's live." | Tyler types in `#general` on the left; it lands on the right instantly. Brooklyn replies; it lands on the left. Humans first, so the viewer trusts the pipe. | New, ~5s, before shot 4 |
+| 4. **The handoff (jaw-drop)** | "His agent and her agent are on the same team, and each still answers to its own person." | Tyler asks *his* agent in Bot Chats to post a task to `#general`. The agent's message appears on both screens, tagged as an agent. Brooklyn tells *her* agent "check #general and take Tyler's task." Her agent reads the channel, does it on her Mac, and posts the result back. | Shot 4 |
 | 5. **Back to him** | "Two-way. Both humans saw it all." | Tyler's agent reads the result from the channel and uses it. Both screens show the full thread: two humans, two agents, one conversation. | Shot 5 |
 | 6. **Name it** | "I want this." | "Herd. Multiplayer Hermes." Install one-liner. | Shots 6–7 |
 
 ## Notes for Herald
 
 - **Shot 4 has two versions; record both.** (a) If @mention wake makes the
-  Nov 7 go (N-1 Stretch): Tyler's agent posts "@riley-hermes can you take
-  this?" and Riley's agent picks it up by itself; Riley approves its action on
-  her Mac. (b) Fallback: Riley asks her agent to check #general and take the
+  Nov 7 go (N-1 Stretch): Tyler's agent posts "@brooklyn-hermes can you take
+  this?" and Brooklyn's agent picks it up by itself; Brooklyn approves its action on
+  her Mac. (b) Fallback: Brooklyn asks her agent to check #general and take the
   task. Say it out loud: *"She hands it to her agent."*
 - **Pick a task that shows "her machine."** Best: something only her Mac has,
-  e.g. "summarize the notes file on Riley's desktop" or "check what's on Riley's
+  e.g. "summarize the notes file on Brooklyn's desktop" or "check what's on Brooklyn's
   calendar Friday." Avoid tasks either agent could do alone, or the handoff
   looks pointless.
 - **Agent labels must be visible** in every shot after beat 4. The viewer has
@@ -43,7 +43,7 @@ is about two people, not two bots. See N-1 "Positioning vs. core Group Chat."
   and I just put our Hermes agents in the same channel."
 - **Shot 2 is now the Add-teammate form**, not `hermes peer add` in a terminal
   (Sentry's Q-3 ruling, see N-1 R-1).
-- **Riley approves her own agent on camera** (one click is enough). That's the
+- **Brooklyn approves her own agent on camera** (one click is enough). That's the
   moment that shows Herd isn't Group Chat: her agent, her machine, her say.
 - **Don't say:** "peer-to-peer," "gateway," "fan-out," "SQLite." Do say:
   "channel," "connect," "her agent," "his agent."
