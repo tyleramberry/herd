@@ -9,7 +9,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 | Date | Milestone |
 |---|---|
-| Wed Nov 5 | **SPINE:** two gateways exchange one real message through the plugin |
+| Thu Nov 5 | **SPINE:** two gateways exchange one real message through the plugin |
 | Fri Nov 7 | Validate + doctor clean; demo script final; polish pass done |
 | Sun Nov 8 | **CODE FREEZE** · catalog PR opened · demo video recorded |
 | Mon Nov 9 | Clean-install rehearsal (fresh HERMES_HOME, 2-gateway smoke test) |
