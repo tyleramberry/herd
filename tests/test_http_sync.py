@@ -83,6 +83,17 @@ class TwoGatewaysOverHttp(unittest.TestCase):
         self.assertTrue(st["connected"])
         self.assertEqual(st["remote_name"], "riley")
 
+    def test_passive_side_reports_incoming_over_http(self):
+        self.use_a()
+        [res] = store.sync_all()
+        self.assertTrue(res["ok"], res)
+        a_id = store.identity()["gateway_id"]
+        store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = self.b_db, self.b_settings
+        st = store.status()
+        self.assertEqual(st["peers"], [])
+        [inc] = st["incoming"]
+        self.assertEqual((inc["gateway_id"], inc["name"], inc["linked_back"]), (a_id, "tyler", False))
+
     def test_wrong_key_is_a_friendly_error(self):
         self.use_a(key="wrong")
         [res] = store.sync_all()

@@ -261,6 +261,56 @@ class TwoGatewayTest(unittest.TestCase):
                 store.handle_peer_sync({"after_seq": "abc"})
 
 
+    # --- S-8: passive side learns about the incoming link -------------------------------------
+
+    def test_passive_side_sees_incoming_registration(self):
+        self.sync()
+        with self.A:
+            a_id = store.identity()["gateway_id"]
+        with self.B:
+            st = store.status()
+        self.assertEqual(st["peers"], [])
+        [inc] = st["incoming"]
+        self.assertEqual((inc["gateway_id"], inc["name"], inc["linked_back"]), (a_id, "tyler", False))
+        self.assertGreaterEqual(inc["syncs"], 1)
+
+    def test_linked_back_flips_when_b_configures_a(self):
+        self.sync()
+        with self.A:
+            a_id = store.identity()["gateway_id"]
+        with self.B:
+            self.assertFalse(store.status()["incoming"][0]["linked_back"])
+            self.B.settings.update({"peer_name": "tyler", "peer_url": "http://tyler.test:8642"})
+            self.B.settings["__secrets__"]["HERD_PEER_KEY"] = "k-tyler"
+        # B syncs to A (transport swaps to A's handler).
+        def to_a(peer, body):
+            with self.A:
+                return json.loads(json.dumps(store.handle_peer_sync(json.loads(json.dumps(body)))))
+        store.TRANSPORT = to_a
+        with self.B:
+            [res] = store.sync_all()
+            self.assertTrue(res["ok"], res)
+            st = store.status()
+            self.assertEqual(st["peers"][0]["remote_name"], "tyler")
+            self.assertEqual([i["gateway_id"] for i in st["incoming"]], [a_id])
+            self.assertTrue(st["incoming"][0]["linked_back"])
+
+    def test_sync_without_sender_id_records_nothing(self):
+        with self.B:
+            for body in ({}, {"from": {}}, {"from": {"gateway_id": "", "display_name": "x"}}, {"from": "bad"}):
+                store.handle_peer_sync(body)
+            self.assertEqual(store.status()["incoming"], [])
+
+    def test_incoming_name_prefers_real_display_name(self):
+        with self.B:
+            store.handle_peer_sync({"from": {"gateway_id": "g1", "display_name": "Tyler"}})
+            store.handle_peer_sync({"from": {"gateway_id": "g1"}})
+            [inc] = store.status()["incoming"]
+            self.assertEqual((inc["name"], inc["syncs"]), ("Tyler", 2))
+            store.handle_peer_sync({"from": {"gateway_id": "g2"}})
+            self.assertIn("peer", [i["name"] for i in store.status()["incoming"]])
+
+
 class ToolsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
