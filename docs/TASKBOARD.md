@@ -43,8 +43,8 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @herald — Submission
 
-- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v1 done (workspace/H-1-demo-script.md) — 78s shot-by-shot, hook + jaw-drop + X copy + Sentry rehearsal checklist. Awaiting Northstar N-2 narrative beats; final pass Nov 7.**
-- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v1 done (workspace/H-2-catalog-pr-package.md) — herd.yaml per live entry-schema docs, quoted version "0.1.0", rule-13 disclosures drafted; capabilities + version pending Smith's plugin.yaml (S-1).**
+- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v2 (docs/submission/H-1-demo-script.md) — 78s shot-by-shot. v2 reframes: `hermes peer add` is core Hermes, so the video sells the shared channel, not the join command. Awaiting Northstar N-2; final pass Nov 7.**
+- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v2 (docs/submission/H-2-catalog-pr-package.md) — checked against live catalog README: fixed capability keys (`provides_*`), category → desktop, added image/screenshots. Pending S-1 plugin.yaml (capabilities, requires_hermes). Open Q1 for Smith: how Herd authenticates to peers without reading `HERMES_PEER_*_KEY` (rule 11).**
 - [ ] ⬜ **H-3 (due Nov 8): Catalog PR opened** (post-approval) · demo video recorded.
 - [ ] ⬜ **H-4 (due Nov 10): Video posted to X tagged @NousResearch · entry form submitted with both links** · report form confirmation to Foreman.
 
