@@ -1,4 +1,4 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v1, Nov 5)
+# H-2 — Catalog PR Package: Herd (DRAFT v2, Nov 5)
 
 > **Status: PREPARED ONLY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
@@ -9,27 +9,29 @@
 name: herd
 title: Herd
 description: >-
-  Multiplayer Hermes — channels and DMs where humans and their agents work
-  together across machines, inside the Hermes desktop app.
+  Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
+  your Hermes agents work together across two machines.  # N-3 copy
 repo: https://github.com/tyleramberry/herd
-sha: 543c1fe2e672862a548d72d5b3fa5ebbd4b1fa44  # PLACEHOLDER — must be the Nov 8 freeze commit (full 40-hex, verify with `git rev-parse HEAD` at pin time)
+sha: 0000000000000000000000000000000000000000  # PLACEHOLDER — the Nov 8 freeze commit, full 40-hex (`git rev-parse HEAD` at pin time)
 tier: community
-category: platform
+category: desktop  # shelf options: desktop|memory|platform|web|tools|voice|automation|models|general. Herd is a desktop pane, so "desktop" (was "platform", which is the messaging-platform shelf)
 maintainer: tyleramberry
-version: "0.1.0"  # QUOTED per schema; must match plugin.yaml at pinned commit — verify at freeze
-requires_hermes: ">=0.19"  # TODO: set to actual floor once plugin.yaml exists; must match plugin.yaml (rule 14)
-# platforms: omit unless plugin is macOS-only
-# subdir: omit (plugin at repo root)
-capabilities:
-  # TODO: must match what the plugin actually registers at the pinned commit (rule 6).
-  # Pull the exact tools/hooks/middleware/requires_env list from plugin.yaml at freeze.
-  tools: []       # FILL FROM plugin.yaml
-  hooks: []       # FILL FROM plugin.yaml
-  middleware: []  # FILL FROM plugin.yaml
-  requires_env: []  # e.g. API_SERVER_KEY — confirm whether env or config_schema secret (rule 11)
-# image / screenshots: pin to the entry's commit (raw.githubusercontent.com/tyleramberry/herd/<sha>/...)
-#   — add after the Nov 8 recording session; screenshots also satisfy the PR-description requirement
+version: "0.1.0"  # QUOTED; must match plugin.yaml at the pinned commit
+requires_hermes: ">=0.22.7"  # Sentry Q-3: the release we actually test on (0.19.0 unverified). Smith must set the same floor in plugin.yaml (rule 14)
 docs_url: https://github.com/tyleramberry/herd#readme
+# platforms: omit unless macOS-only
+# subdir: omit (plugin at repo root)
+image: https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/banner.png  # 2:1, e.g. 1200x600; pin to the same sha
+screenshots:  # up to 6, GitHub hosts only, pinned to the same sha
+  - https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/channel-two-machines.png
+  - https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/agent-posts-to-channel.png
+capabilities:
+  # Key names per the live entry schema: provides_tools / provides_hooks / provides_middleware / requires_env
+  # (draft v1 used tools/hooks/middleware, which is wrong). Must match what the plugin registers at the pin (rule 6).
+  provides_tools: [herd_list_channels, herd_post, herd_read_channel]  # confirmed by Smith Nov 5; re-check at freeze
+  provides_hooks: []        # none (Smith)
+  provides_middleware: []   # none (Smith)
+  requires_env: []          # none: the peer key is a config_schema secret (HERD_PEER_KEY), not requires_env
 ```
 
 ## 2. PR description (draft)
@@ -37,36 +39,35 @@ docs_url: https://github.com/tyleramberry/herd#readme
 ### What it does
 Herd is multiplayer Hermes: channels and direct messages inside the Hermes
 desktop app where humans and their Hermes agents collaborate across machines.
-One command joins a peer:
-
-```
-hermes peer add <name> --url <their-gateway-url> --key <API_SERVER_KEY>
-```
-
-After joining, agents on both machines can exchange messages and hand work to
+You connect a teammate's Hermes under **Settings > Plugins > Herd** (their
+gateway URL and API key). Herd then gives you shared channels in the desktop app: agents on both machines can exchange messages and hand work to
 each other; both humans see the same thread. Built for the Nous Research
 Hermes Agent Plugin Hackathon (Nov 2026).
 
+**What Herd adds over core:** Core Group Chat and `hermes peer dm` connect one
+person's bots across their machines. Herd connects two people: each keeps their
+own Hermes, credentials and approvals, and both humans and both agents share
+one persistent channel.
+
 ### Hermes surfaces used
 <!-- FILL AT FREEZE — enumerate exactly what the pinned tree registers, e.g.: -->
-- Tools: `hermes peer add`, … (exact tool names from plugin.yaml)
-- Hooks/middleware: TBD
+- Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels` (exact names from plugin.yaml)
+- `config_schema` settings (peer_name, peer_url, peer_key secret), rendered by Desktop under Settings > Plugins > Herd
+- No hooks, no middleware, no CLI commands
 - Desktop plugin surface (desktop/plugin.js) via the plugin SDK only
 
 ### Rule 13 disclosures
 <!-- Keep only lines that are true at the pinned commit; delete the rest. -->
-- **Network calls:** Herd runs its own gateway/relay server and communicates
-  peer-to-peer over the network to the gateways you configure (`--url`). No
-  third-party services. <!-- VERIFY: does anything else phone home? -->
-- **Long-running background processes:** the gateway/API server runs for the
-  lifetime of the Hermes session to receive peer connections. <!-- VERIFY -->
-- **Stored credentials:** peer API keys (`API_SERVER_KEY`) are stored by
-  Hermes's secret route (`agent.secret_scope.get_secret`) — not read from
-  .env or any other credential store. <!-- VERIFY implementation (rule 11) -->
-- **Reads outside plugin data:** none. <!-- VERIFY -->
-- **Shell commands:** `hermes peer add` is a Hermes CLI command, not a plugin
-  shell-out. <!-- VERIFY no subprocess usage -->
-- **Telemetry:** none. Opt-in telemetry: n/a.
+- **Network calls:** only to the one peer gateway configured in Herd's
+  settings. No third-party services. <!-- VERIFY at freeze: grep for any other outbound URL -->
+- **Long-running background processes:** while the plugin is enabled with a teammate configured, Herd pushes outgoing messages to the teammate's gateway and polls it for new messages about every 3 seconds. <!-- confirm interval at freeze -->
+- **Stored credentials:** one peer API key, declared as a `config_schema`
+  secret (`peer_key`, env `HERD_PEER_KEY`) and stored by Hermes; Herd reads it
+  only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
+- **Reads outside plugin data:** none.
+- **Shell commands:** none. <!-- VERIFY no subprocess usage; if Herd shells out to `hermes peer dm`, disclose it here -->
+- **Local data:** channel history in a SQLite file under the plugin's data dir.
+- **Telemetry:** none.
 
 ### Screenshots
 <!-- Attach: (1) the peer-add command in the terminal, (2) both desktop apps
@@ -77,15 +78,25 @@ Hermes Agent Plugin Hackathon (Nov 2026).
 - `hermes plugins validate /path/to/herd --install-deps` run at the pinned commit — green.
   <!-- PASTE ACTUAL OUTPUT AT FREEZE -->
 
-### Checklist
-- [x] One file added: `plugin-catalog/herd.yaml`
-- [x] Full 40-char SHA pin (placeholder above — swap for freeze commit)
+### Checklist (tick only when true at the pinned commit)
+- [ ] One file added: `plugin-catalog/herd.yaml`
+- [ ] Full 40-char SHA pin (freeze commit, not placeholder)
 - [x] `version` quoted
-- [x] Rule 13 disclosures in description (and mirrored in README)
-- [x] Capabilities match plugin.yaml at pin
-- [x] Screenshots attached
+- [ ] Rule 13 disclosures in description AND mirrored in README
+- [ ] `capabilities` match plugin.yaml at pin
+- [ ] Screenshots attached (PR body) and listed in `screenshots:`
+- [ ] `hermes plugins validate --install-deps` green locally
 - [ ] CI green
 - [ ] Foreman review + Tyler sign-off (Nov 8) — **gate before opening PR**
+
+## Open questions (need Smith / Northstar)
+- **Q1 — peer auth vs rule 11: RESOLVED.** Herd declares its own
+  `config_schema` (peer_name, peer_url, peer_key secret → `HERD_PEER_KEY`),
+  read only via `get_secret`. Sentry's Q-3 ruling (PR #8): **strip**
+  `use_hermes_peers` from the catalog build, since reviewers read the code at
+  the pin whatever the default, and undeclared dynamic secret names fail
+  rules 6 and 11.
+- ~~**Q2 — what Herd adds over core**~~ resolved: Northstar N-3 line, now in "What it does" above.
 
 ## 3. Pre-open verification list (at freeze, Nov 8)
 1. `git -C /path/to/herd rev-parse HEAD` → swap into `sha:`
@@ -94,3 +105,13 @@ Hermes Agent Plugin Hackathon (Nov 2026).
 4. Grep the tree for rule 8/9 red flags (prototype patching, `eval`, core module
    overrides, `os.environ` secret reads) — should be clean
 5. Confirm README carries the same rule-13 disclosures
+5b. `python scripts/qa/catalog_audit.py . --entry herd.yaml` (Sentry, PR #8) is clean
+5c. No `use_hermes_peers` / `HERMES_PEER_` references anywhere in the pinned tree
+6. Swap `<sha>` in `image:` / `screenshots:` URLs for the pinned sha, and confirm
+   those files exist at that commit (`docs/media/…`)
+7. Confirm `requires_hermes` is identical in plugin.yaml and herd.yaml (rule 14)
+8. No `.pyc`, binaries or opaque archives in the tree (rule 17); no self-updater (rule 3)
+
+_Sources checked Nov 5: `plugin-catalog/README.md` (entry schema + rules 1–18) and
+`website/docs/developer-guide/plugins/catalog-submission.md` in NousResearch/hermes-agent;
+`hermes peer` section of `website/docs/reference/cli-commands.md`._

@@ -32,20 +32,20 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 - [ ] ✅ **Q-1 (due Nov 4 EOD): QA checklist for Thursday milestone** — DONE: `docs/qa/Q1-SPINE-CHECKLIST.md` (SPINE gate = TC-2.1/2.2, static pre-flight, local round-trip, fan-out incl. polling-fallback + convergence, edge cases, bug template, sign-off rules).
 - [ ] ⬜ **Q-2 (Nov 6–7): QA round 1** — test Smith's PRs against checklist; bugs back to Smith with repro steps; loop until clean, then route to Foreman.
-- [ ] ⬜ **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy.
-- [ ] ⬜ **Q-4 (due Nov 9): Clean-install rehearsal** — fresh HERMES_HOME, install by repo, enable, two-gateway smoke test, report pass/fail to Foreman.
+- [ ] 🔵 **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy. **Round 1 done Nov 5: `docs/qa/Q3-CATALOG-AUDIT.md` + `scripts/qa/catalog_audit.py`. PR #4 has 3 open S1s (requires_hermes missing, herd_read_channel missing, use_hermes_peers → strip). Re-run at freeze.**
+- [ ] ⬜ **Q-4 (due Nov 9): Clean-install rehearsal** — fresh HERMES_HOME, install by repo, enable, two-gateway smoke test, report pass/fail to Foreman. Script ready: `docs/qa/Q4-CLEAN-INSTALL.md`.
 - [ ] ⬜ **Q-5 (Nov 10): Regression pass on any post-freeze fixes.**
 
 ## @northstar — Product
 
-- [ ] 🔵 **N-1 (due Nov 4 EOD): Locked cut-list written down** — channels, DMs, agent posting, 2-gateway fan-out. Everything else = post-hackathon. This file is the scope-creep yardstick.
-- [ ] ⬜ **N-2 (due Nov 6): Demo narrative** — the story beats for Herald's script (hook: "hermes peer add" join flow; payoff: two agents collaborating in one channel).
-- [ ] ⬜ **N-3 (due Nov 7): Naming/copy pass** — plugin name/description for catalog entry + README polish suggestions to Smith.
+- [x] ✅ **N-1 (due Nov 4 EOD): Locked cut-list written down** — DONE Nov 5: `docs/product/N-1-CUT-LIST.md`. IN = channels, 2-gateway fan-out, peer join, agents post **and read** (`herd_list_channels`, `herd_post`, `herd_read_channel`), DMs (= 2-person channel). OUT incl. auto-wake/@mention triggers. Join = Herd's own Add-teammate form (core peer registry off-limits per Q-3 CA-4). Positioning vs. core Group Chat added (CA-8): Herd connects people, not just bots.
+- [x] ✅ **N-2 (due Nov 6): Demo narrative** — DONE Nov 5: `docs/product/N-2-DEMO-NARRATIVE.md`. 6 beats for Herald; adds a 5s human-to-human beat before the jaw-drop; shot 4 = Riley *hands* the task to her agent (no auto-wake in v1).
+- [x] ✅ **N-3 (due Nov 7): Naming/copy pass** — DONE v1 Nov 5: `docs/product/N-3-NAMING-COPY.md` (catalog title/description for H-2, tool descriptions + UI strings + README suggestions for Smith). Will re-check against real UI Nov 7.
 
 ## @herald — Submission
 
-- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v1 done (workspace/H-1-demo-script.md) — 78s shot-by-shot, hook + jaw-drop + X copy + Sentry rehearsal checklist. Awaiting Northstar N-2 narrative beats; final pass Nov 7.**
-- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v1 done (workspace/H-2-catalog-pr-package.md) — herd.yaml per live entry-schema docs, quoted version "0.1.0", rule-13 disclosures drafted; capabilities + version pending Smith's plugin.yaml (S-1).**
+- [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v6 (docs/submission/H-1-demo-script.md) — ~80s. People-first hook ("Hermes is single-player. We made it multiplayer."), shot 2 = Add-teammate form, Brooklyn approves her agent on camera. Shot 5 recorded both ways (5A baseline, 5B @mention); Foreman go/no-go Fri noon. Final pass Nov 7.**
+- [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v2 (docs/submission/H-2-catalog-pr-package.md) — checked against live catalog README: fixed capability keys (`provides_*`), category → desktop, added image/screenshots. Capabilities from Smith; requires_hermes ">=0.22.7" per Sentry Q-3; rule-11 Q1 resolved (strip use_hermes_peers).**
 - [ ] ⬜ **H-3 (due Nov 8): Catalog PR opened** (post-approval) · demo video recorded.
 - [ ] ⬜ **H-4 (due Nov 10): Video posted to X tagged @NousResearch · entry form submitted with both links** · report form confirmation to Foreman.
 

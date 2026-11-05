@@ -70,8 +70,9 @@ Preconditions to verify BEFORE testing (a failure here is env, not product):
 - [ ] TC-0.7 No secrets in code; no network calls except the gateway and our
       `/api/plugins/herd/` namespace
 - [ ] TC-0.8 `plugin.yaml` `provides_tools` lists exactly what `register()`
-      registers via `ctx.register_tool` (today: herd_post,
-      herd_list_channels — no more, no fewer)
+      registers via `ctx.register_tool` (locked scope, N-1: herd_list_channels,
+      herd_post, herd_read_channel — no more, no fewer). Automated:
+      `python scripts/qa/catalog_audit.py .`
 - [ ] TC-0.9 Tool handlers return JSON strings and accept `**kwargs`
 - [ ] TC-0.10 Never assigns to Hermes modules, `sys.modules`, or core
       dicts/functions at runtime
