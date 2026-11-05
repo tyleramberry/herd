@@ -10,7 +10,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 | Date | Milestone |
 |---|---|
 | Thu Nov 5 | **SPINE:** two gateways exchange one real message through the plugin |
-| Fri Nov 7 | Validate + doctor clean; demo script final; polish pass done |
+| Sat Nov 7 | Validate + doctor clean; demo script final; polish pass done |
 | Sun Nov 8 | **CODE FREEZE** · catalog PR opened · demo video recorded |
 | Mon Nov 9 | Clean-install rehearsal (fresh HERMES_HOME, 2-gateway smoke test) |
 | Tue Nov 10 | Video posted to X (@NousResearch) · entry form submitted |
@@ -26,7 +26,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 - [ ] 🔵 **S-4 (due Nov 6): Join/onboarding flow** — **Status: done pending QA.** Join = Settings → Plugins → Herd form (peer name, URL, masked key via config_schema secret; Sentry CA-4 / rule 11), "Connect a teammate" button in the pane, New channel, New message (DM = dm-flagged 2-member channel).
 - [ ] ⬜ **S-5 (due Nov 7): Fix Sentry's QA round-1 bugs**; `hermes plugins validate` + `doctor` clean; screenshots for catalog PR.
 - [ ] ⬜ **S-6 (Nov 8): Freeze** — bug fixes only.
-- [ ] ⬜ **S-7 (stretch, gated): @mention wake** — only after TC-2 passes on real hardware and Tyler says go; Foreman go/no-go Fri Nov 7 noon; default off (ctx.inject_message + allow_gateway_injection).
+- [ ] 🔵 **S-7 (stretch, gated): @mention wake** — **Tyler approved the build (Nov 5): "Yes, build it."** Smith is starting. Gate stands: **Foreman go/no-go Fri Nov 6 noon** (board previously said "Fri Nov 7"; Nov 7 is Saturday). Go only if TC-2 (two real gateways) has passed on real hardware; otherwise cut it, no freeze slip. Default off (ctx.inject_message + allow_gateway_injection). Rule-13 disclosure and H-2 capabilities must be updated if it ships.
 
 ## @sentry — QA
 
