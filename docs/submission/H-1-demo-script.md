@@ -22,6 +22,8 @@
 - **5A (baseline, no auto-reply):** as in the table above. Riley tells her agent to take the task; she approves; it posts back.
 - **5B (if @mention ships):** Tyler types "@riley-agent can you take this?" in `#general`. Her agent wakes on the mention, Riley approves on camera, and it does the work on her Mac and posts back. VO: "He asks her agent. She says yes. Her agent, her machine." 5B runs about 4s shorter; give that time to shot 6.
 
+**Setup facts (Smith, Nov 5):** only Tyler fills in Add teammate (Riley's URL plus her `API_SERVER_KEY`). Riley's Mac needs `API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0` and `API_SERVER_KEY` set, `hermes gateway` running, and Herd enabled. Set **"Your name"** in Herd settings on both Macs, or the names default to the computer names. **Latency:** messages from Tyler to Riley arrive almost instantly, but messages from Riley to Tyler can take up to about 3s because Herd polls. In shots 4–6, hold on the left screen for 3s after Riley or her agent posts, and never cut away early.
+
 **Total ~80s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
 
 **Task for shot 5 (must need *her* Mac):** "summarize the notes file on Riley's desktop" or "what's on Riley's calendar Friday?". Never a task either agent could do alone.

@@ -60,7 +60,7 @@ one persistent channel.
 <!-- Keep only lines that are true at the pinned commit; delete the rest. -->
 - **Network calls:** only to the one peer gateway configured in Herd's
   settings. No third-party services. <!-- VERIFY at freeze: grep for any other outbound URL -->
-- **Long-running background processes:** <!-- VERIFY: does Herd poll peers on a timer / run a sync loop? If yes, disclose interval. Core api_server is Hermes's, not Herd's. -->
+- **Long-running background processes:** while the plugin is enabled with a teammate configured, Herd pushes outgoing messages to the teammate's gateway and polls it for new messages about every 3 seconds. <!-- confirm interval at freeze -->
 - **Stored credentials:** one peer API key, declared as a `config_schema`
   secret (`peer_key`, env `HERD_PEER_KEY`) and stored by Hermes; Herd reads it
   only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
