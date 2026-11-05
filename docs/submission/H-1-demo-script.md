@@ -5,6 +5,17 @@
 **Record date: Nov 8 — code freeze. Rehearse with Sentry before recording.**
 **All timings sum to ~78s, leaving ~10s buffer under the 90s cap.**
 
+## Swappable constants (confirm by Nov 6 — Foreman sourcing from Tyler)
+```text
+GATEWAY_URL   = <their-gateway-url>      # used in shot 2 on-screen command
+PEER_KEY      = **** (always masked on camera — never show the real API_SERVER_KEY)
+PEER_NAME     = riley                     # wife's Hermes instance name, shots 2–5
+HERMES_CMD    = hermes                    # CLI invocation as shipped at freeze
+```
+Every command/UI cue below references these constants only — if any value
+changes before Nov 8, swap it here and re-render the on-screen text, no re-edit
+of the script body.
+
 ## Shot-by-shot
 
 | # | Time | Screen | VO / on-screen |
