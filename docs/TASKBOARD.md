@@ -30,9 +30,9 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @sentry — QA
 
-- [ ] ✅ **Q-1 (due Nov 4 EOD): QA checklist for Thursday milestone** — DONE: `docs/qa/Q1-SPINE-CHECKLIST.md` (SPINE gate = TC-2.1/2.2, static pre-flight, local round-trip, fan-out incl. polling-fallback + convergence, edge cases, bug template, sign-off rules).
-- [ ] ⬜ **Q-2 (Nov 6–7): QA round 1** — test Smith's PRs against checklist; bugs back to Smith with repro steps; loop until clean, then route to Foreman.
-- [ ] 🔵 **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy. **Round 1 done Nov 5: `docs/qa/Q3-CATALOG-AUDIT.md` + `scripts/qa/catalog_audit.py`. PR #4 has 3 open S1s (requires_hermes missing, herd_read_channel missing, use_hermes_peers → strip). Re-run at freeze.**
+- [x] ✅ **Q-1 (due Nov 4 EOD): QA checklist for Thursday milestone** — DONE: `docs/qa/Q1-SPINE-CHECKLIST.md` (SPINE gate = TC-2.1/2.2, static pre-flight, local round-trip, fan-out incl. polling-fallback + convergence, edge cases, bug template, sign-off rules).
+- [ ] 🔵 **Q-2 (Nov 6–7): QA round 1** — test Smith's PRs against checklist; bugs back to Smith with repro steps; loop until clean, then route to Foreman. **Nov 5: #9 static pass (TC-0.3–0.9) green, 49 tests. Live TC-0.1/0.2 (validate/doctor) and TC-2 need Tyler's two Macs.**
+- [ ] 🔵 **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy. **Round 1 done Nov 5: `docs/qa/Q3-CATALOG-AUDIT.md` + `scripts/qa/catalog_audit.py`. All 3 S1s fixed in #9 (merged); audit on main = 0 FAIL. Re-run at freeze.**
 - [ ] ⬜ **Q-4 (due Nov 9): Clean-install rehearsal** — fresh HERMES_HOME, install by repo, enable, two-gateway smoke test, report pass/fail to Foreman. Script ready: `docs/qa/Q4-CLEAN-INSTALL.md`.
 - [ ] ⬜ **Q-5 (Nov 10): Regression pass on any post-freeze fixes.**
 
@@ -51,9 +51,9 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @foreman — Project management
 
-- [ ] ✅ **F-1: Repo created** — github.com/tyleramberry/herd (public, verified).
-- [ ] ⬜ **F-2 (daily): Verify each deliverable artifact personally** before marking Done; daily risk report to Chief.
-- [ ] ⬜ **F-3 (due Nov 8): Review catalog PR against judging criteria → Tyler approval gate.**
+- [x] ✅ **F-1: Repo created** — github.com/tyleramberry/herd (public, verified).
+- [ ] 🔵 **F-2 (daily): Verify each deliverable artifact personally** before marking Done; daily risk report. Reports in `docs/pm/` (latest: `docs/pm/2026-11-05-status.md`).
+- [ ] 🔵 **F-3 (due Nov 8): Review catalog PR against judging criteria → Tyler approval gate.** Gate checklist drafted: `docs/pm/F-3-freeze-gate.md`.
 
 ---
 
