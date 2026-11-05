@@ -37,14 +37,31 @@ def herd_list_channels(args: dict, **kwargs: Any) -> str:
         return _fail(exc)
 
 
+def _brief_message(m: dict) -> dict:
+    return {"id": m["id"], "author": m["author_name"], "author_type": m["author_type"],
+            "from_machine": m["gateway_name"], "at": m["created_at"], "text": m["content"],
+            "replies": m.get("reply_count", 0)}
+
+
 def herd_post(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}
         channel = str(args.get("channel") or "").strip()
         content = str(args.get("content") or "")
+        reply_to = str(args.get("reply_to") or "").strip()
+        store = _store()
+        if reply_to:
+            parent = store.get_message(reply_to)
+            if not parent:
+                return json.dumps({"ok": False, "error": f"No message with id '{reply_to[:64]}' to reply to."})
+            if channel:
+                found = store.resolve_channel(channel)
+                if not found or found["id"] != parent["channel_id"]:
+                    return json.dumps({"ok": False, "error": "That message is in a different channel."})
+            channel = parent["channel_id"]
         if not channel:
             return json.dumps({"ok": False, "error": "channel is required"})
-        message = _store().post_message(channel, content, author_type="agent")
+        message = store.post_message(channel, content, author_type="agent", thread_parent_id=reply_to or None)
         return json.dumps({"ok": True, "message": {k: message[k] for k in
                                                    ("id", "channel_id", "author_name", "created_at")}})
     except Exception as exc:  # noqa: BLE001
@@ -55,6 +72,11 @@ def herd_read_channel(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}
         channel = str(args.get("channel") or "").strip()
+        thread = str(args.get("thread") or "").strip()
+        if thread:
+            found = _store().list_thread(thread)
+            return json.dumps({"ok": True, "thread": {"parent": _brief_message(found["parent"]),
+                                                      "replies": [_brief_message(m) for m in found["replies"]]}})
         if not channel:
             return json.dumps({"ok": False, "error": "channel is required"})
         try:
@@ -69,9 +91,7 @@ def herd_read_channel(args: dict, **kwargs: Any) -> str:
         messages = store.list_messages(found["id"], limit=limit)
         return json.dumps({
             "ok": True, "channel": _brief_channel(found),
-            "messages": [{"author": m["author_name"], "author_type": m["author_type"],
-                          "from_machine": m["gateway_name"], "at": m["created_at"], "text": m["content"]}
-                         for m in messages],
+            "messages": [_brief_message(m) for m in messages],
         })
     except Exception as exc:  # noqa: BLE001
         return _fail(exc)

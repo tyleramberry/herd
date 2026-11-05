@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS messages (
     gateway_id TEXT NOT NULL,
     gateway_name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    thread_parent_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at, id);
 CREATE TABLE IF NOT EXISTS participants (
@@ -149,6 +150,10 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         if key in _initialized:
             return
         conn.executescript(_SCHEMA)
+        # CREATE TABLE IF NOT EXISTS never adds columns to an existing table: migrate older DBs.
+        if "thread_parent_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
+            conn.execute("ALTER TABLE messages ADD COLUMN thread_parent_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_parent_id)")
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
             "VALUES (?, ?, '', 0, '[]', ?)",
@@ -360,7 +365,16 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
 # Messages
 # ---------------------------------------------------------------------------
 
-_MESSAGE_COLS = "seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, created_at"
+_MESSAGE_COLS = ("seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, "
+                 "created_at, thread_parent_id")
+# Same columns qualified for the reply-count queries, plus the per-message thread summary.
+_MESSAGE_SELECT = (
+    ", ".join("m." + c.strip() for c in _MESSAGE_COLS.split(","))
+    + ", (SELECT COUNT(*) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
+    " AS reply_count"
+    ", (SELECT MAX(r.created_at) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
+    " AS last_reply_at"
+)
 
 
 def _notify(event: str, payload: dict) -> None:
@@ -374,7 +388,7 @@ def _notify(event: str, payload: dict) -> None:
 
 
 def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
-                 author_name: Any = None, message_id: Any = None) -> dict:
+                 author_name: Any = None, message_id: Any = None, thread_parent_id: Any = None) -> dict:
     text = str(content or "")
     if not text.strip():
         raise HerdError(422, "Message is empty.")
@@ -390,17 +404,21 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
     mid = str(message_id or "").strip() or str(uuid.uuid4())
     if len(mid) > 64:
         raise HerdError(422, "Message id is too long.")
+    tid = str(thread_parent_id or "").strip() or None
     row = {
         "id": mid, "channel_id": channel["id"], "author_type": author_type,
         "author_name": _clean_name(author_name, default_author), "gateway_id": me["gateway_id"],
         "gateway_name": me["display_name"], "content": text, "created_at": _now(),
+        "thread_parent_id": None,
     }
     with connect() as conn:
+        if tid:
+            row["thread_parent_id"] = _thread_root_id(conn, tid, channel["id"])
         _touch_participant(conn, me["gateway_id"], me["display_name"], True)
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-            "gateway_name, content, created_at) VALUES (:id, :channel_id, :author_type, :author_name, "
-            ":gateway_id, :gateway_name, :content, :created_at)", row)
+            "gateway_name, content, created_at, thread_parent_id) VALUES (:id, :channel_id, :author_type, "
+            ":author_name, :gateway_id, :gateway_name, :content, :created_at, :thread_parent_id)", row)
         inserted = bool(cur.rowcount)
         stored = dict(conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (mid,)).fetchone())
     if not inserted:
@@ -410,13 +428,62 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
         if stored["channel_id"] != channel["id"]:
             raise HerdError(409, f"Message id '{mid}' already exists in another channel.")
         return stored
-    _notify("message.created", {"channel_id": stored["channel_id"], "id": stored["id"]})
+    _notify("message.created", {"channel_id": stored["channel_id"], "id": stored["id"],
+                                "thread_parent_id": stored["thread_parent_id"]})
     request_sync()
     return stored
 
 
+def _no_such_message(message_id: str) -> HerdError:
+    return HerdError(404, f"No message with id '{message_id[:64]}' to reply to.")
+
+
+def _thread_root_id(conn: sqlite3.Connection, message_id: str, channel_id: Optional[str] = None) -> str:
+    """The root of the thread containing ``message_id`` (itself if it is top-level).
+
+    With ``channel_id``, the message must live in that channel (replying across channels is refused).
+    A broken chain (an ancestor that never arrived) stops at the last row we do have.
+    """
+    row = conn.execute("SELECT id, channel_id, thread_parent_id FROM messages WHERE id = ?",
+                       (message_id,)).fetchone()
+    if not row:
+        raise _no_such_message(message_id)
+    if channel_id is not None and row["channel_id"] != channel_id:
+        raise HerdError(422, "You can only reply in a thread within the same channel.")
+    seen = {row["id"]}
+    while row["thread_parent_id"] and row["thread_parent_id"] not in seen:
+        up = conn.execute("SELECT id, channel_id, thread_parent_id FROM messages WHERE id = ?",
+                          (row["thread_parent_id"],)).fetchone()
+        if not up:
+            break
+        seen.add(up["id"])
+        row = up
+    return row["id"]
+
+
+def get_message(message_id: str) -> Optional[dict]:
+    with connect() as conn:
+        row = conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?",
+                           (str(message_id or "").strip(),)).fetchone()
+    return dict(row) if row else None
+
+
+def list_thread(parent_id: str) -> dict:
+    """The thread containing ``parent_id`` (a root or any reply): ``{"parent", "replies"}``, oldest first."""
+    pid = str(parent_id or "").strip()
+    with connect() as conn:
+        root_id = _thread_root_id(conn, pid)
+        parent = dict(conn.execute(f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.id = ?",
+                                   (root_id,)).fetchone())
+        replies = conn.execute(
+            f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.thread_parent_id = ? AND m.channel_id = ? "
+            "ORDER BY m.created_at, m.id", (root_id, parent["channel_id"])).fetchall()
+    return {"parent": parent, "replies": [dict(r) for r in replies]}
+
+
 def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: int = 200) -> list[dict]:
-    """Messages in a channel, oldest first (newest last). ``after_seq`` is a local cursor, immune
+    """Top-level messages in a channel, oldest first (newest last), each with ``reply_count`` and
+    ``last_reply_at``; replies live in ``list_thread``. ``after_seq`` is a local cursor, immune
     to clock skew between gateways; without it, the latest ``limit`` messages are returned."""
     channel = resolve_channel(channel_ref)
     if not channel:
@@ -425,12 +492,14 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
     with connect() as conn:
         if after_seq is not None:
             rows = conn.execute(
-                f"SELECT {_MESSAGE_COLS} FROM messages WHERE channel_id = ? AND seq > ? "
-                "ORDER BY created_at, id LIMIT ?", (channel["id"], int(after_seq), limit)).fetchall()
+                f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.channel_id = ? AND m.seq > ? "
+                "AND m.thread_parent_id IS NULL ORDER BY m.created_at, m.id LIMIT ?",
+                (channel["id"], int(after_seq), limit)).fetchall()
         else:
             rows = conn.execute(
-                f"SELECT * FROM (SELECT {_MESSAGE_COLS} FROM messages WHERE channel_id = ? "
-                "ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at, id",
+                f"SELECT * FROM (SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.channel_id = ? "
+                "AND m.thread_parent_id IS NULL ORDER BY m.created_at DESC, m.id DESC LIMIT ?) "
+                "ORDER BY created_at, id",
                 (channel["id"], limit)).fetchall()
     return [dict(r) for r in rows]
 
@@ -460,6 +529,7 @@ def _valid_message(m: Any) -> Optional[dict]:
             "gateway_id": str(m.get("gateway_id") or "")[:64],
             "gateway_name": _clean_name(m.get("gateway_name"), ""),
             "content": str(m.get("content") or ""), "created_at": str(m.get("created_at") or _now())[:40],
+            "thread_parent_id": str(m.get("thread_parent_id") or "")[:64],
         }
     except (KeyError, TypeError):
         return None
@@ -491,10 +561,29 @@ def ingest(batch: dict) -> int:
                 continue
             if not conn.execute("SELECT 1 FROM channels WHERE id = ?", (m["channel_id"],)).fetchone():
                 continue
+            tid = m.get("thread_parent_id")
+            if tid:
+                parent = conn.execute("SELECT id FROM messages WHERE id = ?", (tid,)).fetchone()
+                if parent is not None:
+                    try:
+                        # Same resolution as the local post path: a reply-to-a-reply is
+                        # flattened onto its root, and a parent in another channel is
+                        # refused (422).
+                        m["thread_parent_id"] = _thread_root_id(conn, tid, m["channel_id"])
+                    except HerdError:
+                        # A conforming peer never sends this (it flattens locally), but a
+                        # cross-channel parent can only come from a non-conforming one.
+                        # Stored, the row would render in no channel and no thread view —
+                        # TC-7.8: dropped on ingest, where the local path is a loud 422.
+                        continue
+                # Parent not here yet — a normal cross-gateway ordering artifact. The row
+                # is kept as an orphan (TC-7.4/7.7) and attaches to the thread when the
+                # parent arrives; dropping it would be silent data loss.
             cur = conn.execute(
                 "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-                "gateway_name, content, created_at) VALUES (:id, :channel_id, :author_type, :author_name, "
-                ":gateway_id, :gateway_name, :content, :created_at)", m)
+                "gateway_name, content, created_at, thread_parent_id) VALUES (:id, :channel_id, "
+                ":author_type, :author_name, :gateway_id, :gateway_name, :content, :created_at, "
+                "NULLIF(:thread_parent_id, ''))", m)
             if cur.rowcount:
                 inserted += 1
                 touched.add(m["channel_id"])
