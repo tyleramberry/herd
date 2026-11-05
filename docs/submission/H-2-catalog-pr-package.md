@@ -1,4 +1,4 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v1, Nov 5)
+# H-2 — Catalog PR Package: Herd (DRAFT v2, Nov 5 — reconciled with Smith's PR #4 surface)
 
 > **Status: PREPARED ONLY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
@@ -12,21 +12,22 @@ description: >-
   Multiplayer Hermes — channels and DMs where humans and their agents work
   together across machines, inside the Hermes desktop app.
 repo: https://github.com/tyleramberry/herd
-sha: 543c1fe2e672862a548d72d5b3fa5ebbd4b1fa44  # PLACEHOLDER — must be the Nov 8 freeze commit (full 40-hex, verify with `git rev-parse HEAD` at pin time)
+sha: 543c1fe2e672862a548d72d5b3fa5ebbd4b1fa44  # PLACEHOLDER — per Foreman: pin = actual Nov 8 head of main AFTER review+sign-off. Candidate lineage: PR #4 @ 988585ff94c48344243a10c5ed5b79bfa3c2c86a
 tier: community
 category: platform
 maintainer: tyleramberry
-version: "0.1.0"  # QUOTED per schema; must match plugin.yaml at pinned commit — verify at freeze
-requires_hermes: ">=0.19"  # TODO: set to actual floor once plugin.yaml exists; must match plugin.yaml (rule 14)
+version: "0.1.0"  # QUOTED per schema; matches plugin.yaml at PR #4 (verified with Smith) — re-verify at freeze
+requires_hermes: ">=0.19"  # TODO(FIX IN REPO): plugin.yaml declares NO floor — rule 14 wants the same floor in BOTH plugin.yaml and the catalog entry. Ask Smith to add requires_hermes to plugin.yaml (PR #4 or follow-up); then set the catalog value to match exactly.
 # platforms: omit unless plugin is macOS-only
 # subdir: omit (plugin at repo root)
 capabilities:
-  # TODO: must match what the plugin actually registers at the pinned commit (rule 6).
-  # Pull the exact tools/hooks/middleware/requires_env list from plugin.yaml at freeze.
-  tools: []       # FILL FROM plugin.yaml
-  hooks: []       # FILL FROM plugin.yaml
-  middleware: []  # FILL FROM plugin.yaml
-  requires_env: []  # e.g. API_SERVER_KEY — confirm whether env or config_schema secret (rule 11)
+  # Verified against PR #4 plugin.yaml + runtime registration (Smith, Nov 5) — rule 6.
+  tools:
+    - herd_post
+    - herd_list_channels
+  hooks: []        # none registered
+  middleware: []   # none registered
+  requires_env: [] # none declared; no config_schema secrets
 # image / screenshots: pin to the entry's commit (raw.githubusercontent.com/tyleramberry/herd/<sha>/...)
 #   — add after the Nov 8 recording session; screenshots also satisfy the PR-description requirement
 docs_url: https://github.com/tyleramberry/herd#readme
@@ -48,25 +49,38 @@ each other; both humans see the same thread. Built for the Nous Research
 Hermes Agent Plugin Hackathon (Nov 2026).
 
 ### Hermes surfaces used
-<!-- FILL AT FREEZE — enumerate exactly what the pinned tree registers, e.g.: -->
-- Tools: `hermes peer add`, … (exact tool names from plugin.yaml)
-- Hooks/middleware: TBD
-- Desktop plugin surface (desktop/plugin.js) via the plugin SDK only
+<!-- Verified against PR #4 (988585ff94c48344243a10c5ed5b79bfa3c2c86a) — Smith, Nov 5 -->
+- Tools (toolset "herd"): `herd_post`, `herd_list_channels`
+- Hooks: none. Middleware: none. Slash commands: none.
+- Desktop surface: `desktop/plugin.js` via the plugin SDK only; dashboard backend
+  mounted in-gateway at `/api/plugins/herd/` (no separate process)
 
 ### Rule 13 disclosures
-<!-- Keep only lines that are true at the pinned commit; delete the rest. -->
-- **Network calls:** Herd runs its own gateway/relay server and communicates
-  peer-to-peer over the network to the gateways you configure (`--url`). No
-  third-party services. <!-- VERIFY: does anything else phone home? -->
-- **Long-running background processes:** the gateway/API server runs for the
-  lifetime of the Hermes session to receive peer connections. <!-- VERIFY -->
-- **Stored credentials:** peer API keys (`API_SERVER_KEY`) are stored by
-  Hermes's secret route (`agent.secret_scope.get_secret`) — not read from
-  .env or any other credential store. <!-- VERIFY implementation (rule 11) -->
-- **Reads outside plugin data:** none. <!-- VERIFY -->
-- **Shell commands:** `hermes peer add` is a Hermes CLI command, not a plugin
-  shell-out. <!-- VERIFY no subprocess usage -->
+<!-- As confirmed by Smith for the PR #4 tree; re-verify at freeze. -->
+- **Execution model:** the plugin runs inside the Hermes gateway process
+  (dashboard backend mount). No subprocesses. No long-lived background process
+  of its own.
+- **Network calls:** none in the pinned Day-1 commit. The desktop half talks
+  only to its own `/api/plugins/herd/` namespace and the host event stream.
+  Cross-gateway sync (between the two `hermes peer`-configured gateways) is the
+  only planned egress — disclose it explicitly once it exists at the pinned
+  commit, and state it goes only to gateways the user configured.
+- **Secrets / credentials:** none. No `requires_env`, no `config_schema`
+  secret-typed fields, no use of `agent.secret_scope.get_secret`. Known item
+  pending the config_schema fix (below): one direct read of the non-secret
+  `HERMES_GATEWAY_ID` env var (dashboard/plugin_api.py:49), used as the
+  gateway's logical identity, defaulting to `"local"`.
+- **Reads outside plugin data:** none.
+- **Shell commands:** none.
 - **Telemetry:** none. Opt-in telemetry: n/a.
+
+### Known pre-open fixes (do NOT open the PR before these land at the pin)
+1. **Rule 11 hygiene:** replace the direct `os.environ.get("HERMES_GATEWAY_ID")`
+   read with a `config_schema` setting (`gateway_id` under
+   `plugins.entries.herd.settings`). Recommended to fold into PR #4 while it is
+   still in Sentry QA — trivial change, removes the only env read from the tree.
+2. **Rule 14:** add `requires_hermes` to plugin.yaml (currently absent) and set
+   the catalog entry's floor to the exact same value.
 
 ### Screenshots
 <!-- Attach: (1) the peer-add command in the terminal, (2) both desktop apps
