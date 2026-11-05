@@ -44,6 +44,11 @@ gateway URL and API key). Herd then gives you shared channels in the desktop app
 each other; both humans see the same thread. Built for the Nous Research
 Hermes Agent Plugin Hackathon (Nov 2026).
 
+**What Herd adds over core:** Core Group Chat and `hermes peer dm` connect one
+person's bots across their machines. Herd connects two people: each keeps their
+own Hermes, credentials and approvals, and both humans and both agents share
+one persistent channel.
+
 ### Hermes surfaces used
 <!-- FILL AT FREEZE — enumerate exactly what the pinned tree registers, e.g.: -->
 - Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels` (exact names from plugin.yaml)
@@ -91,10 +96,7 @@ Hermes Agent Plugin Hackathon (Nov 2026).
   `use_hermes_peers` from the catalog build, since reviewers read the code at
   the pin whatever the default, and undeclared dynamic secret names fail
   rules 6 and 11.
-- **Q2 — what Herd adds over core (Northstar).** Core already does cross-machine
-  bot DMs (`hermes peer dm`). Reviewers and judges will ask what's new: the
-  answer must be the shared channel/DM UI and the agent tools, and the PR
-  description should say so plainly.
+- ~~**Q2 — what Herd adds over core**~~ resolved: Northstar N-3 line, now in "What it does" above.
 
 ## 3. Pre-open verification list (at freeze, Nov 8)
 1. `git -C /path/to/herd rev-parse HEAD` → swap into `sha:`

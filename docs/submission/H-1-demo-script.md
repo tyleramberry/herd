@@ -1,4 +1,4 @@
-# H-1 — Demo Video Script: Herd (DRAFT v4, Nov 5)
+# H-1 — Demo Video Script: Herd (DRAFT v5, Nov 5)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
@@ -9,11 +9,11 @@
 
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
-| 1 | 0:00–0:05 | Alone | SPLIT: two Macs, two Hermes apps | **HOOK:** "This is one agent. This is another. They've never met." |
-| 2 | 0:05–0:13 | One step | Left Mac, Hermes desktop: Settings > Plugins > Herd | "Connect them:" paste Riley's URL and key (key field masked), Save. One screen, no terminal. |
+| 1 | 0:00–0:05 | Two people, two Hermes | SPLIT: two Macs, Tyler and Riley each at their own Hermes | **HOOK:** "Hermes is single-player. We made it multiplayer." |
+| 2 | 0:05–0:13 | One step | Left Mac, Hermes desktop: Settings → Plugins → Herd → Add teammate | "Add Riley:" paste her address and key (key masked), Save. One side is enough. |
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Riley appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Riley replies → lands on the left. No VO, let it land. |
-| 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Riley: "check #general and take Tyler's task." Her agent reads the channel, does it **on her Mac**, posts the result back. VO: "She hands it to her agent. Her agent did the work, on her machine." |
+| 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Riley: "check #general and take Tyler's task." Her agent reads the channel; **Riley approves its action on camera (one click)**; it does the work on her Mac and posts the result back. VO: "She hands it to her agent. Her agent, her machine, her say." |
 | 6 | 0:50–0:62 | Back to him | Left, then wide | Tyler's agent reads the result from the channel and uses it. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
 | 7 | 0:62–0:75 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
 | 8 | 0:75–0:80 | End card | Static | Install one-liner + repo + @NousResearch |
@@ -29,10 +29,10 @@
 ## Copy
 
 **Post copy (short, punchy):**
-> My agent just handed a job to my wife's agent. Herd is multiplayer Hermes: channels and DMs where you, a teammate, and both of your agents work together across two machines. Built for the @NousResearch Hermes hackathon. 🐄
+> Hermes is single-player. We made it multiplayer. Herd is: channels and DMs where you, a teammate, and both of your agents work together across two machines. Built for the @NousResearch Hermes hackathon. 🐄
 
-**Alt hooks (test at rehearsal):**
-- "My agent just handed a job to my wife's agent." (Northstar's pick for the X post)
+**Alt hooks (test at rehearsal; never pitch agent-to-agent, core Group Chat already does that):**
+- "My wife and I just put our Hermes agents in the same channel." (Northstar's pick for the X post)
 - "Watch one agent do a job on a computer it's never touched."
 
 ## Rehearsal checklist (for @sentry)
@@ -54,7 +54,8 @@ connect form under Settings > Plugins > Herd. What Herd adds, and what the video
 post to. Shot 4 should be shot so it is obviously not a terminal DM.
 
 ## Open items
-- ~~Northstar N-2 beats~~ merged into v3 (PR #5)
+- ~~Northstar N-2 beats~~ merged (PR #5); v5 adds the people-first hook and Riley's on-camera approval (core Group Chat already does agent-to-agent, Sentry CA-8)
+- **Pending (Northstar + Smith):** auto-respond on @mention is being sized. If it ships, shot 5 drops "Riley tells her agent" and becomes "Tyler @mentions Riley's agent", but Riley's approval click stays
 - ~~Shot 2 CLI vs in-app form~~ resolved: Settings form (Sentry Q-3, PR #8). Northstar: N-2 beat 2 and README "Setup with a teammate" should match
 - **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
 - Confirm gateway URL + API_SERVER_KEY handling for the two-Mac demo (Foreman/Smith)
