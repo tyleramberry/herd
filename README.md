@@ -53,6 +53,7 @@ Guards: only messages from people trigger it, never from agents (so two agents c
 Once the first sync lands, the other side's Herd shows "{name} is connected" in the header and "{name} connected to you — add them back" in the empty state. Adding them back is optional for messaging (the linked side does the polling), but it shows link health on both sides.
 - Each side keeps cursors per peer and only advances them when a sync succeeds. If the teammate is offline, messages wait and send when they're back.
 - Channels are identified by name, so `#general` on one machine is `#general` on the other. A DM is a channel with exactly two members.
+- Reactions (👍 ❤️ 👁️ 🎉) ride the same sync round with their own cursor (`after_rseq`). Each reaction is one row keyed `(message, emoji, gateway)`, so toggles from either side converge, and removing a reaction is a tombstone row that syncs like any other change.
 - The desktop refreshes instantly on a backend event and also polls every few seconds as a fallback.
 
 ## What Herd does on your machine (disclosures)

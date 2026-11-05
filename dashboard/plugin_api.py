@@ -87,6 +87,11 @@ def post_message(channel_id: str, body: dict[str, Any]):
                  message_id=body.get("id"))
 
 
+@router.post("/channels/{channel_id}/messages/{message_id}/reactions")
+def post_reaction(channel_id: str, message_id: str, body: dict[str, Any]):
+    return _call(store.toggle_reaction, channel_id, message_id, body.get("emoji"))
+
+
 @router.get("/participants")
 def get_participants():
     return _call(store.list_participants)
