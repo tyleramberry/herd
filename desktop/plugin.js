@@ -39,6 +39,7 @@ const KEYS = {
 let rest = null
 const selection = { page: atom(null), pane: atom(null) }
 const composing = { page: atom(null), pane: atom(null) } // null | 'channel' | 'dm'
+const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown open
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -202,20 +203,53 @@ function NewDmPicker({ onDone }) {
 // Channel list
 // ---------------------------------------------------------------------------
 
-function SectionHeader({ label, action, onAction }) {
-  return jsxs('div', {
+function SectionHeader({ label }) {
+  return jsx('div', {
     className: 'flex items-center justify-between px-1 pt-1',
+    children: jsx('span', {
+      className: 'text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary)',
+      children: label
+    })
+  })
+}
+
+// Single '+' affordance with a two-item dropdown. Outside-click closes via a transparent backdrop;
+// Escape closes via the focused menu (the plugin lint forbids document/window listeners).
+function PlusMenu({ $open, onPick }) {
+  const open = useValue($open)
+  const close = () => $open.set(false)
+  const item = (label, mode) =>
+    jsx('button', {
+      type: 'button',
+      onClick: () => {
+        close()
+        onPick(mode)
+      },
+      className: 'rounded-[3px] px-2 py-1 text-left text-xs text-(--ui-text-secondary) hover:text-(--ui-accent)',
+      children: label
+    })
+  return jsxs('div', {
+    className: 'relative flex justify-end px-1',
     children: [
-      jsx('span', {
-        className: 'text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary)',
-        children: label
-      }),
       jsx('button', {
         type: 'button',
-        onClick: onAction,
-        className: 'text-[0.6875rem] text-(--ui-text-tertiary) hover:text-(--ui-accent)',
-        children: action
-      })
+        'aria-label': 'New',
+        onClick: () => $open.set(!open),
+        className:
+          'flex size-5 items-center justify-center rounded-[3px] text-sm leading-none text-(--ui-text-tertiary) hover:text-(--ui-accent)',
+        children: '+'
+      }),
+      open ? jsx('div', { className: 'fixed inset-0 z-10', onMouseDown: close }) : null,
+      open
+        ? jsxs('div', {
+            tabIndex: -1,
+            autoFocus: true,
+            onKeyDown: e => e.key === 'Escape' && close(),
+            className:
+              'absolute right-1 top-6 z-20 flex min-w-32 flex-col gap-0.5 rounded-[3px] border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) p-1 outline-none',
+            children: [item('New channel', 'channel'), item('New message', 'dm')]
+          })
+        : null
     ]
   })
 }
@@ -238,7 +272,7 @@ function ChannelButton({ channel, label, selected, onSelect }) {
   })
 }
 
-function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composing }) {
+function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composing, $menu }) {
   const mode = useValue($composing)
   const setMode = value => $composing.set(value)
   const done = id => {
@@ -252,12 +286,13 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
       ? 'flex max-h-56 shrink-0 flex-col gap-1 overflow-y-auto border-b border-(--ui-stroke-secondary) p-2'
       : 'flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-(--ui-stroke-secondary) p-2',
     children: [
-      jsx(SectionHeader, { label: 'Channels', action: 'New channel', onAction: () => setMode(mode === 'channel' ? null : 'channel') }),
+      jsx(PlusMenu, { $open: $menu, onPick: setMode }),
+      jsx(SectionHeader, { label: 'Channels' }),
       mode === 'channel' ? jsx(NewChannelForm, { onDone: done }) : null,
       ...rooms.map(ch =>
         jsx(ChannelButton, { channel: ch, label: '# ' + ch.name, selected: ch.id === selectedId, onSelect }, ch.id)
       ),
-      jsx(SectionHeader, { label: 'Direct messages', action: 'New message', onAction: () => setMode(mode === 'dm' ? null : 'dm') }),
+      jsx(SectionHeader, { label: 'Direct messages' }),
       mode === 'dm' ? jsx(NewDmPicker, { onDone: done }) : null,
       ...dms.map(ch =>
         jsx(ChannelButton, { channel: ch, label: dmLabel(ch, selfId), selected: ch.id === selectedId, onSelect }, ch.id)
@@ -403,6 +438,7 @@ function NoTeammate() {
 function HerdView({ compact }) {
   const $selected = compact ? selection.pane : selection.page
   const $composing = compact ? composing.pane : composing.page
+  const $menu = compact ? plusMenu.pane : plusMenu.page
   const selectedId = useValue($selected)
   const statusQuery = useStatus()
   const status = statusQuery.data
@@ -436,11 +472,12 @@ function HerdView({ compact }) {
             selectedId: selected ? selected.id : null,
             onSelect: id => $selected.set(id),
             compact,
-            $composing
+            $composing,
+            $menu
           }),
           selected
             ? jsx(MessageView, { channel: selected, selfId, status }, selected.id)
-            : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with New channel.' })
+            : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
         ]
       })
     ]
@@ -470,6 +507,8 @@ export default {
     selection.pane.set(null)
     composing.page.set(null)
     composing.pane.set(null)
+    plusMenu.page.set(false)
+    plusMenu.pane.set(false)
     ctx.onDispose(() => {
       rest = null
     })
