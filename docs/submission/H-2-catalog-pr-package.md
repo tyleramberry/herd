@@ -1,4 +1,4 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v2, Nov 5)
+# H-2 — Catalog PR Package: Herd (DRAFT v3, Nov 5)
 
 > **Status: PREPARED ONLY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
@@ -17,7 +17,7 @@ tier: community
 category: desktop  # shelf options: desktop|memory|platform|web|tools|voice|automation|models|general. Herd is a desktop pane, so "desktop" (was "platform", which is the messaging-platform shelf)
 maintainer: tyleramberry
 version: "0.1.0"  # QUOTED; must match plugin.yaml at the pinned commit
-requires_hermes: ">=0.22.0"  # Sentry, Nov 5: oldest release verified to have every core API Herd uses (Tyler's Mac runs 0.22.0). Smith must set the same floor in plugin.yaml (rule 14)
+requires_hermes: ">=0.22.0"  # Sentry, Nov 5: oldest release verified to have every core API Herd uses (Tyler's Mac runs 0.22.0). VERIFIED Nov 5: plugin.yaml on main carries the same floor (PRs #10/#11, rule 14)
 docs_url: https://github.com/tyleramberry/herd#readme
 # platforms: omit unless macOS-only
 # subdir: omit (plugin at repo root)
@@ -28,10 +28,10 @@ screenshots:  # up to 6, GitHub hosts only, pinned to the same sha
 capabilities:
   # Key names per the live entry schema: provides_tools / provides_hooks / provides_middleware / requires_env
   # (draft v1 used tools/hooks/middleware, which is wrong). Must match what the plugin registers at the pin (rule 6).
-  provides_tools: [herd_list_channels, herd_post, herd_read_channel]  # confirmed by Smith Nov 5; re-check at freeze
-  provides_hooks: []        # none (Smith)
-  provides_middleware: []   # none (Smith)
-  requires_env: []          # none: the peer key is a config_schema secret (HERD_PEER_KEY), not requires_env
+  provides_tools: [herd_list_channels, herd_post, herd_read_channel]  # VERIFIED vs plugin.yaml on main (PRs #9, #13); re-check at freeze
+  provides_hooks: []        # VERIFIED none in plugin.yaml on main
+  provides_middleware: []   # VERIFIED none in plugin.yaml on main
+  requires_env: []          # VERIFIED none: the peer key is a config_schema secret (HERD_PEER_KEY), not requires_env
 ```
 
 ## 2. PR description (draft)
@@ -50,22 +50,24 @@ own Hermes, credentials and approvals, and both humans and both agents share
 one persistent channel.
 
 ### Hermes surfaces used
-<!-- FILL AT FREEZE — enumerate exactly what the pinned tree registers, e.g.: -->
-- Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels` (exact names from plugin.yaml)
-- `config_schema` settings (peer_name, peer_url, peer_key secret), rendered by Desktop under Settings > Plugins > Herd
-- No hooks, no middleware, no CLI commands
+<!-- v3: verified against plugin.yaml + tree on main (PRs #9–#13 merged). Re-check at freeze. -->
+- Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels` (exact names from plugin.yaml — VERIFIED)
+- Chat command: `/herd-listen` (and `/herd-listen off`) registered via `ctx.register_command` — picks the chat that receives @mentions (S-7, PR #13)
+- Opt-in agent turns for @mention wake: teammate mention → `ctx.inject_message` (needs the user's `allow_gateway_injection` permission; off by default via `mention_wake: false`)
+- `config_schema` settings (display_name, peer_name, peer_url, peer_key secret, mention_wake), rendered by Desktop under Settings > Plugins > Herd
+- No hooks, no middleware, no CLI commands (`/herd-listen` is a plugin chat command, not CLI)
 - Desktop plugin surface (desktop/plugin.js) via the plugin SDK only
 
 ### Rule 13 disclosures
-<!-- Keep only lines that are true at the pinned commit; delete the rest. -->
-- **Network calls:** only to the one peer gateway configured in Herd's
-  settings. No third-party services. <!-- VERIFY at freeze: grep for any other outbound URL -->
-- **Long-running background processes:** while the plugin is enabled with a teammate configured, Herd pushes outgoing messages to the teammate's gateway and polls it for new messages about every 3 seconds. <!-- confirm interval at freeze -->
+<!-- v3: lines below verified against the tree on main (Nov 5); keep only lines true at the pinned commit at freeze. -->
+- **Network calls:** only to the one teammate gateway URL entered in settings, at `POST <url>/herd/v1/sync`. No third-party services. <!-- grep verified Nov 5; re-run at freeze -->
+- **Long-running background processes:** a sync loop runs inside the gateway process while the API server is up — pushes outgoing messages and polls the teammate's gateway every 3 seconds (does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds. <!-- intervals VERIFIED vs README/tree Nov 5 -->
+- **Agent turns (opt-in only):** if the user enables @mention wake (`mention_wake: true` + `allow_gateway_injection: true`), a teammate's mention is injected into a user-chosen chat via Hermes's `inject_message`. Off by default.
 - **Stored credentials:** one peer API key, declared as a `config_schema`
   secret (`peer_key`, env `HERD_PEER_KEY`) and stored by Hermes; Herd reads it
   only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
 - **Reads outside plugin data:** none.
-- **Shell commands:** none. <!-- VERIFY no subprocess usage; if Herd shells out to `hermes peer dm`, disclose it here -->
+- **Shell commands:** none. <!-- VERIFIED Nov 5: no subprocess/os.system/eval/os.environ usage in tools.py, __init__.py, schemas.py -->
 - **Local data:** channel history in a SQLite file under the plugin's data dir.
 - **Telemetry:** none.
 
@@ -82,8 +84,8 @@ one persistent channel.
 - [ ] One file added: `plugin-catalog/herd.yaml`
 - [ ] Full 40-char SHA pin (freeze commit, not placeholder)
 - [x] `version` quoted
-- [ ] Rule 13 disclosures in description AND mirrored in README
-- [ ] `capabilities` match plugin.yaml at pin
+- [x] Rule 13 disclosures in description AND mirrored in README <!-- README verified Nov 5: disclosures section incl. @mention-wake/inject_message line -->
+- [x] `capabilities` match plugin.yaml at pin <!-- verified Nov 5 vs main; re-check at freeze -->
 - [ ] Screenshots attached (PR body) and listed in `screenshots:`
 - [ ] `hermes plugins validate --install-deps` green locally
 - [ ] CI green
@@ -97,6 +99,9 @@ one persistent channel.
   the pin whatever the default, and undeclared dynamic secret names fail
   rules 6 and 11.
 - ~~**Q2 — what Herd adds over core**~~ resolved: Northstar N-3 line, now in "What it does" above.
+- ~~**Q3 — plugin.yaml missing requires_hermes**~~ resolved: plugin.yaml on main
+  now carries `requires_hermes: ">=0.22.0"` (PRs #10/#11) and the three tools.
+  Verified Nov 5 against `main` @ 8281abb.
 
 ## 3. Pre-open verification list (at freeze, Nov 8)
 1. `git -C /path/to/herd rev-parse HEAD` → swap into `sha:`
