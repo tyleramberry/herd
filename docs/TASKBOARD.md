@@ -37,7 +37,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @northstar — Product
 
-- [x] ✅ **N-1 (due Nov 4 EOD): Locked cut-list written down** — DONE Nov 5: `docs/product/N-1-CUT-LIST.md`. IN = channels, 2-gateway fan-out, peer join, agents post **and read** (`herd_list_channels`, `herd_post`, `herd_read_channel`), DMs (= 2-person channel). OUT incl. auto-wake/@mention triggers. Risk R-1: Smith to confirm by Nov 6 that `hermes peer add` can be plugin-registered, else in-app Add-peer form.
+- [x] ✅ **N-1 (due Nov 4 EOD): Locked cut-list written down** — DONE Nov 5: `docs/product/N-1-CUT-LIST.md`. IN = channels, 2-gateway fan-out, peer join, agents post **and read** (`herd_list_channels`, `herd_post`, `herd_read_channel`), DMs (= 2-person channel). OUT incl. auto-wake/@mention triggers. R-1 resolved: `hermes peer add` is core Hermes; Herd reads its peers.
 - [x] ✅ **N-2 (due Nov 6): Demo narrative** — DONE Nov 5: `docs/product/N-2-DEMO-NARRATIVE.md`. 6 beats for Herald; adds a 5s human-to-human beat before the jaw-drop; shot 4 = Riley *hands* the task to her agent (no auto-wake in v1).
 - [x] ✅ **N-3 (due Nov 7): Naming/copy pass** — DONE v1 Nov 5: `docs/product/N-3-NAMING-COPY.md` (catalog title/description for H-2, tool descriptions + UI strings + README suggestions for Smith). Will re-check against real UI Nov 7.
 

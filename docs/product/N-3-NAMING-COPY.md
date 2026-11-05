@@ -65,5 +65,5 @@ Drop "inside the Hermes desktop app" — the catalog already implies it.
    needs README and PR description to match).
 6. Replace "Under active construction. See `docs/` for architecture." with a
    status line once SPINE is green.
-7. Keep the install block as is. If R-1 (N-1) lands on the in-app form, swap
-   the "Setup with a teammate" block for 3 numbered steps.
+7. Keep the install and "Setup with a teammate" blocks; add a note that
+   running `hermes peer add` on one side connects both directions.

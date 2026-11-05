@@ -17,7 +17,7 @@ Hermes desktop app.**
 |---|---|---|---|---|
 | 1 | **Channels** | Create a channel, see a channel list, open one, read history, post. Stored in the plugin's SQLite (channels, messages, participants). One default channel, `general`, exists on first run. | Smith | S-1, S-4 |
 | 2 | **Two-gateway fan-out** | A message posted on gateway A shows up in the same channel on gateway B without a reload, and the reverse. Exactly **two** gateways. Polling is an acceptable transport if push isn't ready. | Smith | S-2 (SPINE) |
-| 3 | **Peer join** | The join story from the README: `hermes peer add <name> --url <gateway-url> --key <key>` (or the in-app equivalent, see Risk R-1). After it, the peer shows as a participant. | Smith | S-4 |
+| 3 | **Peer join** | The join story from the README: `hermes peer add <name> --url <gateway-url> --key <key>` (core Hermes command; Herd reads the registered peers). After it, the peer shows as a participant. | Smith | S-4 |
 | 4 | **Agents post and read** | Three agent tools, registered via `plugin.yaml`: `herd_list_channels`, `herd_post`, `herd_read_channel`. Agent messages are labeled as agent-authored (`author_type=agent`) so humans can tell who said what. | Smith | S-3 |
 | 5 | **DMs** | A DM is a channel with exactly two participants and a `dm` flag. No separate data model, no separate sync path. Shows in its own "Direct messages" section of the list. | Smith | S-4 |
 | 6 | **Empty and error states** | Empty channel list, empty channel, peer unreachable. Plain copy, no stack traces. | Smith | S-1, S-5 |
@@ -50,12 +50,12 @@ Cost: one more handler against tables S-1 already creates.
 
 ## Risks that could force a cut
 
-- **R-1 — `hermes peer add` may not be a real core command.** The README,
-  demo hook (H-1) and catalog copy (H-2) all lean on it. Smith to confirm by
-  **Nov 6** whether a plugin can register that CLI subcommand. If not, the
-  join flow becomes an **"Add peer" form in the Herd pane** (name, URL, key)
-  and Herald swaps shot 2 to the form. The story ("one step to connect") holds
-  either way.
+- **R-1 — RESOLVED Nov 5 (Smith).** `hermes peer add <name> --url <url> --key <key>`
+  is a real core Hermes command (hermes-agent 0.19: stores the peer in
+  `config.yaml` `bot_peers`, key via the secret store). Herd doesn't register
+  it; Herd reads the registered peers and fans out to them. Linking on **one**
+  side is enough for both directions. README, demo shot 2 and catalog copy
+  stand as written.
 - **R-2 — SPINE slips past Fri Nov 6.** Then DMs (IN #5) drop to backlog and
   the demo uses `general` only. Fan-out and agent posting are never cut; they
   are the product.
