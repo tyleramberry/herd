@@ -17,7 +17,7 @@ tier: community
 category: platform
 maintainer: tyleramberry
 version: "0.1.0"  # QUOTED per schema; matches plugin.yaml at PR #4 (verified with Smith) — re-verify at freeze
-requires_hermes: ">=0.19"  # TODO(FIX IN REPO): plugin.yaml declares NO floor — rule 14 wants the same floor in BOTH plugin.yaml and the catalog entry. Ask Smith to add requires_hermes to plugin.yaml (PR #4 or follow-up); then set the catalog value to match exactly.
+requires_hermes: ">=0.22.0"  # Smith's verified floor (gates ran on v0.22.0+159); being added to plugin.yaml in PR #4 — catalog entry mirrors it exactly (rule 14). Re-verify against plugin.yaml at freeze head.
 # platforms: omit unless plugin is macOS-only
 # subdir: omit (plugin at repo root)
 capabilities:
@@ -77,10 +77,15 @@ Hermes Agent Plugin Hackathon (Nov 2026).
 ### Known pre-open fixes (do NOT open the PR before these land at the pin)
 1. **Rule 11 hygiene:** replace the direct `os.environ.get("HERMES_GATEWAY_ID")`
    read with a `config_schema` setting (`gateway_id` under
-   `plugins.entries.herd.settings`). Recommended to fold into PR #4 while it is
-   still in Sentry QA — trivial change, removes the only env read from the tree.
-2. **Rule 14:** add `requires_hermes` to plugin.yaml (currently absent) and set
-   the catalog entry's floor to the exact same value.
+   `plugins.entries.herd.settings`). **IN FLIGHT (Smith, Nov 5):** delegated to
+   Claude Code on feat/scaffold inside PR #4 — env read removed, config_schema
+   `gateway_id` via `ctx.get_config()`, default `"local"`, plus a repo-wide test
+   asserting no `os.environ`/`getenv` in the Python half. All four gates re-run
+   before push.
+2. **Rule 14:** add `requires_hermes` to plugin.yaml. **IN FLIGHT (Smith):**
+   `">=0.22.0"` — the floor he can truthfully verify (gates ran against
+   install v0.22.0+159). Catalog entry set to mirror it exactly. Verify
+   plugin.yaml carries it at the freeze head.
 
 ### Screenshots
 <!-- Attach: (1) the peer-add command in the terminal, (2) both desktop apps
