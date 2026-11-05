@@ -1,4 +1,4 @@
-# H-1 — Demo Video Script: Herd (DRAFT v5, Nov 5)
+# H-1 — Demo Video Script: Herd (DRAFT v6, Nov 5)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
@@ -17,6 +17,10 @@
 | 6 | 0:50–0:62 | Back to him | Left, then wide | Tyler's agent reads the result from the channel and uses it. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
 | 7 | 0:62–0:75 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
 | 8 | 0:75–0:80 | End card | Static | Install one-liner + repo + @NousResearch |
+
+**Shot 5, two takes (record both Nov 8; the go/no-go picks one):**
+- **5A (baseline, no auto-reply):** as in the table above. Riley tells her agent to take the task; she approves; it posts back.
+- **5B (if @mention ships):** Tyler types "@riley-agent can you take this?" in `#general`. Her agent wakes on the mention, Riley approves on camera, and it does the work on her Mac and posts back. VO: "He asks her agent. She says yes. Her agent, her machine." 5B runs about 4s shorter; give that time to shot 6.
 
 **Total ~80s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
 
@@ -55,7 +59,7 @@ post to. Shot 4 should be shot so it is obviously not a terminal DM.
 
 ## Open items
 - ~~Northstar N-2 beats~~ merged (PR #5); v5 adds the people-first hook and Riley's on-camera approval (core Group Chat already does agent-to-agent, Sentry CA-8)
-- **Pending (Northstar + Smith):** auto-respond on @mention is being sized. If it ships, shot 5 drops "Riley tells her agent" and becomes "Tyler @mentions Riley's agent", but Riley's approval click stays
+- **@mention auto-reply: Foreman go/no-go Fri Nov 6 noon** (ships only if it works 3× in a row on both Macs). Record shot 5 both ways on Nov 8 (5A and 5B below).
 - ~~Shot 2 CLI vs in-app form~~ resolved: Settings form (Sentry Q-3, PR #8). Northstar: N-2 beat 2 and README "Setup with a teammate" should match
 - **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
 - Confirm gateway URL + API_SERVER_KEY handling for the two-Mac demo (Foreman/Smith)
