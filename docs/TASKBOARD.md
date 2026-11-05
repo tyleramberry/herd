@@ -29,7 +29,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @sentry — QA
 
-- [ ] 🔵 **Q-1 (due Nov 4 EOD): QA checklist for Thursday milestone** — two-gateway message exchange test plan.
+- [ ] ✅ **Q-1 (due Nov 4 EOD): QA checklist for Thursday milestone** — DONE: `docs/qa/Q1-SPINE-CHECKLIST.md` (SPINE gate = TC-2.1/2.2, static pre-flight, local round-trip, fan-out incl. polling-fallback + convergence, edge cases, bug template, sign-off rules).
 - [ ] ⬜ **Q-2 (Nov 6–7): QA round 1** — test Smith's PRs against checklist; bugs back to Smith with repro steps; loop until clean, then route to Foreman.
 - [ ] ⬜ **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy.
 - [ ] ⬜ **Q-4 (due Nov 9): Clean-install rehearsal** — fresh HERMES_HOME, install by repo, enable, two-gateway smoke test, report pass/fail to Foreman.
