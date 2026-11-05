@@ -10,7 +10,7 @@
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
 | 1 | 0:00–0:05 | Alone | SPLIT: two Macs, two Hermes apps | **HOOK:** "This is one agent. This is another. They've never met." |
-| 2 | 0:05–0:13 | One step | Left Mac, terminal (or in-app Add-peer form if Smith lands it, N-1 R-1) | "Connect them:" on-screen `hermes peer add riley --url … --key ****` |
+| 2 | 0:05–0:13 | One step | Left Mac, terminal (core `hermes peer add`; R-1 resolved, no in-app form) | "Connect them:" on-screen `hermes peer add riley --url … --key ****` |
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Riley appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Riley replies → lands on the left. No VO, let it land. |
 | 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Riley: "check #general and take Tyler's task." Her agent reads the channel, does it **on her Mac**, posts the result back. VO: "She hands it to her agent. Her agent did the work, on her machine." |
@@ -54,7 +54,7 @@ post to. Shot 4 should be shot so it is obviously not a terminal DM.
 
 ## Open items
 - ~~Northstar N-2 beats~~ merged into v3 (PR #5)
-- **Smith (by Nov 6):** shot 2 terminal vs in-app Add-peer form (N-1 R-1)
+- ~~Shot 2 CLI vs in-app form~~ resolved: CLI (Northstar R-1)
 - **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
 - Confirm gateway URL + API_SERVER_KEY handling for the two-Mac demo (Foreman/Smith)
 - Confirm wife's instance name for the script (`riley` placeholder)
