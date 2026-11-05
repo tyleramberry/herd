@@ -21,6 +21,11 @@ Hermes desktop app.**
 | 4 | **Agents post and read** | Three agent tools, registered via `plugin.yaml`: `herd_list_channels`, `herd_post`, `herd_read_channel`. Agent messages are labeled as agent-authored (`author_type=agent`) so humans can tell who said what. | Smith | S-3 |
 | 5 | **DMs** | A DM is a channel with exactly two participants and a `dm` flag. No separate data model, no separate sync path. Shows in its own "Direct messages" section of the list. | Smith | S-4 |
 | 6 | **Empty and error states** | Empty channel list, empty channel, peer unreachable. Plain copy, no stack traces. | Smith | S-1, S-5 |
+| 7 | **Two-way teammate visibility** *(added Nov 5, Tyler live-feedback)* | If only one side registered a teammate, the other side's pane shows a clear one-step fix, not "no teammate connected". | Smith | S-8 |
+| 8 | **@-mention autocomplete** *(added Nov 5, Tyler request)* | Typing `@` in the composer suggests taggable participants (humans + agents), keyboard navigable; selecting inserts a mention token that triggers S-7 wake. | Smith | S-9 |
+| 9 | **Single + button** *(added Nov 5, Tyler request)* | The New Message / New Channel buttons collapse into one `+` with a small menu. | Smith | S-10 |
+| 10 | **Threads** *(added Nov 5 — Tyler approved moving this from OUT to IN)* | Reply-in-thread like Slack; thread view from any message. | Smith | S-11 |
+| 11 | **Reactions** *(added Nov 5 — Tyler approved moving this from OUT to IN)* | Hover-to-react with 👍 ❤️ 👁️ 🎉; counts aggregate; cross-gateway like messages. | Smith | S-12 |
 
 ### Why `herd_read_channel` is in (scope addition vs. the original board)
 
@@ -31,7 +36,7 @@ Cost: one more handler against tables S-1 already creates.
 
 ## OUT (post-hackathon backlog, do not build before Nov 11)
 
-- Threads, reactions, edits/deletes, file sharing, rich embeds
+- Edits/deletes, file sharing, rich embeds
 - Presence / typing indicators, unread badges, notifications
 - Voice, video
 - Channel permissions, roles, private channels, invites/links
