@@ -92,6 +92,25 @@ class ReplaySemanticsTest(unittest.TestCase):
         # And a cursor at the last row returns nothing further.
         self.assertEqual(store.list_messages("general", after_seq=rows[-1]["seq"]), [])
 
+    def test_peer_ingest_replays_local_row_silently(self):
+        # Belt-and-suspenders pin (probe authored by Sentry, round 3): a peer echoing
+        # a locally-originated row back through handle_peer_sync must be a no-op —
+        # no duplicate row, no extra broadcast, no crash.
+        local = store.post_message("general", "local hello", message_id="local-uuid-1")
+        self.assertEqual(self._message_created_count(), 1)
+        chan = store.resolve_channel("general")
+        batch = {
+            "v": 1,
+            "from": {"gateway_id": "peer-gw", "display_name": "peer"},
+            "channels": [dict(chan, is_dm=0, members="")],
+            "messages": [dict(local, seq=999)],
+        }
+        result = store.handle_peer_sync(json.loads(json.dumps(batch)))
+        self.assertEqual(result["accepted"], 0)
+        rows = store.list_messages("general")
+        self.assertEqual([r["id"] for r in rows], ["local-uuid-1"])
+        self.assertEqual(self._message_created_count(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
