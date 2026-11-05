@@ -17,7 +17,7 @@ tier: community
 category: desktop  # shelf options: desktop|memory|platform|web|tools|voice|automation|models|general. Herd is a desktop pane, so "desktop" (was "platform", which is the messaging-platform shelf)
 maintainer: tyleramberry
 version: "0.1.0"  # QUOTED; must match plugin.yaml at the pinned commit
-requires_hermes: ">=0.22.0"  # Latest stable release (v2026.9.24 = 0.22.0), the version Tyler tests on. Must match plugin.yaml (rule 14)
+requires_hermes: ">=0.22.0"  # Sentry, Nov 5: oldest release verified to have every core API Herd uses (Tyler's Mac runs 0.22.0). Smith must set the same floor in plugin.yaml (rule 14)
 docs_url: https://github.com/tyleramberry/herd#readme
 # platforms: omit unless macOS-only
 # subdir: omit (plugin at repo root)
