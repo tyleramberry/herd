@@ -22,7 +22,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 - [ ] 🔵 **S-1 (due Nov 4 EOD): Scaffold unified package** — plugin.yaml, __init__.py, schemas.py, tools.py, plugin_api.py (SQLite: channels, messages, participants), desktop/plugin.js. Pane + route render live from backend, empty state visible. Read Desktop Plugin SDK + "One package, both SDKs" first. Implement via Claude Code Opus 5.5, verify its output. PR to main.
 - [ ] ⬜ **S-2 (due Nov 5): Two-gateway fan-out** — message posted on gateway A appears in channel view on gateway B. THE milestone; escalate to Foreman same night if slipping.
-- [ ] ⬜ **S-3 (due Nov 5): Agent-side tools** — herd_post_message, herd_list_channels (agents post to channels from Bot Chats); register via plugin.yaml per catalog rules.
+- [ ] ⬜ **S-3 (due Nov 5): Agent-side tools** — herd_post, herd_list_channels, herd_read_channel (names locked in N-1) (agents post to channels from Bot Chats); register via plugin.yaml per catalog rules.
 - [ ] ⬜ **S-4 (due Nov 6): Join/onboarding flow** — "hermes peer add" story in UI; channel-create + DM flows.
 - [ ] ⬜ **S-5 (due Nov 7): Fix Sentry's QA round-1 bugs**; `hermes plugins validate` + `doctor` clean; screenshots for catalog PR.
 - [ ] ⬜ **S-6 (Nov 8): Freeze** — bug fixes only.
@@ -37,9 +37,9 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## @northstar — Product
 
-- [ ] 🔵 **N-1 (due Nov 4 EOD): Locked cut-list written down** — channels, DMs, agent posting, 2-gateway fan-out. Everything else = post-hackathon. This file is the scope-creep yardstick.
-- [ ] ⬜ **N-2 (due Nov 6): Demo narrative** — the story beats for Herald's script (hook: "hermes peer add" join flow; payoff: two agents collaborating in one channel).
-- [ ] ⬜ **N-3 (due Nov 7): Naming/copy pass** — plugin name/description for catalog entry + README polish suggestions to Smith.
+- [x] ✅ **N-1 (due Nov 4 EOD): Locked cut-list written down** — DONE Nov 5: `docs/product/N-1-CUT-LIST.md`. IN = channels, 2-gateway fan-out, peer join, agents post **and read** (`herd_list_channels`, `herd_post`, `herd_read_channel`), DMs (= 2-person channel). OUT incl. auto-wake/@mention triggers. Join = Herd's own Add-teammate form (core peer registry off-limits per Q-3 CA-4). Positioning vs. core Group Chat added (CA-8): Herd connects people, not just bots.
+- [x] ✅ **N-2 (due Nov 6): Demo narrative** — DONE Nov 5: `docs/product/N-2-DEMO-NARRATIVE.md`. 6 beats for Herald; adds a 5s human-to-human beat before the jaw-drop; shot 4 = Riley *hands* the task to her agent (no auto-wake in v1).
+- [x] ✅ **N-3 (due Nov 7): Naming/copy pass** — DONE v1 Nov 5: `docs/product/N-3-NAMING-COPY.md` (catalog title/description for H-2, tool descriptions + UI strings + README suggestions for Smith). Will re-check against real UI Nov 7.
 
 ## @herald — Submission
 
