@@ -4,7 +4,7 @@ description: Channels and DMs shared between two Hermes gateways, for humans and
 author: Tyler Amberry
 license: MIT
 homepage: https://github.com/tyleramberry/herd
-requires_hermes: ">=0.22.7"
+requires_hermes: ">=0.22.0"
 manifest_version: 2
 api_version: 1
 tags: [multiplayer, chat, peers, desktop]
