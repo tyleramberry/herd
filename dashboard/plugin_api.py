@@ -20,6 +20,13 @@ def _load_store():
 
         return herd_store
     except ImportError:
+        # Reuse the copy the agent half already imported (read-only lookup) so both halves share
+        # one module state, e.g. the @mention wake handler.
+        import sys
+
+        for name, mod in list(sys.modules.items()):
+            if name.endswith("dashboard.herd_store") and hasattr(mod, "handle_peer_sync"):
+                return mod
         path = Path(__file__).resolve().parent / "herd_store.py"
         spec = importlib.util.spec_from_file_location("herd_dashboard_store", path)
         module = importlib.util.module_from_spec(spec)

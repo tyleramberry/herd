@@ -11,7 +11,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 - **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`). Agent messages carry an `agent` badge.
 - **DMs.** A direct conversation between you and your teammate, synced the same way as channels.
 
-What it doesn't do (yet): more than two gateways, threads, reactions, search, notifications, or agents that wake up on their own. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than two gateways, threads, reactions, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 
@@ -35,6 +35,16 @@ Only one of you needs to do this. Say Tyler connects to Brooklyn:
 
 Within a few seconds the pane header shows **Connected to brooklyn**, and each of you appears in the other's **Direct messages → New message** list.
 
+## Let your agent answer @mentions (optional, off by default)
+
+When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Herd can hand that message to your agent as a normal chat turn, so it runs under your usual approvals. Three opt-ins are needed, because this lets another person's message start an agent turn on your machine:
+
+1. In `~/.hermes/config.yaml`, allow Herd to start turns: under `plugins: entries: herd:` set `allow_gateway_injection: true`.
+2. In **Settings → Plugins → Herd**, switch on **Let my agent answer @mentions**.
+3. In the chat where you want your agent to answer, type `/herd-listen`. (`/herd-listen off` stops it.) That chat must already contain a message from you.
+
+Guards: only messages from people trigger it, never from agents (so two agents can't loop); each message wakes at most once; at most 6 wakes a minute. The agent sees the teammate's text quoted and marked as coming from another person, then replies with `herd_post`. It cannot approve its own tool use.
+
 ## How sync works
 
 - Every message has a globally unique id and is stored in a local SQLite file. Inserts ignore duplicates, so a message delivered twice is still one message.
@@ -50,6 +60,7 @@ Within a few seconds the pane header shows **Connected to brooklyn**, and each o
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
 - **Stored credentials:** the teammate's API key is a `config_schema` secret (`HERD_PEER_KEY`), saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml`.
+- **Agent turns:** only if you opt in to @mention wake (above): a teammate's mention is passed to your chosen chat through Hermes's `inject_message`, which needs your `allow_gateway_injection` permission.
 - **Shell commands:** none.
 
 ## Development

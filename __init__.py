@@ -82,6 +82,20 @@ def _wire_api_server(app, adapter) -> None:
     app.on_cleanup.append(_stop_sync_loop)
 
 
+def _listen_command(raw_args: str, session_key: str = "", **_kw) -> str:
+    """``/herd-listen`` (here) / ``/herd-listen off``: pick the chat that receives @mentions."""
+    store = _store()
+    if raw_args.strip().lower() in {"off", "stop", "none"}:
+        store.set_mention_target("")
+        return "Herd will no longer pass @mentions to an agent."
+    if not session_key:
+        return "Run /herd-listen inside the chat you want your agent to answer Herd mentions in."
+    store.set_mention_target(session_key)
+    on = "on" if store.wake_enabled() else "OFF (turn on \"Let my agent answer @mentions\" in Settings > Plugins > Herd)"
+    return ("Done. @mentions of you in Herd will be handed to this chat. "
+            f"Mention wake is {on}. It also needs allow_gateway_injection: true for herd in config.yaml.")
+
+
 def register(ctx):
     """Wire schemas to handlers and the peer endpoint. Never touches the network or the db."""
     ctx.register_tool(name="herd_list_channels", toolset="herd",
@@ -91,3 +105,11 @@ def register(ctx):
     ctx.register_tool(name="herd_read_channel", toolset="herd",
                       schema=schemas.HERD_READ_CHANNEL, handler=tools.herd_read_channel)
     ctx.register_platform_handler("api_server", _wire_api_server)
+    ctx.register_command("herd-listen", _listen_command,
+                         description="Let your agent in this chat answer Herd @mentions (or: off)",
+                         args_hint="[off]")
+
+    def _wake(session_key: str, text: str) -> bool:
+        return bool(ctx.inject_message(text, role="user", session_key=session_key))
+
+    _store().WAKE_HANDLER = _wake

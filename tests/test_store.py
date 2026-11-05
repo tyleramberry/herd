@@ -299,5 +299,90 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual([m["text"] for m in read["messages"]], ["27", "28", "29"])
 
 
+class MentionWakeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        store.AUTO_SYNC = False
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "w.db"
+        self.settings = {"display_name": "Tyler", "mention_wake": True}
+        store.SETTINGS_OVERRIDE = self.settings
+        self.woken = []
+        store.WAKE_HANDLER = lambda key, text: self.woken.append((key, text)) or True
+        store._wake_times.clear()
+        store.set_mention_target("ses_abc")
+
+    def tearDown(self):
+        store.WAKE_HANDLER = None
+        store.DB_PATH_OVERRIDE = None
+        store.SETTINGS_OVERRIDE = None
+        self.tmp.cleanup()
+
+    def peer_msg(self, content, mid, author_type="human", gw="other-gw"):
+        return {"from": {"gateway_id": gw, "display_name": "Brooklyn"}, "channels": [], "messages": [
+            {"id": mid, "channel_id": "general", "author_type": author_type, "author_name": "Brooklyn",
+             "gateway_id": gw, "gateway_name": "Brooklyn", "content": content, "created_at": "2026-11-05T00:00:00Z"}]}
+
+    def test_handles(self):
+        self.assertEqual(store.mention_handles("Tyler Amberry"), {"tyler-amberry", "tyler-amberry-hermes"})
+        self.assertTrue(store.mentions_me("hey @tyler-hermes, run tests", "Tyler"))
+        self.assertTrue(store.mentions_me("@Tyler ping", "Tyler"))
+        self.assertFalse(store.mentions_me("email me at a@tyler.com", "Tyler"))
+        self.assertFalse(store.mentions_me("@tylerswift hi", "Tyler"))
+
+    def test_mention_wakes_once(self):
+        store.ingest(self.peer_msg("@tyler-hermes please check the build", "m1"))
+        store.ingest(self.peer_msg("@tyler-hermes please check the build", "m1"))  # duplicate delivery
+        self.assertEqual(len(self.woken), 1)
+        key, text = self.woken[0]
+        self.assertEqual(key, "ses_abc")
+        self.assertIn("> @tyler-hermes please check the build", text)
+        self.assertIn("approvals", text)
+
+    def test_agent_authored_never_wakes(self):
+        store.ingest(self.peer_msg("@tyler-hermes loop?", "m2", author_type="agent"))
+        self.assertEqual(self.woken, [])
+
+    def test_off_by_default_and_needs_target_and_mention(self):
+        store.ingest(self.peer_msg("no mention here", "m3"))
+        self.settings["mention_wake"] = False
+        store.ingest(self.peer_msg("@tyler hi", "m4"))
+        self.settings["mention_wake"] = True
+        store.set_mention_target("")
+        store.ingest(self.peer_msg("@tyler hi", "m5"))
+        self.assertEqual(self.woken, [])
+        self.assertEqual(len(store.list_messages("general")), 3)  # all still stored
+
+    def test_rate_cap(self):
+        for i in range(store.WAKE_MAX_PER_MINUTE + 4):
+            store.ingest(self.peer_msg("@tyler go", f"r{i}"))
+        self.assertEqual(len(self.woken), store.WAKE_MAX_PER_MINUTE)
+
+    def test_wake_failure_does_not_break_ingest(self):
+        def boom(k, t):
+            raise RuntimeError("x")
+        store.WAKE_HANDLER = boom
+        self.assertEqual(store.ingest(self.peer_msg("@tyler hi", "f1")), 1)
+
+    def test_listen_command_and_wiring(self):
+        herd, _s, _t = _pkg.load()
+        ctx = type("C", (), {})()
+        ctx.tools, ctx.platform, ctx.commands, ctx.injected = {}, {}, {}, []
+        ctx.register_tool = lambda **kw: None
+        ctx.register_platform_handler = lambda p, f: None
+        ctx.register_command = lambda name, h, **kw: ctx.commands.__setitem__(name, h)
+        ctx.inject_message = lambda c, role="user", *, session_key=None, origin=None: ctx.injected.append((session_key, c)) or True
+        herd.register(ctx)
+        out = ctx.commands["herd-listen"]("", session_key="ses_zzz")
+        self.assertIn("handed to this chat", out)
+        self.assertEqual(store.mention_target(), "ses_zzz")
+        store.ingest(self.peer_msg("@tyler hi", "w1"))
+        self.assertEqual(ctx.injected[0][0], "ses_zzz")
+        self.assertIn("Done", ctx.commands["herd-listen"]("", session_key="k") or "Done")
+        ctx.commands["herd-listen"]("off")
+        self.assertEqual(store.mention_target(), "")
+        self.assertIn("inside the chat", ctx.commands["herd-listen"](""))
+        store.WAKE_HANDLER = None
+
+
 if __name__ == "__main__":
     unittest.main()
