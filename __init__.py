@@ -25,6 +25,34 @@ def _store():
     return herd_store
 
 
+def _sync_pass(store) -> None:
+    """One background sync pass, run with this profile's secret scope bound.
+
+    Under Hermes's multiplex gateway ``agent.secret_scope.get_secret`` fails closed
+    for any task that does not carry a profile scope. A request handler inherits one
+    from its caller (which is why ``request_sync`` works); a task created at app
+    startup does not, so without this binding every pass resolved the peer key as
+    empty, wrote ``last_error`` and never synced. Best-effort: when the scope
+    machinery is unavailable (standalone runs, tests) the pass still runs.
+    """
+    token = None
+    reset = None
+    try:
+        from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+        token = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
+        reset = reset_secret_scope
+    except Exception:  # noqa: BLE001 — scope is an enhancement, never a hard requirement
+        logger.debug("herd: profile secret scope unavailable for the sync loop", exc_info=True)
+    try:
+        store.sync_all()
+    finally:
+        if token is not None and reset is not None:
+            reset(token)
+
+
 def _wire_api_server(app, adapter) -> None:
     """Add Herd's peer route to the api_server aiohttp app (called at connect, before freeze)."""
     from aiohttp import web
@@ -65,7 +93,7 @@ def _wire_api_server(app, adapter) -> None:
             store = _store()
             while True:
                 try:
-                    await asyncio.to_thread(store.sync_all)
+                    await asyncio.to_thread(_sync_pass, store)
                 except Exception:  # noqa: BLE001 — keep syncing through transient failures
                     logger.debug("herd: sync pass failed", exc_info=True)
                 await asyncio.sleep(SYNC_INTERVAL_S)
