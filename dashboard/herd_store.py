@@ -39,7 +39,7 @@ from typing import Any, Callable, Iterator, Optional
 PLUGIN_ID = "herd"
 DEFAULT_CHANNEL = "general"
 PEER_SYNC_PATH = "/herd/v1/sync"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2  # 2: messages may carry promoted_from (S-13); v1 peers ignore the field
 
 MAX_CONTENT = 20_000
 MAX_NAME = 64
@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS messages (
     gateway_name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    thread_parent_id TEXT
+    thread_parent_id TEXT,
+    promoted_from TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at, id);
 CREATE TABLE IF NOT EXISTS participants (
@@ -186,6 +187,8 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         if "thread_parent_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
             conn.execute("ALTER TABLE messages ADD COLUMN thread_parent_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_parent_id)")
+        if "promoted_from" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
+            conn.execute("ALTER TABLE messages ADD COLUMN promoted_from TEXT")
         # Pre-S-12 DBs have peer_state without the reaction cursors (CREATE IF NOT EXISTS won't add them).
         have = {r[1] for r in conn.execute("PRAGMA table_info(peer_state)").fetchall()}
         for col in ("push_rseq", "pull_rseq"):
@@ -347,6 +350,41 @@ def create_channel(name: Any, topic: Any = "") -> dict:
     return {**channel, "is_dm": False, "members": [], "message_count": 0, "last_message_at": None}
 
 
+def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
+    """Promote a DM into a new shared channel (S-13).
+
+    Creates an ordinary channel called ``name`` and copies the DM's top-level and reply messages
+    into it, oldest first, so the people (and agents) who join read the same history. The DM, its
+    messages and its sync cursors are untouched. Copies get fresh ids, keep the source author,
+    time and ``promoted_from`` (the DM id), and are stamped with this gateway as the sender so the
+    normal sync carries them to the peer. Reactions are not copied. Copies never wake an agent.
+    """
+    dm = resolve_channel(dm_ref)
+    if not dm or not dm["is_dm"]:
+        raise HerdError(404, "Pick a direct message to share.")
+    with connect() as conn:
+        src = conn.execute(
+            "SELECT id, author_type, author_name, gateway_name, content, created_at, thread_parent_id "
+            "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
+    if not src:
+        raise HerdError(422, "This conversation has no messages to share yet.")
+    channel = create_channel(name, topic)  # same name rules; 409 if it exists
+    me = identity()["gateway_id"]
+    ids = {r["id"]: f"p{i:06d}{uuid.uuid4().hex[:24]}" for i, r in enumerate(src)}
+    with connect() as conn:
+        for r in src:
+            parent = ids.get(r["thread_parent_id"] or "")
+            conn.execute(
+                "INSERT INTO messages(id, channel_id, author_type, author_name, gateway_id, gateway_name, "
+                "content, created_at, thread_parent_id, promoted_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ids[r["id"]], channel["id"], r["author_type"], r["author_name"], me, r["gateway_name"],
+                 r["content"], r["created_at"], parent, dm["id"]))
+    _notify("channels.changed", {})
+    _notify("message.created", {"channel_id": channel["id"]})
+    request_sync()
+    return {**channel, "message_count": len(src), "promoted_from": dm["id"]}
+
+
 def dm_channel_id(a: str, b: str) -> str:
     return "dm:" + "+".join(sorted([a, b]))
 
@@ -403,7 +441,7 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
 # ---------------------------------------------------------------------------
 
 _MESSAGE_COLS = ("seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, "
-                 "created_at, thread_parent_id")
+                 "created_at, thread_parent_id, promoted_from")
 # Same columns qualified for the reply-count queries, plus the per-message thread summary.
 _MESSAGE_SELECT = (
     ", ".join("m." + c.strip() for c in _MESSAGE_COLS.split(","))
@@ -623,6 +661,7 @@ def _valid_message(m: Any) -> Optional[dict]:
             "gateway_name": _clean_name(m.get("gateway_name"), ""),
             "content": str(m.get("content") or ""), "created_at": str(m.get("created_at") or _now())[:40],
             "thread_parent_id": str(m.get("thread_parent_id") or "")[:64],
+            "promoted_from": str(m.get("promoted_from") or "")[:200],
         }
     except (KeyError, TypeError):
         return None
@@ -690,9 +729,9 @@ def ingest(batch: dict) -> int:
                 # parent arrives; dropping it would be silent data loss.
             cur = conn.execute(
                 "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-                "gateway_name, content, created_at, thread_parent_id) VALUES (:id, :channel_id, "
-                ":author_type, :author_name, :gateway_id, :gateway_name, :content, :created_at, "
-                "NULLIF(:thread_parent_id, ''))", m)
+                "gateway_name, content, created_at, thread_parent_id, promoted_from) VALUES (:id, "
+                ":channel_id, :author_type, :author_name, :gateway_id, :gateway_name, :content, "
+                ":created_at, NULLIF(:thread_parent_id, ''), NULLIF(:promoted_from, ''))", m)
             if cur.rowcount:
                 inserted += 1
                 touched.add(m["channel_id"])
@@ -871,6 +910,8 @@ def _maybe_wake(messages: list[dict]) -> None:
         me, me_id = me_info["display_name"], me_info["gateway_id"]
         for m in messages:
             if m["author_type"] != "human" or m["gateway_id"] == me_id:
+                continue
+            if m.get("promoted_from"):  # a copy of an old DM message, not something new (S-13)
                 continue
             if not mentions_me(m["content"], me):
                 continue
