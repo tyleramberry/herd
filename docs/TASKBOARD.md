@@ -31,8 +31,8 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 - [x] ✅ **S-10 (Nov 6): Single + button** with New channel / New message menu — merged #20.
 - [ ] 🔵 **S-9 (Nov 6): @-mention autocomplete** — built, **PR #19 open, conflicting with main**; Sentry round 1 NOT CLEAN (1×S2 + 3×S3). Rebase + fixes under S-17.
 - [ ] 🔵 **S-11 (Nov 6): Threads** — built, **PR #23 open, conflicting with main.** Rebase under S-17.
-- [ ] 🔵 **S-12 (Nov 6): Reactions** — built, **PR #24 open**; Sentry round 1 PASSED. Rebase under S-17.
-- [ ] 🔵 **S-17 (Nov 6): Rebase #19/#23/#24 onto main and fix S-9 findings** — built-but-unmerged outranks the new scope.
+- [x] ✅ **S-12 (Nov 6): Reactions** — merged #24 (44035e0); Sentry round 1 PASSED.
+- [ ] 🔵 **S-17 (Nov 6): Rebase #19/#23 onto main and fix S-9 findings** — built-but-unmerged outranks the new scope.
 - [ ] ⬜ **S-13 (Nov 6, Tyler directive F1): Promote a private DM into a shared room** — one action in an open DM ("Share to a channel") creates a named channel and replays the DM's messages into it in order; appears on both gateways within a cycle; DM untouched. `PROTOCOL_VERSION` bump. **Done means:** see `docs/product/N-5-CUT-LIST-AMENDMENT.md` §1 F1. Must pass two-gateway, not just unit tests (R-5). QA: Q-7. Est 4 h.
 - [ ] ⬜ **S-14 (Nov 6, Tyler directive F2): Assignment context on @mention wake** — wake text carries who asked (+channel), what is expected, where to report back (`herd_post` ref). All S-7 guards unchanged: mentions only, one wake per message, agent messages never wake, default off, `allow_gateway_injection`. QA: Q-7 (extends TC-4). Est 3 h. **Never cut.**
 - [ ] ⬜ **S-15 (Nov 7, Tyler directive F3): Live supervision status line + speaker badge** — one short phrase from a fixed vocabulary (`reading the code` / `writing the code` / `reviewing` / `done` / `idle`) beside in-flight agent work, plus a human/agent badge per message. No tool-activity stream. Rides existing `broadcast_plugin_event` + 3 s poll. New tool → `provides_tools` + `herd.yaml` capability + rule-13. **Cut #2 if not merged by Sat 18:00.** QA: Q-7. Est 6 h.
