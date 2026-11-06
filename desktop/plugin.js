@@ -45,6 +45,7 @@ const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown
 const thread = { page: atom(null), pane: atom(null) } // the open thread's root message id, or null
 // Per-composer @-autocomplete: { page, pane } so the page and the pane never share
 // (or ghost) one another's dropdown. null | { start, query, index }.
+const sharing = { page: atom(false), pane: atom(false) } // is the DM's 'Share to a channel' form open (S-13)
 const mentionState = { page: atom(null), pane: atom(null) }
 
 function api(path, opts) {
@@ -595,8 +596,57 @@ function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
   })
 }
 
-function MessageView({ channel, selfId, status, $thread, compact }) {
+function ShareDmForm({ channel, $sharing, onShared }) {
+  const share = useMutation({
+    mutationFn: ({ name }) =>
+      api('/channels/' + encodeURIComponent(channel.id) + '/share', { method: 'POST', body: { name } }),
+    onSuccess: created => {
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+      $sharing.set(false)
+      if (created && created.id) onShared(created.id)
+    }
+  })
+  return jsxs('form', {
+    className: 'flex flex-col gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-2',
+    onSubmit: e => {
+      e.preventDefault()
+      const name = String(new FormData(e.currentTarget).get('name') || '').trim()
+      if (name && !share.isPending) share.mutate({ name })
+    },
+    children: [
+      jsx('div', {
+        className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: 'Copies this conversation into a new channel. The direct message stays as it is.'
+      }),
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(Input, {
+            name: 'name',
+            placeholder: 'new-channel-name',
+            autoComplete: 'off',
+            autoFocus: true,
+            'aria-label': 'New channel name',
+            className: 'h-7 min-w-0 flex-1 text-xs'
+          }),
+          jsx(Button, { type: 'submit', size: 'xs', disabled: share.isPending, children: 'Share' }),
+          jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => $sharing.set(false), children: 'Cancel' })
+        ]
+      }),
+      share.isError
+        ? jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: errorText(share.error, "Couldn't share this conversation.")
+          })
+        : null
+    ]
+  })
+}
+
+function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   const openThreadId = useValue($thread)
+  const $sharing = compact ? sharing.pane : sharing.page
+  const isSharing = useValue($sharing) && channel.is_dm
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
     queryFn: () => api('/channels/' + encodeURIComponent(channel.id) + '/messages')
@@ -635,9 +685,26 @@ function MessageView({ channel, selfId, status, $thread, compact }) {
                 : null
             ]
           }),
-          jsx(PeerLine, { status })
+          jsxs('div', {
+            className: 'flex shrink-0 items-center gap-2',
+            children: [
+              channel.is_dm && messages.length > 0
+                ? jsx(Button, {
+                    type: 'button',
+                    size: 'xs',
+                    variant: 'secondary',
+                    onClick: () => $sharing.set(!isSharing),
+                    children: 'Share to a channel'
+                  })
+                : null,
+              jsx(PeerLine, { status })
+            ]
+          })
         ]
       }),
+      isSharing
+        ? jsx(ShareDmForm, { channel, $sharing, onShared: id => { $thread.set(null); $selected.set(id) } })
+        : null,
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
       jsx(Composer, { channel, compact, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
     ]
@@ -814,7 +881,7 @@ function HerdView({ compact }) {
             $menu
           }),
           selected
-            ? jsx(MessageView, { channel: selected, selfId, status, $thread, compact }, selected.id)
+            ? jsx(MessageView, { channel: selected, selfId, status, $thread, $selected, compact }, selected.id)
             : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
         ]
       })
@@ -849,6 +916,8 @@ export default {
     plusMenu.pane.set(false)
     thread.page.set(null)
     thread.pane.set(null)
+    sharing.page.set(false)
+    sharing.pane.set(false)
     mentionState.page.set(null)
     mentionState.pane.set(null)
     ctx.onDispose(() => {

@@ -67,6 +67,12 @@ def post_channel(body: dict[str, Any]):
     return _call(store.create_channel, body.get("name"), body.get("topic", ""))
 
 
+@router.post("/channels/{channel_id}/share")
+def post_share(channel_id: str, body: dict[str, Any]):
+    """Promote a DM into a new shared channel (copies its history)."""
+    return _call(store.share_dm, channel_id, body.get("name"), body.get("topic", ""))
+
+
 @router.post("/dms")
 def post_dm(body: dict[str, Any]):
     return _call(store.open_dm, str(body.get("participant_id") or ""))
