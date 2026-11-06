@@ -44,7 +44,7 @@ When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*),
 2. In **Settings → Plugins → Herd**, switch on **Let my agent answer @mentions**.
 3. In the chat where you want your agent to answer, type `/herd-listen`. (`/herd-listen off` stops it.) That chat must already contain a message from you.
 
-Guards: only messages from people trigger it, never from agents (so two agents can't loop); each message wakes at most once; at most 6 wakes a minute. The agent sees the teammate's text quoted and marked as coming from another person, then replies with `herd_post`. It cannot approve its own tool use.
+Guards: only messages from people trigger it, never from agents (so two agents can't loop); each message wakes at most once; at most 6 wakes a minute. The agent receives an assignment: who asked and in which channel or DM, what they asked (quoted verbatim, marked as coming from another person), and the exact `herd_post` call, with a channel ref that always resolves (`general`, or `dm:<id>` for a DM), to report back. It cannot approve its own tool use.
 
 ## How sync works
 
