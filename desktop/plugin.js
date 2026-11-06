@@ -423,11 +423,43 @@ function MentionMenu({ items, index, onPick }) {
   })
 }
 
-function MessageRow({ message }) {
+const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
+
+function MessageRow({ message, channelId }) {
   const isAgent = message.author_type === 'agent'
+  const reactions = Array.isArray(message.reactions) ? message.reactions : []
+  const react = useMutation({
+    mutationFn: emoji =>
+      api(
+        '/channels/' + encodeURIComponent(channelId) + '/messages/' + encodeURIComponent(message.id) + '/reactions',
+        { method: 'POST', body: { emoji } }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: KEYS.messages(channelId) })
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+    }
+  })
   return jsxs('div', {
-    className: 'flex flex-col gap-0.5 px-3 py-1.5',
+    className: 'group relative flex flex-col gap-0.5 px-3 py-1.5',
     children: [
+      jsx('div', {
+        className:
+          'absolute -top-3 right-3 hidden gap-0.5 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-surface-primary) px-1 py-0.5 group-hover:flex',
+        children: REACTION_EMOJIS.map(emoji =>
+          jsx(
+            'button',
+            {
+              type: 'button',
+              title: 'React ' + emoji,
+              disabled: react.isPending,
+              className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
+              onClick: () => react.mutate(emoji),
+              children: emoji
+            },
+            emoji
+          )
+        )
+      }),
       jsxs('div', {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
@@ -436,7 +468,30 @@ function MessageRow({ message }) {
           jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) })
         ]
       }),
-      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) })
+      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) }),
+      reactions.length
+        ? jsx('div', {
+            className: 'mt-0.5 flex flex-wrap gap-1',
+            children: reactions.map(r =>
+              jsxs(
+                'button',
+                {
+                  type: 'button',
+                  disabled: react.isPending,
+                  title: r.mine ? 'Remove your reaction' : 'React ' + r.emoji,
+                  className:
+                    'flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs ' +
+                    (r.mine
+                      ? 'border-(--ui-accent) bg-(--ui-surface-secondary) text-(--ui-text-primary)'
+                      : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary)'),
+                  onClick: () => react.mutate(r.emoji),
+                  children: [jsx('span', { children: r.emoji }), jsx('span', { children: String(r.count) })]
+                },
+                r.emoji
+              )
+            )
+          })
+        : null
     ]
   })
 }
@@ -458,7 +513,7 @@ function MessageView({ channel, selfId, status, compact }) {
   } else {
     body = jsx('div', {
       className: 'flex flex-col py-1',
-      children: messages.map(m => jsx(MessageRow, { message: m }, m.id))
+      children: messages.map(m => jsx(MessageRow, { message: m, channelId: channel.id }, m.id))
     })
   }
   return jsxs('div', {
@@ -713,6 +768,10 @@ export default {
       const payload = (event && event.payload) || {}
       if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
+    })
+    ctx.onEvent('plugin.herd.reactions.changed', event => {
+      const payload = (event && event.payload) || {}
+      if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
     })
     ctx.onEvent('plugin.herd.channels.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
