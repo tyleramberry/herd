@@ -47,6 +47,8 @@ BATCH_LIMIT = 200
 SYNC_TIMEOUT_S = 10
 SECRET_ENV = "HERD_PEER_KEY"
 
+REACTIONS = ["👍", "❤️", "👁️", "🎉"]
+
 _CHANNEL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 _AUTHOR_TYPES = {"human", "agent"}
 
@@ -112,6 +114,8 @@ CREATE TABLE IF NOT EXISTS peer_state (
     name TEXT NOT NULL DEFAULT '',
     push_seq INTEGER NOT NULL DEFAULT 0,
     pull_seq INTEGER NOT NULL DEFAULT 0,
+    push_rseq INTEGER NOT NULL DEFAULT 0,
+    pull_rseq INTEGER NOT NULL DEFAULT 0,
     remote_gateway_id TEXT NOT NULL DEFAULT '',
     remote_name TEXT NOT NULL DEFAULT '',
     last_attempt TEXT NOT NULL DEFAULT '',
@@ -124,6 +128,17 @@ CREATE TABLE IF NOT EXISTS incoming_peers (
     last_seen TEXT NOT NULL DEFAULT '',
     syncs INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS reactions (
+    rseq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT UNIQUE NOT NULL,
+    message_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    gateway_id TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji, active);
 """
 
 _init_lock = threading.Lock()
@@ -132,6 +147,23 @@ _initialized: set[str] = set()
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _ts(value: Any) -> datetime:
+    """Order timestamps by instant, not spelling (peers may send 'Z' or no offset).
+
+    Unparsable or absent values sort as oldest so a malformed row can never displace
+    a row we already hold.
+    """
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return oldest
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return oldest
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def db_path() -> Path:
@@ -149,6 +181,11 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         if key in _initialized:
             return
         conn.executescript(_SCHEMA)
+        # Pre-S-12 DBs have peer_state without the reaction cursors (CREATE IF NOT EXISTS won't add them).
+        have = {r[1] for r in conn.execute("PRAGMA table_info(peer_state)").fetchall()}
+        for col in ("push_rseq", "pull_rseq"):
+            if col not in have:
+                conn.execute(f"ALTER TABLE peer_state ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
             "VALUES (?, ?, '', 0, '[]', ?)",
@@ -432,7 +469,63 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
                 f"SELECT * FROM (SELECT {_MESSAGE_COLS} FROM messages WHERE channel_id = ? "
                 "ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at, id",
                 (channel["id"], limit)).fetchall()
-    return [dict(r) for r in rows]
+        reactions = _reaction_map(conn, channel["id"])
+    out = [dict(r) for r in rows]
+    for m in out:
+        m["reactions"] = reactions.get(m["id"], [])
+    return out
+
+
+def _reaction_map(conn: sqlite3.Connection, channel_id: str, me: Optional[str] = None,
+                  message_id: Optional[str] = None) -> dict[str, list[dict]]:
+    """message_id -> [{emoji, count, mine}] (active only, whitelist order). One aggregate query."""
+    me = me if me is not None else conn.execute("SELECT value FROM meta WHERE key='gateway_id'").fetchone()[0]
+    sql = ("SELECT message_id, emoji, COUNT(*) AS n, MAX(gateway_id = ?) AS mine FROM reactions "
+           "WHERE channel_id = ? AND active = 1")
+    args: list = [me, channel_id]
+    if message_id:
+        sql += " AND message_id = ?"
+        args.append(message_id)
+    out: dict[str, list[dict]] = {}
+    for r in conn.execute(sql + " GROUP BY message_id, emoji", args).fetchall():
+        if r["emoji"] in REACTIONS:
+            out.setdefault(r["message_id"], []).append(
+                {"emoji": r["emoji"], "count": r["n"], "mine": bool(r["mine"])})
+    for items in out.values():
+        items.sort(key=lambda x: REACTIONS.index(x["emoji"]))
+    return out
+
+
+def list_reactions(channel_id: str) -> dict[str, list[dict]]:
+    with connect() as conn:
+        return _reaction_map(conn, channel_id)
+
+
+def toggle_reaction(channel_ref: str, message_id: str, emoji: Any) -> dict:
+    """React to a message, or remove our reaction if we already have it (one row per message+emoji+gateway)."""
+    channel = resolve_channel(channel_ref)
+    if not channel:
+        raise HerdError(404, f"No channel or DM named '{channel_ref}'.")
+    mid = str(message_id or "").strip()
+    with connect() as conn:
+        if not conn.execute("SELECT 1 FROM messages WHERE id = ? AND channel_id = ?",
+                            (mid, channel["id"])).fetchone():
+            raise HerdError(404, "No message with that id.")
+    if emoji not in REACTIONS:
+        raise HerdError(422, "Pick one of " + " ".join(REACTIONS) + ".")
+    me = identity()["gateway_id"]
+    rid = f"{mid}|{emoji}|{me}"
+    with connect() as conn:
+        row = conn.execute("SELECT active FROM reactions WHERE id = ?", (rid,)).fetchone()
+        active = 0 if (row and row["active"]) else 1
+        # INSERT OR REPLACE without rseq: old row is deleted, new AUTOINCREMENT rseq moves the sync cursor.
+        conn.execute(
+            "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (rid, mid, channel["id"], emoji, me, active, _now()))
+        aggregate = _reaction_map(conn, channel["id"], me, mid).get(mid, [])
+    _notify("reactions.changed", {"channel_id": channel["id"]})
+    request_sync()
+    return {"emoji": emoji, "active": bool(active), "reactions": aggregate}
 
 
 def list_participants() -> list[dict]:
@@ -470,13 +563,29 @@ def _valid_message(m: Any) -> Optional[dict]:
     return out
 
 
+def _valid_reaction(r: Any) -> Optional[dict]:
+    if not isinstance(r, dict):
+        return None
+    emoji = r.get("emoji")
+    if emoji not in REACTIONS:
+        return None
+    mid = str(r.get("message_id") or "")[:64]
+    gateway_id = str(r.get("gateway_id") or "")[:64]
+    if not mid or not gateway_id:
+        return None
+    return {"message_id": mid, "emoji": emoji, "gateway_id": gateway_id,
+            "active": 1 if r.get("active") else 0, "created_at": str(r.get("created_at") or _now())[:40]}
+
+
 def ingest(batch: dict) -> int:
     """Store channels + messages received from a peer. Idempotent. Returns rows newly inserted."""
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
     channels = batch.get("channels") if isinstance(batch.get("channels"), list) else []
     messages = batch.get("messages") if isinstance(batch.get("messages"), list) else []
+    reactions = batch.get("reactions") if isinstance(batch.get("reactions"), list) else []
     inserted = 0
     touched: set[str] = set()
+    rtouched: set[str] = set()
     wakes: list[dict] = []
     with connect() as conn:
         if sender.get("gateway_id"):
@@ -499,25 +608,54 @@ def ingest(batch: dict) -> int:
                 inserted += 1
                 touched.add(m["channel_id"])
                 wakes.append(m)
+        for raw in reactions[:BATCH_LIMIT]:
+            r = _valid_reaction(raw)
+            if not r:
+                continue
+            msg = conn.execute("SELECT channel_id FROM messages WHERE id = ?", (r["message_id"],)).fetchone()
+            if not msg:
+                continue
+            r["channel_id"] = msg["channel_id"]
+            r["id"] = f"{r['message_id']}|{r['emoji']}|{r['gateway_id']}"[:200]
+            existing = conn.execute("SELECT created_at FROM reactions WHERE id = ?", (r["id"],)).fetchone()
+            if existing is not None and _ts(existing["created_at"]) > _ts(r["created_at"]):
+                # A replayed row that is OLDER than what we hold must not win: a re-linked
+                # peer re-pushing a full history (TC-5.9) can resend an add we have since
+                # removed, and INSERT OR REPLACE used to resurrect the reaction. Newest
+                # created_at wins, so convergence is by time, not arrival order (TC-8.5).
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, "
+                "created_at) VALUES (:id, :message_id, :channel_id, :emoji, :gateway_id, :active, :created_at)", r)
+            rtouched.add(r["channel_id"])
     _maybe_wake(wakes)
     for channel_id in touched:
         _notify("message.created", {"channel_id": channel_id})
+    for channel_id in rtouched:
+        _notify("reactions.changed", {"channel_id": channel_id})
     if channels and not touched:
         _notify("channels.changed", {})
     return inserted
 
 
-def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_LIMIT) -> dict:
+def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_LIMIT,
+                 after_rseq: int = 0) -> dict:
     """Our channels + messages after ``after_seq`` (skipping ones that came from ``exclude_gateway``)."""
     with connect() as conn:
         examined = conn.execute(
             f"SELECT {_MESSAGE_COLS} FROM messages WHERE seq > ? ORDER BY seq LIMIT ?",
             (int(after_seq), int(limit))).fetchall()
         channels = [_channel_row(r) for r in conn.execute("SELECT * FROM channels").fetchall()]
+        rexamined = conn.execute(
+            "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
+            "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
     # The cursor moves past excluded rows too (the peer already has its own messages).
     rows = [dict(r) for r in examined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
     next_seq = examined[-1]["seq"] if examined else int(after_seq)
-    return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit}
+    rrows = [dict(r) for r in rexamined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
+    next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
+    return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit,
+            "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit}
 
 
 def _record_incoming(sender: dict) -> None:
@@ -548,7 +686,11 @@ def handle_peer_sync(body: Any) -> dict:
         after_seq = max(0, int(body.get("after_seq") or 0))
     except (TypeError, ValueError):
         raise HerdError(422, "after_seq must be an integer.")
-    out = export_batch(after_seq, exclude_gateway=str(sender.get("gateway_id") or ""))
+    try:
+        after_rseq = max(0, int(body.get("after_rseq") or 0))
+    except (TypeError, ValueError):
+        raise HerdError(422, "after_rseq must be an integer.")
+    out = export_batch(after_seq, exclude_gateway=str(sender.get("gateway_id") or ""), after_rseq=after_rseq)
     return {"v": PROTOCOL_VERSION, "from": identity(), "accepted": accepted, **out}
 
 
@@ -700,30 +842,37 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
     with connect() as conn:
         _peer_state(conn, peer)
         conn.execute("UPDATE peer_state SET last_attempt = ? WHERE url = ?", (_now(), peer["url"]))
-    pushed = pulled = 0
+    pushed = pulled = rpushed = 0
     try:
         if not peer.get("key"):
             raise PermissionError("no key")
         for _ in range(max(1, rounds)):
             with connect() as conn:
                 st = _peer_state(conn, peer)
-            out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"])
+            out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"],
+                               after_rseq=st["push_rseq"])
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
-                                    "messages": out["messages"], "after_seq": st["pull_seq"]})
+                                    "messages": out["messages"], "after_seq": st["pull_seq"],
+                                    "reactions": out["reactions"], "after_rseq": st["pull_rseq"]})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             pulled += ingest(resp)
             pushed += len(out["messages"])
+            rpushed += len(out["reactions"])
             next_pull = resp.get("next_seq")
+            next_rpull = resp.get("next_rseq")
             with connect() as conn:
                 conn.execute(
-                    "UPDATE peer_state SET push_seq = ?, pull_seq = ?, remote_gateway_id = ?, remote_name = ?, "
+                    "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, remote_gateway_id = ?, remote_name = ?, "
                     "last_ok = ?, last_error = '' WHERE url = ?",
                     (out["next_seq"], int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
+                     out["next_rseq"],
+                     int(next_rpull) if isinstance(next_rpull, int) else st["pull_rseq"],
                      str(remote.get("gateway_id") or st["remote_gateway_id"])[:64],
                      _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["url"]))
-            if not out["more"] and not resp.get("more"):
+            if not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
                 break
-        return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled}
+        return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled,
+                "reactions_pushed": rpushed}
     except Exception as exc:  # noqa: BLE001 — a peer being down is a normal state, not a crash
         message = "No key set for this peer." if isinstance(exc, PermissionError) else _describe_error(exc)
         with connect() as conn:
