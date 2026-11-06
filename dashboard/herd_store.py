@@ -39,7 +39,7 @@ from typing import Any, Callable, Iterator, Optional
 PLUGIN_ID = "herd"
 DEFAULT_CHANNEL = "general"
 PEER_SYNC_PATH = "/herd/v1/sync"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 MAX_CONTENT = 20_000
 MAX_NAME = 64
@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS messages (
     gateway_id TEXT NOT NULL,
     gateway_name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    origin_channel_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at, id);
 CREATE TABLE IF NOT EXISTS participants (
@@ -169,6 +170,10 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         for col in ("push_rseq", "pull_rseq"):
             if col not in have:
                 conn.execute(f"ALTER TABLE peer_state ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+        # Pre-S-13 DBs have messages without the promote marker.
+        mcols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if "origin_channel_id" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN origin_channel_id TEXT NOT NULL DEFAULT ''")
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
             "VALUES (?, ?, '', 0, '[]', ?)",
@@ -352,8 +357,62 @@ def open_dm(participant_id: str) -> dict:
     return _channel_row(row)
 
 
-def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
-    """Accept a channel from a peer. Validated: never trust peer input to shape our rows."""
+def _promoted_message_id(dm_id: str, message_id: str, channel_id: str) -> str:
+    """Deterministic copy id: the source id as a prefix (so same-millisecond ties keep the
+    DM's own relative order) plus a stable hash of (dm, message, target channel)."""
+    suffix = uuid.uuid5(uuid.NAMESPACE_URL, f"herd-promote|{dm_id}|{message_id}|{channel_id}").hex[:16]
+    return message_id[:40] + "-p" + suffix
+
+
+def promote_dm(dm_ref: Any, name: Any, topic: Any = "") -> dict:
+    """'Share to a channel': create a new shared channel and COPY a DM's history into it, in order.
+
+    The DM row, its messages and the peer cursors are never touched. Copies get fresh ids (the source
+    id is already taken on the peer, so reusing it would be silently ignored there), keep the source
+    author/gateway/``created_at`` verbatim, and carry ``origin_channel_id`` so the export filter ships
+    them to the peer and they never trigger @mention wakes. Reactions and thread refs are not copied.
+    """
+    dm = resolve_channel(dm_ref)
+    if not dm:
+        raise HerdError(404, f"No channel or DM named '{dm_ref}'.")
+    if not dm["is_dm"]:
+        raise HerdError(422, "Only a direct message can be shared to a channel.")
+    clean = normalize_channel_name(name)
+    if not clean:
+        raise HerdError(422, "Channel name is required.")
+    if not _CHANNEL_NAME_RE.match(clean):
+        raise HerdError(422, "Use lowercase letters, numbers, - or _ (max 48 characters).")
+    channel = {"id": clean, "name": clean, "topic": str(topic or "")[:200], "is_dm": 0,
+               "members": "[]", "created_at": _now()}
+    copied = 0
+    with connect() as conn:  # one transaction: the room and every copy land together or not at all
+        try:
+            conn.execute(
+                "INSERT INTO channels(id, name, topic, is_dm, members, created_at) "
+                "VALUES (:id, :name, :topic, :is_dm, :members, :created_at)", channel)
+        except sqlite3.IntegrityError as exc:
+            raise HerdError(409, f"#{clean} already exists.") from exc
+        source = conn.execute(
+            "SELECT id, author_type, author_name, gateway_id, gateway_name, content, created_at "
+            "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
+        for m in source:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
+                "gateway_name, content, created_at, origin_channel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (_promoted_message_id(dm["id"], m["id"], clean), clean, m["author_type"], m["author_name"],
+                 m["gateway_id"], m["gateway_name"], m["content"], m["created_at"], dm["id"]))
+            copied += cur.rowcount
+        count, last = conn.execute(
+            "SELECT COUNT(*), MAX(created_at) FROM messages WHERE channel_id = ?", (clean,)).fetchone()
+    request_sync()
+    return {**channel, "is_dm": False, "members": [], "message_count": int(count), "last_message_at": last,
+            "messages_copied": copied, "promoted_from": dm["id"]}
+
+
+def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> bool:
+    """Accept a channel from a peer. Validated: never trust peer input to shape our rows.
+
+    Returns True only when a NEW channel row was inserted (False on update/ignore/reject)."""
     cid = str(ch.get("id") or "")
     is_dm = bool(ch.get("is_dm"))
     if is_dm:
@@ -361,26 +420,29 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
         clean = [{"id": str(m.get("id", ""))[:64], "name": _clean_name(m.get("name"), "?")}
                  for m in members if isinstance(m, dict)][:2]
         if len(clean) != 2 or cid != dm_channel_id(clean[0]["id"], clean[1]["id"]):
-            return
+            return False
         name = " & ".join(m["name"] for m in clean)
+        existed = conn.execute("SELECT 1 FROM channels WHERE id = ?", (cid,)).fetchone() is not None
         conn.execute(
             "INSERT INTO channels(id, name, topic, is_dm, members, created_at) VALUES (?, ?, '', 1, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET name=excluded.name, members=excluded.members",
             (cid, name, json.dumps(clean), str(ch.get("created_at") or _now())[:40]))
-    else:
-        if cid != normalize_channel_name(cid) or not _CHANNEL_NAME_RE.match(cid):
-            return
-        conn.execute(
-            "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
-            "VALUES (?, ?, ?, 0, '[]', ?)",
-            (cid, cid, str(ch.get("topic") or "")[:200], str(ch.get("created_at") or _now())[:40]))
+        return not existed
+    if cid != normalize_channel_name(cid) or not _CHANNEL_NAME_RE.match(cid):
+        return False
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
+        "VALUES (?, ?, ?, 0, '[]', ?)",
+        (cid, cid, str(ch.get("topic") or "")[:200], str(ch.get("created_at") or _now())[:40]))
+    return bool(cur.rowcount)
 
 
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
 
-_MESSAGE_COLS = "seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, created_at"
+_MESSAGE_COLS = ("seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, "
+                 "created_at, origin_channel_id")
 
 
 def _notify(event: str, payload: dict) -> None:
@@ -414,13 +476,14 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
         "id": mid, "channel_id": channel["id"], "author_type": author_type,
         "author_name": _clean_name(author_name, default_author), "gateway_id": me["gateway_id"],
         "gateway_name": me["display_name"], "content": text, "created_at": _now(),
+        "origin_channel_id": "",
     }
     with connect() as conn:
         _touch_participant(conn, me["gateway_id"], me["display_name"], True)
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-            "gateway_name, content, created_at) VALUES (:id, :channel_id, :author_type, :author_name, "
-            ":gateway_id, :gateway_name, :content, :created_at)", row)
+            "gateway_name, content, created_at, origin_channel_id) VALUES (:id, :channel_id, :author_type, "
+            ":author_name, :gateway_id, :gateway_name, :content, :created_at, :origin_channel_id)", row)
         inserted = bool(cur.rowcount)
         stored = dict(conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (mid,)).fetchone())
     if not inserted:
@@ -536,6 +599,7 @@ def _valid_message(m: Any) -> Optional[dict]:
             "gateway_id": str(m.get("gateway_id") or "")[:64],
             "gateway_name": _clean_name(m.get("gateway_name"), ""),
             "content": str(m.get("content") or ""), "created_at": str(m.get("created_at") or _now())[:40],
+            "origin_channel_id": str(m.get("origin_channel_id") or "")[:200],
         }
     except (KeyError, TypeError):
         return None
@@ -570,13 +634,14 @@ def ingest(batch: dict) -> int:
     touched: set[str] = set()
     rtouched: set[str] = set()
     wakes: list[dict] = []
+    new_channels = False
     with connect() as conn:
         if sender.get("gateway_id"):
             _touch_participant(conn, str(sender["gateway_id"])[:64],
                                _clean_name(sender.get("display_name"), "peer"), False)
         for ch in channels[:BATCH_LIMIT]:
-            if isinstance(ch, dict):
-                _upsert_channel(conn, ch)
+            if isinstance(ch, dict) and _upsert_channel(conn, ch):
+                new_channels = True
         for raw in messages[:BATCH_LIMIT]:
             m = _valid_message(raw)
             if not m:
@@ -585,12 +650,14 @@ def ingest(batch: dict) -> int:
                 continue
             cur = conn.execute(
                 "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-                "gateway_name, content, created_at) VALUES (:id, :channel_id, :author_type, :author_name, "
-                ":gateway_id, :gateway_name, :content, :created_at)", m)
+                "gateway_name, content, created_at, origin_channel_id) VALUES (:id, :channel_id, "
+                ":author_type, :author_name, :gateway_id, :gateway_name, :content, :created_at, "
+                ":origin_channel_id)", m)
             if cur.rowcount:
                 inserted += 1
                 touched.add(m["channel_id"])
-                wakes.append(m)
+                if not m["origin_channel_id"]:  # a promoted copy is history, never a fresh @mention
+                    wakes.append(m)
         for raw in reactions[:BATCH_LIMIT]:
             r = _valid_reaction(raw)
             if not r:
@@ -609,7 +676,7 @@ def ingest(batch: dict) -> int:
         _notify("message.created", {"channel_id": channel_id})
     for channel_id in rtouched:
         _notify("reactions.changed", {"channel_id": channel_id})
-    if channels and not touched:
+    if new_channels or (channels and not touched):
         _notify("channels.changed", {})
     return inserted
 
@@ -626,7 +693,9 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
             "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
             "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
     # The cursor moves past excluded rows too (the peer already has its own messages).
-    rows = [dict(r) for r in examined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
+    # ...except promoted copies: the peer has its own ORIGINAL in the DM, not the copy in the new room.
+    rows = [dict(r) for r in examined
+            if not exclude_gateway or r["gateway_id"] != exclude_gateway or r["origin_channel_id"]]
     next_seq = examined[-1]["seq"] if examined else int(after_seq)
     rrows = [dict(r) for r in rexamined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
     next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
@@ -655,6 +724,16 @@ def handle_peer_sync(body: Any) -> dict:
     """
     if not isinstance(body, dict):
         raise HerdError(422, "Body must be a JSON object.")
+    version = body.get("v")
+    if version is not None:
+        try:
+            version = int(version)
+        except (TypeError, ValueError):
+            raise HerdError(422, "v must be an integer.")
+        if version < 1:
+            raise HerdError(422, "v must be a positive integer.")
+        if version > PROTOCOL_VERSION:
+            raise HerdError(422, f"Peer speaks a newer Herd protocol (v{version}); update this gateway's Herd plugin.")
     accepted = ingest(body)
     sender = body.get("from") if isinstance(body.get("from"), dict) else {}
     _record_incoming(sender)

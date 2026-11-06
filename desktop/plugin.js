@@ -40,6 +40,7 @@ let rest = null
 const selection = { page: atom(null), pane: atom(null) }
 const composing = { page: atom(null), pane: atom(null) } // null | 'channel' | 'dm'
 const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown open
+const sharing = { page: atom(false), pane: atom(false) } // is the DM's 'Share to a channel' form open
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -164,6 +165,51 @@ function NewChannelForm({ onDone }) {
         ? jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             children: errorText(create.error, "Couldn't create the channel.")
+          })
+        : null
+    ]
+  })
+}
+
+// Copies an open DM into a new shared channel. The DM itself is left untouched.
+function ShareToChannelForm({ channel, onDone }) {
+  const create = useMutation({
+    mutationFn: ({ name }) =>
+      api('/channels/' + encodeURIComponent(channel.id) + '/promote', { method: 'POST', body: { name } }),
+    onSuccess: ch => {
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+      queryClient.invalidateQueries({ queryKey: KEYS.participants })
+      if (ch && ch.id) queryClient.invalidateQueries({ queryKey: KEYS.messages(ch.id) })
+      onDone(ch && ch.id)
+    }
+  })
+  return jsxs('form', {
+    className: 'flex flex-col gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-2',
+    onSubmit: e => {
+      e.preventDefault()
+      const name = String(new FormData(e.currentTarget).get('name') || '').trim()
+      if (name && !create.isPending) create.mutate({ name })
+    },
+    children: [
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(Input, {
+            name: 'name',
+            placeholder: 'channel-name',
+            autoComplete: 'off',
+            autoFocus: true,
+            'aria-label': 'New channel name',
+            className: 'h-7 min-w-0 flex-1 text-xs'
+          }),
+          jsx(Button, { type: 'submit', size: 'xs', disabled: create.isPending, children: 'Share' }),
+          jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => onDone(null), children: 'Cancel' })
+        ]
+      }),
+      create.isError
+        ? jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: errorText(create.error, "Couldn't share this conversation.")
           })
         : null
     ]
@@ -392,7 +438,8 @@ function MessageRow({ message, channelId }) {
   })
 }
 
-function MessageView({ channel, selfId, status }) {
+function MessageView({ channel, selfId, status, $sharing, onSelect }) {
+  const sharingOpen = useValue($sharing)
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
     queryFn: () => api('/channels/' + encodeURIComponent(channel.id) + '/messages')
@@ -427,9 +474,34 @@ function MessageView({ channel, selfId, status }) {
                 : null
             ]
           }),
-          jsx(PeerLine, { status })
+          jsxs('div', {
+            className: 'flex shrink-0 items-center gap-2',
+            children: [
+              channel.is_dm
+                ? jsx(Button, {
+                    type: 'button',
+                    size: 'xs',
+                    variant: 'secondary',
+                    'aria-label': 'Share to a channel',
+                    disabled: sharingOpen,
+                    onClick: () => $sharing.set(!sharingOpen),
+                    children: 'Share to a channel'
+                  })
+                : null,
+              jsx(PeerLine, { status })
+            ]
+          })
         ]
       }),
+      channel.is_dm && sharingOpen
+        ? jsx(ShareToChannelForm, {
+            channel,
+            onDone: id => {
+              $sharing.set(false)
+              if (id) onSelect(id)
+            }
+          })
+        : null,
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
       jsx(Composer, { channel, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
     ]
@@ -524,6 +596,7 @@ function HerdView({ compact }) {
   const $selected = compact ? selection.pane : selection.page
   const $composing = compact ? composing.pane : composing.page
   const $menu = compact ? plusMenu.pane : plusMenu.page
+  const $sharing = compact ? sharing.pane : sharing.page
   const selectedId = useValue($selected)
   const statusQuery = useStatus()
   const status = statusQuery.data
@@ -556,13 +629,29 @@ function HerdView({ compact }) {
             channels,
             selfId,
             selectedId: selected ? selected.id : null,
-            onSelect: id => $selected.set(id),
+            onSelect: id => {
+              $sharing.set(false)
+              $selected.set(id)
+            },
             compact,
             $composing,
             $menu
           }),
           selected
-            ? jsx(MessageView, { channel: selected, selfId, status }, selected.id)
+            ? jsx(
+                MessageView,
+                {
+                  channel: selected,
+                  selfId,
+                  status,
+                  $sharing,
+                  onSelect: id => {
+                    $sharing.set(false)
+                    $selected.set(id)
+                  }
+                },
+                selected.id
+              )
             : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
         ]
       })
@@ -595,6 +684,8 @@ export default {
     composing.pane.set(null)
     plusMenu.page.set(false)
     plusMenu.pane.set(false)
+    sharing.page.set(false)
+    sharing.pane.set(false)
     ctx.onDispose(() => {
       rest = null
     })

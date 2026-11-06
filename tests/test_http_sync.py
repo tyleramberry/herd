@@ -83,6 +83,24 @@ class TwoGatewaysOverHttp(unittest.TestCase):
         self.assertTrue(st["connected"])
         self.assertEqual(st["remote_name"], "riley")
 
+    def test_promote_over_http(self):
+        """TC-10.4 over the real urllib/Bearer/JSON client path: a promoted room reaches B."""
+        self.use_a()
+        [res] = store.sync_all()  # first contact: A learns B's participant id from the response
+        self.assertTrue(res["ok"], res)
+        riley = [p for p in store.list_participants() if not p["is_self"]][0]
+        dm_id = store.open_dm(riley["id"])["id"]
+        store.post_message(dm_id, "let's take this public")
+        ch = store.promote_dm(dm_id, "shared-room")
+        self.assertEqual(ch["messages_copied"], 1)
+        [res] = store.sync_all()
+        self.assertTrue(res["ok"], res)
+        store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = self.b_db, self.b_settings
+        rooms = {c["id"]: c for c in store.list_channels()}
+        self.assertIn("shared-room", rooms)
+        self.assertFalse(rooms["shared-room"]["is_dm"])
+        self.assertEqual([m["content"] for m in store.list_messages("shared-room")], ["let's take this public"])
+
     def test_passive_side_reports_incoming_over_http(self):
         self.use_a()
         [res] = store.sync_all()
