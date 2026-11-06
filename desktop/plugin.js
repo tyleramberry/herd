@@ -404,7 +404,12 @@ function mentionAtCaret(textarea) {
 
 function insertMention(textarea, state, handle, $mention) {
   const value = textarea.value
-  const end = Math.max(textarea.selectionStart, state.start + 1)
+  const from = Math.max(textarea.selectionStart, state.start + 1)
+  // Consume the rest of the word being typed. The @-fragment is anchored at the
+  // caret, so picking with the caret mid-word would otherwise leave the tail
+  // behind ("hey @peerXYZ" -> "hey @Peer-One XYZ"); QA F3.
+  const tail = /^[A-Za-z0-9_-]*/.exec(value.slice(from))
+  const end = from + (tail ? tail[0].length : 0)
   const token = '@' + handle + ' '
   textarea.value = value.slice(0, state.start) + token + value.slice(end)
   const caret = state.start + token.length
@@ -768,7 +773,9 @@ function Composer({ channel, compact, placeholderName, threadParentId }) {
               $mention.set({ ...mention, index: next })
               return
             }
-            if (e.key === 'Enter' || e.key === 'Tab') {
+            // Shift+Enter means "newline" even with the menu open (the submit path
+            // below already guards it); without the guard it picked a mention. QA F4.
+            if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
               e.preventDefault()
               pick(e.currentTarget.form, items[activeIndex])
               return

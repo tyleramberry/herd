@@ -92,6 +92,33 @@ class MentionRoundTrip(unittest.TestCase):
         for needle in ("MentionMenu", "mentionCandidates", "renderContent", "ArrowDown", "'Tab'", "'Escape'"):
             self.assertIn(needle, JS)
 
+    def test_insert_mention_consumes_the_word_tail(self):
+        """Picking with the caret mid-word must not leave the tail behind (QA F3)."""
+        fn = re.search(r"function insertMention\(textarea, state, handle, \$mention\) \{.*?\n\}\n", JS, re.S).group(0)
+        script = fn + """
+const cases = [
+  { value: 'hey @peerXYZ', caret: 9 },
+  { value: 'hey @peerXYZ', caret: 12 },
+  { value: 'start @peerXYZ end', caret: 11 },
+];
+console.log(JSON.stringify(cases.map(c => {
+  const ta = { value: c.value, selectionStart: c.caret, focus() {}, setSelectionRange(a) { this.caret = a } };
+  insertMention(ta, { start: c.value.indexOf('@') }, 'Peer-One', { set() {} });
+  return [ta.value, ta.caret];
+})));
+"""
+        out = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out[0], ["hey @Peer-One ", 14])          # caret inside the word run
+        self.assertEqual(out[1], ["hey @Peer-One ", 14])          # caret at the end of it
+        self.assertEqual(out[2], ["start @Peer-One  end", 16])    # surrounding text kept
+
+    def test_shift_enter_does_not_pick_a_mention(self):
+        """Shift+Enter means newline even with the menu open (QA F4)."""
+        self.assertIn("(e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab'", JS)
+        self.assertNotIn("if (e.key === 'Enter' || e.key === 'Tab')", JS)
+        # the submit path guards Shift+Enter too, so the key falls through to a newline
+        self.assertIn("if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing)", JS)
+
 
 if __name__ == "__main__":
     unittest.main()
