@@ -1,11 +1,13 @@
-# H-1 — Demo Video Script: Herd (v7 FINAL PASS, Nov 5)
+# H-1 — Demo Video Script: Herd (v8, Nov 6)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
 **Record date: Nov 8 — code freeze. Rehearse with Sentry before recording.**
-**Timings sum to ~80s, leaving ~10s buffer under the 90s cap.**
+**Timings sum to ~83s, leaving ~7s buffer under the 90s cap (≤85s target held).**
 
-## Shot-by-shot (v7 final pass, follows Northstar N-2 beats, PR #5)
+> **v8 change (H-5, consolidates PRs #25 + #27 onto v7):** adds the reaction beat (5A-reaction, S-12 / PR #24) and the @-autocomplete beat inside take 5B (S-9 / PR #19); threads (S-11 / PR #23) stay ambient only; adds the Tyler-confirmed locked-constants block. Verified against the actual PR trees Nov 6: reactions are a 4-emoji hover picker (👍 ❤️ 👁️ 🎉) that syncs via the reaction cursor (`after_rseq`), so it lands on the other Mac in real time, which is why it earns its 3 seconds; @-autocomplete is a mention-suggestion menu that opens as you type `@` (arrow keys to move, Enter/Tab to pick); threads render as an "N replies" summary pill under a message plus an inline thread pane, with no sidebar. **Fallback of record is v7** (this script minus shot 5A-reaction and the autocomplete beat) if S-12 or S-9 fails QA before Nov 8.
+
+## Shot-by-shot (v8, follows Northstar N-2 beats, PR #5)
 
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
@@ -14,23 +16,36 @@
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Brooklyn appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Brooklyn replies → lands on the left. No VO, let it land. |
 | 5 | 0:26–0:50 | **Handoff (jaw-drop)** | Both screens, side by side | Tyler asks *his* agent in Bot Chats to post a task to `#general`; it appears on both screens with an `agent` pill. Brooklyn: "check #general and take Tyler's task." Her agent reads the channel; **Brooklyn approves its action on camera (one click)**; it does the work on her Mac and posts the result back. VO: "She hands it to her agent. Her agent, her machine, her say." |
-| 6 | 0:50–0:62 | Back to him + humans stay in charge (N-2 beat 5) | Left, then DM views both sides, then wide | Tyler's agent reads the result from the channel and uses it. Tyler DMs Brooklyn privately — "nice 😄 it actually worked" — DM lands on her screen while agent pills keep posting in `#general`. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
-| 7 | 0:62–0:75 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
-| 8 | 0:75–0:80 | End card | Static | Install one-liner + repo + @NousResearch |
+| 5A | 0:50–0:53 | **Reaction (new, S-12)** | Right, then LEFT | Brooklyn hovers her agent's result message, the 4-emoji picker appears, she clicks **👍**, then a hard cut to the reaction landing **live on the left Mac**. No VO. |
+| 6 | 0:53–0:65 | Back to him + humans stay in charge (N-2 beat 5) | Left, then DM views both sides, then wide | Tyler's agent reads the result from the channel and uses it. Tyler DMs Brooklyn privately — "nice 😄 it actually worked" — DM lands on her screen while agent pills keep posting in `#general`. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
+| 7 | 0:65–0:78 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
+| 8 | 0:78–0:83 | End card | Static | Install one-liner + repo + @NousResearch |
 
 **Shot 5, two takes (record both Nov 8; the go/no-go picks one):**
 - **5A (baseline, no auto-reply):** as in the table above. Brooklyn tells her agent to take the task; she approves; it posts back.
-- **5B (if @mention ships):** Tyler types "@brooklyn-agent can you take this?" in `#general`. Her agent wakes on the mention, Brooklyn approves on camera, and it does the work on her Mac and posts back. VO: "He asks her agent. She says yes. Her agent, her machine." 5B runs about 4s shorter; give that time to shot 6.
+- **5B (if S-9 ships):** Tyler types `@` in the composer and the **mention-suggestion menu opens as he types `@brooklyn`** (hold the popup about 2s, no VO: the wake is discoverable, not magic). He picks Brooklyn's agent with Enter and hits send. Her agent wakes on the mention, Brooklyn approves on camera, and it does the work on her Mac and posts back. VO: "He asks her agent. She says yes. Her agent, her machine." 5B runs about 4s shorter than 5A; give that time to shots 5A-reaction and 6.
 
-**Setup facts (Smith, Nov 5):** only Tyler fills in Add teammate (Brooklyn's URL plus her `API_SERVER_KEY`). Brooklyn's Mac needs `API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0` and `API_SERVER_KEY` set, `hermes gateway` running, and Herd enabled. Set **"Your name"** in Herd settings on both Macs, or the names default to the computer names. **Latency:** messages from Tyler to Brooklyn arrive almost instantly, but messages from Brooklyn to Tyler can take up to about 3s because Herd polls. In shots 4–6, hold on the left screen for 3s after Brooklyn or her agent posts, and never cut away early.
+**Threads (S-11): deliberate no-beat (H-5 decision).** No thread drill-down: it costs 5–8s and muddies the one idea (shared channel). Threads may appear **ambiently only** (the "N replies" pill under a message in shots 4–6 if a take naturally has replies). Never click into a thread on camera.
 
-**Total ~80s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
+## Locked constants (Tyler-confirmed Nov 5, closed item)
+```text
+PEER_NAME     = Brooklyn                    # spelling locked; "Your name" setting on both Macs
+PEER_ADDR     = Brooklyns-MacBook-Pro-3.local   # LAN .local address ON CAMERA is approved (Tyler)
+                                  # if mDNS flakes on record day, swap to the LAN IP — swappable here only
+PEER_KEY      = **** MASKED                 # never on camera: mask the Key field in the Add-teammate take
+TASK          = "summarize the notes file on Brooklyn's desktop"   # must need HER Mac
+```
+Everything on screen is either this block or blurred. The Key field is the only masked value; the LAN address renders unmasked as approved. If any value changes, edit only this block and re-render the on-screen text. (This supersedes the v7-draft idea of masking the address too: Tyler approved showing it.)
+
+**Setup facts (Smith, Nov 5):** only Tyler fills in Add teammate (Brooklyn's URL plus her `API_SERVER_KEY`). Brooklyn's Mac needs `API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0` and `API_SERVER_KEY` set, `hermes gateway` running, and Herd enabled. Set **"Your name"** in Herd settings on both Macs, or the names default to the computer names. **Latency:** messages from Tyler to Brooklyn arrive almost instantly, but messages from Brooklyn to Tyler can take up to about 3s because Herd polls. In shots 4–6, hold on the left screen for 3s after Brooklyn or her agent posts, and never cut away early. **Reactions ride the same sync, so from Brooklyn to Tyler the same up-to-3s poll applies: in shot 5A-reaction, hold on the left screen until the 👍 lands.**
+
+**Total ~83s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
 
 **Task for shot 5 (must need *her* Mac):** "summarize the notes file on Brooklyn's desktop" or "what's on Brooklyn's calendar Friday?". Never a task either agent could do alone.
 
-**Word rules (N-2):** say channel / connect / her agent / his agent. Never say peer-to-peer, gateway, fan-out, SQLite. Agent pills visible in every shot from 5 on.
+**Word rules (N-2):** say channel / connect / her agent / his agent. Never say peer-to-peer, gateway, fan-out, SQLite. Agent pills visible in every shot from 5 on. Never narrate the reaction or the autocomplete: they are glance beats, silence is the point.
 
-**Fallback:** if shot 5 flakes live, cut in Sentry's pre-recorded take of shot 5 only. Shots 2–4 must be live.
+**Fallback:** if shot 5 flakes live, cut in Sentry's pre-recorded take of shot 5 only. Shots 2–4 must be live. **If S-12 or S-9 is not merged and QA-green by the Nov 8 recording, fall back to v7**: drop 5A-reaction and the autocomplete beat, and timings return to ~80s (shot 6 at 0:50–0:62, shot 7 at 0:62–0:75, shot 8 at 0:75–0:80).
 
 ## Copy
 
@@ -44,6 +59,9 @@
 ## Rehearsal checklist (for @sentry)
 - [ ] Full dry run timed — MUST land ≤85s with natural pacing
 - [ ] Settings > Plugins > Herd connect flow works on BOTH Macs from clean state (key field masked on screen)
+- [ ] **Shot 5A-reaction: 👍 lands on the left Mac within the 3s poll window, on camera, 3× in a row** (S-12, PR #24)
+- [ ] **Shot 5B autocomplete: mention menu opens while typing `@brooklyn`, Enter picks, mention wake fires, 3× in a row on both Macs** (S-9, PR #19, Foreman go/no-go)
+- [ ] **Thread "N replies" pill renders if a take naturally has replies: ambient only, never clicked** (S-11, PR #23)
 - [ ] Network/latency checked on the home LAN — no visible stalls in the jaw-drop
 - [ ] Screen recording at final resolution; captions legible at 100% zoom
 - [ ] Key in demo command is masked/redacted on screen
@@ -65,5 +83,6 @@ post to. Shot 4 should be shot so it is obviously not a terminal DM.
 - ~~Shot 2 CLI vs in-app form~~ resolved: Settings form (Sentry Q-3, PR #8). Northstar: N-2 beat 2 and README "Setup with a teammate" should match
 - **Smith:** shot 4 needs S-2 fan-out; shot 5 needs S-3 `herd_post` + `herd_read_channel` working on two real Macs; shot 3 needs Herd UI showing registered peers
 - Confirm gateway URL + API_SERVER_KEY handling for the two-Mac demo (Foreman/Smith)
-- Confirm wife's instance name for the script (`brooklyn` placeholder)
+- ~~Confirm wife's instance name~~ CLOSED (Tyler, Nov 5): **Brooklyn**, locked in the constants block
+- **v8 (H-5):** shot 5A-reaction needs S-12 merged + QA-green (PR #24); the 5B autocomplete beat needs S-9 merged + QA-green (PR #19). Threads (S-11, PR #23) are ambient-only and NOT record-blocking.
 - Screenshots for H-2 package can be pulled from this same session
