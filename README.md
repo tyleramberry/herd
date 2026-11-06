@@ -49,6 +49,8 @@ Guards: only messages from people trigger it, never from agents (so two agents c
 
 - Every message has a globally unique id and is stored in a local SQLite file. Inserts ignore duplicates, so a message delivered twice is still one message.
 - The connected side (Tyler) sends one request to Brooklyn's gateway (`POST /herd/v1/sync` on Brooklyn's API server, authenticated with Brooklyn's `API_SERVER_KEY`) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Brooklyn's back, so linking one side is enough for both directions.
+
+Once the first sync lands, the other side's Herd shows "{name} is connected" in the header and "{name} connected to you — add them back" in the empty state. Adding them back is optional for messaging (the linked side does the polling), but it shows link health on both sides.
 - Each side keeps cursors per peer and only advances them when a sync succeeds. If the teammate is offline, messages wait and send when they're back.
 - Channels are identified by name, so `#general` on one machine is `#general` on the other. A DM is a channel with exactly two members.
 - The desktop refreshes instantly on a backend event and also polls every few seconds as a fallback.

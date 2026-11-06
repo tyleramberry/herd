@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS peer_state (
     last_ok TEXT NOT NULL DEFAULT '',
     last_error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS incoming_peers (
+    gateway_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    last_seen TEXT NOT NULL DEFAULT '',
+    syncs INTEGER NOT NULL DEFAULT 0
+);
 """
 
 _init_lock = threading.Lock()
@@ -514,6 +520,19 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
     return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit}
 
 
+def _record_incoming(sender: dict) -> None:
+    """Remember who synced to us. The route is already authenticated with our API_SERVER_KEY."""
+    gid = str(sender.get("gateway_id") or "").strip()[:64]
+    if not gid:
+        return
+    real = _clean_name(sender.get("display_name"), "")
+    with connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO incoming_peers(gateway_id, name) VALUES (?, ?)", (gid, real or "peer"))
+        conn.execute(
+            "UPDATE incoming_peers SET name = CASE WHEN ? != '' THEN ? ELSE name END, "
+            "last_seen = ?, syncs = syncs + 1 WHERE gateway_id = ?", (real, real, _now(), gid))
+
+
 def handle_peer_sync(body: Any) -> dict:
     """Server side of ``POST /herd/v1/sync`` (runs on the gateway that was linked TO).
 
@@ -524,6 +543,7 @@ def handle_peer_sync(body: Any) -> dict:
         raise HerdError(422, "Body must be a JSON object.")
     accepted = ingest(body)
     sender = body.get("from") if isinstance(body.get("from"), dict) else {}
+    _record_incoming(sender)
     try:
         after_seq = max(0, int(body.get("after_seq") or 0))
     except (TypeError, ValueError):
@@ -756,6 +776,11 @@ def status() -> dict:
     peers = configured_peers()
     with connect() as conn:
         states = {r["url"]: dict(r) for r in conn.execute("SELECT * FROM peer_state").fetchall()}
+        inc_rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM incoming_peers ORDER BY last_seen DESC").fetchall()]
+    linked_ids = {states.get(p["url"], {}).get("remote_gateway_id") or "" for p in peers} - {""}
+    incoming = [{"gateway_id": r["gateway_id"], "name": r["name"], "last_seen": r["last_seen"],
+                 "syncs": r["syncs"], "linked_back": r["gateway_id"] in linked_ids} for r in inc_rows]
     out = []
     for p in peers:
         st = states.get(p["url"], {})
@@ -765,4 +790,4 @@ def status() -> dict:
             "last_attempt": st.get("last_attempt") or "", "last_error": st.get("last_error") or "",
             "connected": bool(st.get("last_ok")) and not st.get("last_error"),
         })
-    return {"self": me, "peers": out, "protocol": PROTOCOL_VERSION}
+    return {"self": me, "peers": out, "incoming": incoming, "protocol": PROTOCOL_VERSION}

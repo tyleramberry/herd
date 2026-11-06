@@ -82,9 +82,23 @@ function useStatus() {
   return useQuery({ queryKey: KEYS.status, queryFn: () => api('/status') })
 }
 
+function incomingUnlinked(status) {
+  const list = (status && status.incoming) || []
+  return list.find(entry => entry && !entry.linked_back) || null
+}
+
 function PeerLine({ status }) {
   const peers = (status && status.peers) || []
   if (peers.length === 0) {
+    const incoming = incomingUnlinked(status)
+    if (incoming) {
+      const who = incoming.name || 'A teammate'
+      return jsxs('div', {
+        className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+        title: 'Add ' + who + ' back under Settings → Plugins → Herd to see link health here.',
+        children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: who + ' is connected' })]
+      })
+    }
     return jsxs('div', {
       className: 'flex items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
       children: [
@@ -386,17 +400,33 @@ function Composer({ channel, placeholderName }) {
 // Page / pane
 // ---------------------------------------------------------------------------
 
-function NoTeammate() {
+function NoTeammate({ incoming }) {
+  const who = incoming ? incoming.name || 'A teammate' : ''
   return jsxs('div', {
     className: 'flex flex-col items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-3 text-center',
-    children: [
-      jsx('div', { className: 'text-sm font-medium', children: 'Nobody here yet.' }),
-      jsx('div', {
-        className: 'text-xs text-(--ui-text-tertiary)',
-        children: "Connect a teammate's Hermes to start a channel together."
-      }),
-      jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Connect a teammate' })
-    ]
+    children: incoming
+      ? [
+          jsx('div', { className: 'text-sm font-medium', children: who + ' is connected.' }),
+          jsx('div', {
+            className: 'text-xs text-(--ui-text-tertiary)',
+            children:
+              who + ' connected to you. You can chat right now — add ' + who + ' back to see link health on this side too.'
+          }),
+          jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Add ' + who + ' back' }),
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children:
+              "Settings → Plugins → Herd → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and API key (their API_SERVER_KEY)."
+          })
+        ]
+      : [
+          jsx('div', { className: 'text-sm font-medium', children: 'Nobody here yet.' }),
+          jsx('div', {
+            className: 'text-xs text-(--ui-text-tertiary)',
+            children: "Connect a teammate's Hermes to start a channel together."
+          }),
+          jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Connect a teammate' })
+        ]
   })
 }
 
@@ -410,6 +440,7 @@ function HerdView({ compact }) {
   const channels = Array.isArray(data) ? data : []
   const selfId = status && status.self ? status.self.gateway_id : null
   const hasPeer = Boolean(status && status.peers && status.peers.length)
+  const incoming = incomingUnlinked(status)
 
   if (isLoading) {
     return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading Herd…' })
@@ -426,7 +457,7 @@ function HerdView({ compact }) {
   return jsxs('div', {
     className: 'flex h-full min-h-0 flex-col',
     children: [
-      statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, {}) : null,
+      statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
         children: [
