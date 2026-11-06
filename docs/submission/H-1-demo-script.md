@@ -97,6 +97,11 @@ each start 4s earlier, total ~77s). Shots 2–4 must be live. Never cut the hook
 - "Watch one agent do a job on a computer it's never touched."
 
 ## Rehearsal checklist (for @sentry)
+- [ ] **PREREQ — update the demo rig to the current build before anything else.** The live two-Mac
+      SPINE window (QA Q-10 run log) ran a build **28 commits behind main**, so it did not exercise
+      S-9's pick-tail fix (#36), S-12 reply-resurrection (#34) or S-13 (#37). Rehearse and record on the
+      freeze build, not the old one; re-verify shot 3 (peer visible), shot 4 (fan-out) and shot 5
+      (@mention) on the updated build — a green old-build run is not evidence for the video build.
 - [ ] Full dry run timed — MUST land ≤85s with natural pacing
 - [ ] Settings > Plugins > Herd connect flow works on BOTH Macs from clean state (key field masked on screen)
 - [ ] **Shot 5 mention (primary; S-9 #19 + S-7 #13 + S-14 #33): typing `@brooklyn` opens the mention
@@ -130,4 +135,8 @@ post to. Shot 4 should be shot so it is obviously not a terminal DM.
 - ~~Confirm wife's instance name~~ CLOSED (Tyler, Nov 5): **Brooklyn**, locked in the constants block
 - ~~v8 feature gates~~ S-12 (#24) and S-9 (#19) both merged + QA-green; S-9's round-1 findings were fixed in its merge. The "fall back to v7" clause is retired — the fallback is now take 5-baseline (± the reaction beat).
 - **GATED new-scope surfaces (S-13 promote, S-15 status line, S-16 Kanban link): NOT in this script — none merged at prep (`origin/main` @ `e967130`, Nov 6).** Staged in `docs/submission/H-6-new-scope-surfaces.md`; applied at the freeze pass **only if the feature is merged + QA-green**, then re-timed (H-6 §2.5 combination table). S-16 is cut #1 (Sat Nov 7 12:00), S-15 is cut #2 (Sat Nov 7 18:00).
+- **⚠️ Demo-rig build lag (QA SPINE run log, Nov 6):** the two-Mac window that passed TC-2 ran a
+  build 28 commits behind main. The Nov 8 recording rig must be updated to the freeze build first;
+  treat every still-open fix merged after that old build (S-9 pick-tail + Shift+Enter #36, S-12 #34,
+  S-13 #37) as **unverified on camera** until the rehearsal re-runs shots 3–5 on the new build.
 - Screenshots for H-2 package can be pulled from this same session

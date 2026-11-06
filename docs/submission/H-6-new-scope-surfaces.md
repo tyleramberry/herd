@@ -22,11 +22,11 @@ disposition comes from **Sentry Q-8**.
 
 | Feature | Board | Branch / PR | State at prep | Gate to apply its block |
 |---|---|---|---|---|
-| S-13 promote DM → channel (F1) | `S-13` | `wt/s13-promote`, no PR yet | not merged | merged + QA Q-7 green + TC-2 (two-gateway) |
-| S-15 status line + badge (F3) | `S-15` | `wt/s15-status`, no PR yet | not merged | merged + QA Q-7 green |
-| S-16 Kanban link (F4) | `S-16` | none (blocked on Q-8) | not merged, **cut #1** | merged + Q-8 ruling recorded + QA green |
-| Smith capability list | — | H-6 dependency | **S-13 + S-15 received**; S-16 disposition still pending | §5 answered (S-13, S-15) |
-| Sentry Q-8 ruling | `Q-8` | — | **no ruling yet** | id-only vs DB-read decides §3/§4 S-16 lines |
+| S-13 promote DM → channel (F1) | `S-13` | **MERGED #37 @ 9d9c6e7** (protocol v2) | merged; **QA gate NOT met** — F-3 A6 open (Q-9 evidence + TC-2.3/2.6 unreported; TC-10.4 flagged #44) | merged ✅ + QA Q-7 green (**pending**) + TC-2 (two-gateway) |
+| S-15 status line + badge (F3) | `S-15` | board says done, branch `feat/s15-status` — **no merge commit on `origin/main`** (verified Nov 6) | not merged | merged + QA Q-7 green |
+| S-16 Kanban link (F4) | `S-16` | none yet — **unblocked by Q-8** | not merged, **cut #1** | merged + Q-8 ruling recorded ✅ + QA green |
+| Smith capability list | — | H-6 dependency | **S-13 + S-15 received** (`herd_set_status` = the 4th tool); S-16 adds no tool per Q-8 (`capabilities:` unchanged either way) | §5 answered ✅ |
+| Sentry Q-8 ruling | `Q-8` | **DONE Nov 6 09:02** | **RULING: YES — read-only kanban.db read is permitted under rule 13**, 7 binding constraints (mode=ro URI, soft-degrade to id-only, profile-aware path, `SELECT title FROM tasks WHERE id=?` only, disclose in README+PR, no private core imports) | §3.3 **YES (DB read)** branch applies; id-only fallback also compliant |
 
 S-16 is **cut #1** (Sat Nov 7 12:00) and S-15 is **cut #2** (Sat Nov 7 18:00). The most likely freeze
 outcome is **S-13 alone, or S-13 + S-15**. The combination table in §2.5 covers every case.
@@ -53,7 +53,12 @@ Base timeline = main's H-1 **+ PR #25 (H-5 beats)** + **PR #27 (locked constants
 both touch this file, so apply H-6 *after* they merge or H-1 will conflict. Anchor the inserts by the
 quoted text below, not by line number, so they survive a rebase.
 
-### 2.1 — S-13: promote a DM into a shared room  ·  **APPLY IF S-13 MERGED**
+### 2.1 — S-13: promote a DM into a shared room  ·  **MERGED #37 — HOLD: QA gate open**
+
+> **Status check (Herald, Nov 6):** S-13 is merged to `origin/main` (`9d9c6e7`, protocol v2) but the
+> QA gate is **not** met — F-3 A6 needs the Q-9 evidence and TC-2.3/2.6 reported, and TC-10.4 is
+> flagged (#44). Per THE ONE RULE the block below stays **staged**, not applied, until QA is green.
+> Most likely shape at freeze: S-13 alone or S-13 + S-15.
 
 New shot, ~5s, inserted **after shot 6** ("Back to him") and before the end card; call it **shot 6A**.
 
@@ -166,7 +171,14 @@ herd_post, herd_read_channel]`, empty hooks/middleware/env.
 - **Rule-13 (Sentry TC-11.8 makes this a merge gate).** Apply the line in §4 verbatim: local-only, in
   gateway memory only (D-5), no peer sync, no `herd.db` write, self-clears. Do **not** invent a network line.
 
-### 3.3 — S-16  ·  **APPLY IF S-16 MERGED**
+### 3.3 — S-16  ·  **APPLY IF S-16 MERGED**  *(Q-8 = **YES, DB read** — this branch is the live one)*
+
+> **Q-8 answered (Sentry, Nov 6): YES — read-only kanban.db read is permitted under rule 13.** Use the
+> **DB-read** wording below (task-id **+ title**, read-only, degrades to id-only), plus Sentry's exact
+> constraints: `mode=ro` URI, `SELECT title FROM tasks WHERE id=?` only, profile-aware path (no bare
+> `os.environ`), never block the pane, disclose in README + PR description. **CA-7 line "reads outside
+> plugin data: none" must be deleted** and replaced by the §4 read line. The id-only fallback is also
+> compliant but is now the fallback, not the target. S-16 still needs merge + QA — cut #1 is Sat 12:00.
 - **If Q-8 = NO (id-only):** `capabilities:` **NO CHANGE**. Add PR-description bullet
   `- Kanban link: an agent's answer can carry a task-id badge that opens that task on the herd board; the task id is passed explicitly by the agent and no Kanban data is read.`
 - **If Q-8 = YES (DB read allowed):** a local-DB read is **not** a `capabilities:` key — rule 6's block
