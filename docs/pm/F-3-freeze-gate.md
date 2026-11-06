@@ -11,12 +11,12 @@ explicitly waived. After sign-off, Herald opens the catalog PR (H-3) pinned to t
 | A3 | `node --check desktop/plugin.js` passes | | |
 | A4 | `hermes plugins validate .` clean | | |
 | A5 | `hermes plugins doctor . --ci` clean | | |
-| A6 | SPINE demonstrated: message on gateway A appears on gateway B (Q-1 TC-2.1/2.2 signed by Sentry) | Q-9 PASSED Nov 6 on two real Macs (Tyler first-hand; card t_4e0473ee). Written artifact owed: `docs/qa/Q9-SPINE-RUNLOG.md` (Q-10, due Nov 7). Fill ✅ at freeze. | |
+| A6 | SPINE demonstrated: message on gateway A appears on gateway B (Q-1 TC-2.1/2.2 signed by Sentry) | **NOT FULLY MET.** Q-9 reported PASSED Nov 6 on two real Macs, on Tyler's first-hand word. Sentry's run log (`docs/qa/Q9-SPINE-RUNLOG.md`, #43) records it as reported, not QA-verified; Hermes version, plugin SHA per Mac, `doctor` output and `peer_state` are still blank. Never reported: **TC-2.3** (agent post seen by the other human) and **TC-2.6** (restart keeps history), both demo-critical. Tick only when real output fills the log. | |
 
 ## B. Scope (N-1 cut-list)
 | # | Check | Evidence | ✅ |
 |---|---|---|---|
-| B1 | Channels, DMs, agent posting, 2-gateway fan-out all work | | |
+| B1 | Channels, DMs, agent posting, 2-gateway fan-out all work | S-13 (share a DM to a channel) is merged but TC-10.4 on two real gateways is open. If it fails by the freeze, cut S-13. | |
 | B2 | Nothing from the post-hackathon backlog snuck in | | |
 
 ## C. Catalog rules (Sentry Q-3)
