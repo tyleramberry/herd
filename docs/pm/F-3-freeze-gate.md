@@ -11,7 +11,7 @@ explicitly waived. After sign-off, Herald opens the catalog PR (H-3) pinned to t
 | A3 | `node --check desktop/plugin.js` passes | | |
 | A4 | `hermes plugins validate .` clean | | |
 | A5 | `hermes plugins doctor . --ci` clean | | |
-| A6 | SPINE demonstrated: message on gateway A appears on gateway B (Q-1 TC-2.1/2.2 signed by Sentry) | | |
+| A6 | SPINE demonstrated: message on gateway A appears on gateway B (Q-1 TC-2.1/2.2 signed by Sentry) | Q-9 PASSED Nov 6 on two real Macs (Tyler first-hand; card t_4e0473ee). Written artifact owed: `docs/qa/Q9-SPINE-RUNLOG.md` (Q-10, due Nov 7). Fill ✅ at freeze. | |
 
 ## B. Scope (N-1 cut-list)
 | # | Check | Evidence | ✅ |
