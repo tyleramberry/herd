@@ -23,6 +23,7 @@ provides_tools:
   - herd_list_channels
   - herd_post
   - herd_read_channel
+  - herd_set_status
 provides_hooks: []
 """
 
@@ -43,10 +44,15 @@ def _read(args=None, **kwargs):
     return json.dumps({"messages": []})
 
 
+def _status(args=None, **kwargs):
+    return json.dumps({"ok": True})
+
+
 def register(ctx):
     ctx.register_tool(name="herd_list_channels", toolset="herd", schema={}, handler=_list)
     ctx.register_tool(name="herd_post", toolset="herd", schema={}, handler=_post)
     ctx.register_tool(name="herd_read_channel", toolset="herd", schema={}, handler=_read)
+    ctx.register_tool(name="herd_set_status", toolset="herd", schema={}, handler=_status)
 '''
 
 GOOD_JS = """\
@@ -76,6 +82,7 @@ capabilities:
     - herd_list_channels
     - herd_post
     - herd_read_channel
+    - herd_set_status
   provides_hooks: []
   provides_middleware: []
   requires_env: []

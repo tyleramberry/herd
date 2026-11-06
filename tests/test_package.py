@@ -44,12 +44,16 @@ class ManifestTest(unittest.TestCase):
         ctx = FakeCtx()
         herd.register(ctx)
         self.assertEqual(sorted(ctx.tools), sorted(_manifest()["provides_tools"]))
-        self.assertEqual(sorted(ctx.tools), ["herd_list_channels", "herd_post", "herd_read_channel"])
+        self.assertEqual(sorted(ctx.tools),
+                         ["herd_list_channels", "herd_post", "herd_read_channel", "herd_set_status"])
         self.assertEqual(list(ctx.platform), ["api_server"])
         for name, (_ts, schema, handler) in ctx.tools.items():
             self.assertEqual(schema["name"], name)
             params = inspect.signature(handler).parameters
             self.assertTrue(any(p.kind is p.VAR_KEYWORD for p in params.values()), name)
+        status_schema = ctx.tools["herd_set_status"][1]
+        self.assertEqual(status_schema["parameters"]["properties"]["status"]["enum"], list(store.STATUS_PHRASES))
+        self.assertEqual(status_schema["parameters"]["required"], ["status"])
 
     def test_manifest_fields(self):
         m = _manifest()

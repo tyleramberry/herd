@@ -70,3 +70,25 @@ HERD_READ_CHANNEL = {
         "additionalProperties": False,
     },
 }
+
+HERD_SET_STATUS = {
+    "name": "herd_set_status",
+    "description": (
+        "Tell your user, in one short phrase, what you are doing right now. They see it beside your "
+        "work in the Herd pane. Use exactly one of: 'reading the code', 'writing the code', "
+        "'reviewing', 'done', 'idle'. Set it when you start a piece of work and again when you finish. "
+        "It clears itself after five minutes, so set it again during long work."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["reading the code", "writing the code", "reviewing", "done", "idle"],
+                "description": "One of the five phrases.",
+            }
+        },
+        "required": ["status"],
+        "additionalProperties": False,
+    },
+}

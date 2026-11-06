@@ -3,7 +3,8 @@
 Shared by every Herd surface:
 
 * ``dashboard/plugin_api.py`` (FastAPI router at ``/api/plugins/herd/``, the desktop half's backend)
-* ``tools.py`` (agent tools ``herd_list_channels`` / ``herd_post`` / ``herd_read_channel``)
+* ``tools.py`` (agent tools ``herd_list_channels`` / ``herd_post`` / ``herd_read_channel`` /
+  ``herd_set_status``)
 * ``__init__.py`` (the peer endpoint ``POST /herd/v1/sync`` on the gateway's ``api_server``)
 
 Fan-out model (see README "How sync works"):
@@ -63,6 +64,14 @@ AUTO_SYNC = True
 # Set by the plugin's register(): ``fn(session_key, text) -> bool`` (wraps ctx.inject_message).
 WAKE_HANDLER: Optional[Callable[[str, str], bool]] = None
 WAKE_MAX_PER_MINUTE = 6
+
+# Live supervision status (S-15 / F3). Fixed vocabulary; local to this gateway's own agent;
+# in-memory only: never written to SQLite, so a restart can never resurrect a stale phrase.
+# Bound: agent_status() returns None once the phrase is STATUS_TTL_S (5 minutes) old or older.
+STATUS_PHRASES = ("reading the code", "writing the code", "reviewing", "done", "idle")
+STATUS_TTL_S = 300.0
+_status: Optional[dict] = None
+_status_lock = threading.Lock()
 
 
 class HerdError(Exception):
@@ -1074,6 +1083,38 @@ def request_sync() -> None:
     threading.Thread(target=lambda: ctx.run(_run), name="herd-sync-kick", daemon=True).start()
 
 
+def set_status(phrase: Any) -> dict:
+    """Set this gateway agent's supervision phrase. Refuses anything outside STATUS_PHRASES.
+
+    Local only (D-5): no network call, no sync, nothing written to herd.db.
+    """
+    text = " ".join(str(phrase or "").split()).casefold()
+    if text not in STATUS_PHRASES:
+        raise HerdError(422, "Status must be one of: " + ", ".join(STATUS_PHRASES) + ".")
+    me = identity()
+    global _status
+    with _status_lock:
+        _status = {"phrase": text, "at": time.time(), "agent": me["display_name"],
+                   "gateway_id": me["gateway_id"]}
+    _notify("status.changed", {"phrase": text, "agent": me["display_name"]})
+    return {"phrase": text, "at": _now(), "agent": me["display_name"], "ttl_s": STATUS_TTL_S}
+
+
+def agent_status(now: Optional[float] = None) -> Optional[dict]:
+    """The agent's supervision phrase, or None when unset/expired. Never guesses. No DB access."""
+    with _status_lock:
+        entry = _status
+    if not entry or entry.get("phrase") not in STATUS_PHRASES:
+        return None
+    now = time.time() if now is None else float(now)
+    age = max(0.0, now - float(entry["at"]))
+    if age >= STATUS_TTL_S:
+        return None
+    return {"phrase": entry["phrase"], "agent": str(entry.get("agent") or ""),
+            "at": datetime.fromtimestamp(float(entry["at"]), timezone.utc).isoformat(timespec="milliseconds"),
+            "age_s": round(age, 3)}
+
+
 def status() -> dict:
     """Identity + per-peer link health, for the desktop's header and empty states."""
     me = identity()
@@ -1094,4 +1135,5 @@ def status() -> dict:
             "last_attempt": st.get("last_attempt") or "", "last_error": st.get("last_error") or "",
             "connected": bool(st.get("last_ok")) and not st.get("last_error"),
         })
-    return {"self": me, "peers": out, "incoming": incoming, "protocol": PROTOCOL_VERSION}
+    return {"self": me, "peers": out, "incoming": incoming, "protocol": PROTOCOL_VERSION,
+            "agent_status": agent_status()}

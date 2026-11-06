@@ -1,6 +1,6 @@
 """Herd — multiplayer Hermes. Agent-side registration.
 
-* Three agent tools (``herd_list_channels``, ``herd_post``, ``herd_read_channel``).
+* Four agent tools (``herd_list_channels``, ``herd_post``, ``herd_read_channel``, ``herd_set_status``).
 * The peer endpoint ``POST /herd/v1/sync`` on this gateway's ``api_server`` (the same server and
   ``API_SERVER_KEY`` a teammate's Hermes already uses to reach this one), plus a background
   sync loop that keeps this gateway and its configured peer converged.
@@ -132,6 +132,8 @@ def register(ctx):
                       schema=schemas.HERD_POST, handler=tools.herd_post)
     ctx.register_tool(name="herd_read_channel", toolset="herd",
                       schema=schemas.HERD_READ_CHANNEL, handler=tools.herd_read_channel)
+    ctx.register_tool(name="herd_set_status", toolset="herd",
+                      schema=schemas.HERD_SET_STATUS, handler=tools.herd_set_status)
     ctx.register_platform_handler("api_server", _wire_api_server)
     ctx.register_command("herd-listen", _listen_command,
                          description="Let your agent in this chat answer Herd @mentions (or: off)",
