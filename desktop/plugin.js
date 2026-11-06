@@ -43,6 +43,9 @@ const selection = { page: atom(null), pane: atom(null) }
 const composing = { page: atom(null), pane: atom(null) } // null | 'channel' | 'dm'
 const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown open
 const thread = { page: atom(null), pane: atom(null) } // the open thread's root message id, or null
+// Per-composer @-autocomplete: { page, pane } so the page and the pane never share
+// (or ghost) one another's dropdown. null | { start, query, index }.
+const mentionState = { page: atom(null), pane: atom(null) }
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -353,6 +356,107 @@ function ReplySummary({ message, onOpen }) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// @-mentions. Handle rules mirror dashboard/herd_store.py (mention_handles / mentions_me):
+// a handle is the display name with runs of non-alphanumerics turned into '-', and
+// `@handle` or `@handle-hermes` wakes that teammate's agent.
+// ---------------------------------------------------------------------------
+
+// Boundaries are Unicode-aware to mirror the Python side (`\w` is Unicode there):
+// with an ASCII \w an "é@ty" or "K@ty" (U+212A) looked like a mention in JS but
+// never woke anyone in Python. The token body stays ASCII because handles are
+// ASCII slugs; the trigger body accepts any script so the menu stays open while
+// the user is still typing the name.
+const MENTION_TOKEN = /(?<![\p{L}\p{N}_@])@[A-Za-z0-9][A-Za-z0-9_-]*/gu
+const MENTION_TRIGGER = /(?<![\p{L}\p{N}_@])@([\p{L}\p{N}_-]*)$/u
+
+function mentionHandle(name) {
+  // Lowercase BEFORE slugging, exactly like the Python `mention_handles`
+  // (re.sub(r"[^a-z0-9]+", "-", display_name.lower())): "İlker" -> "i-lker",
+  // "K" U+212A -> "k". Sluggling first kept the case and produced handles the
+  // backend never matched.
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function mentionCandidates(participants, query) {
+  const q = String(query || '').toLowerCase()
+  const out = []
+  ;(Array.isArray(participants) ? participants : []).forEach(p => {
+    const handle = mentionHandle(p.display_name)
+    if (p.is_self || !handle) return
+    out.push({ key: p.id + ':human', handle, label: p.display_name, agent: false })
+    out.push({ key: p.id + ':agent', handle: handle + '-hermes', label: p.display_name + "'s Hermes", agent: true })
+  })
+  return out.filter(c => !q || c.handle.toLowerCase().includes(q) || c.label.toLowerCase().includes(q))
+}
+
+// The open @fragment ending at the caret, or null.
+function mentionAtCaret(textarea) {
+  const caret = textarea.selectionStart
+  if (typeof caret !== 'number') return null
+  const m = MENTION_TRIGGER.exec(textarea.value.slice(0, caret))
+  return m ? { start: m.index, query: m[1], index: 0 } : null
+}
+
+function insertMention(textarea, state, handle, $mention) {
+  const value = textarea.value
+  const end = Math.max(textarea.selectionStart, state.start + 1)
+  const token = '@' + handle + ' '
+  textarea.value = value.slice(0, state.start) + token + value.slice(end)
+  const caret = state.start + token.length
+  textarea.focus()
+  textarea.setSelectionRange(caret, caret)
+  $mention.set(null)
+}
+
+// Plain strings + <span>s only (React escapes text), so message bodies stay XSS-safe.
+function renderContent(text) {
+  const str = String(text == null ? '' : text)
+  const parts = []
+  let last = 0
+  for (const m of str.matchAll(MENTION_TOKEN)) {
+    if (m.index > last) parts.push(str.slice(last, m.index))
+    parts.push(jsx('span', { className: 'font-medium text-(--ui-accent)', children: m[0] }, 'm' + m.index))
+    last = m.index + m[0].length
+  }
+  if (last < str.length) parts.push(str.slice(last))
+  return parts
+}
+
+function MentionMenu({ items, index, onPick }) {
+  return jsx('div', {
+    role: 'listbox',
+    'aria-label': 'Mention suggestions',
+    className:
+      'absolute bottom-full left-2 right-2 z-10 mb-1 flex max-h-48 flex-col overflow-y-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-surface-primary) p-1 shadow-md',
+    children: items.map((c, i) =>
+      jsxs(
+        'div',
+        {
+          role: 'option',
+          'aria-selected': i === index,
+          // mouseDown (not click) + preventDefault keeps focus in the textarea.
+          onMouseDown: e => {
+            e.preventDefault()
+            onPick(e.currentTarget.closest('form'), c)
+          },
+          className:
+            'flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 text-xs ' +
+            (i === index ? 'bg-(--ui-surface-secondary) text-(--ui-text-primary)' : 'text-(--ui-text-secondary)'),
+          children: [
+            jsx('span', { className: 'truncate', children: c.label }),
+            jsx('span', { className: 'text-(--ui-text-tertiary)', children: '@' + c.handle })
+          ]
+        },
+        c.key
+      )
+    )
+  })
+}
+
 const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
 function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
@@ -407,7 +511,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
             : null
         ]
       }),
-      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: message.content }),
+      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) }),
       reactions.length
         ? jsx('div', {
             className: 'mt-0.5 flex flex-wrap gap-1',
@@ -440,7 +544,7 @@ function threadTitle(channel, selfId) {
   return channel.is_dm ? dmLabel(channel, selfId) : '# ' + channel.name
 }
 
-function ThreadView({ channel, rootId, selfId, status, $thread }) {
+function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.thread(rootId),
     queryFn: () => api('/messages/' + encodeURIComponent(rootId) + '/thread')
@@ -486,12 +590,12 @@ function ThreadView({ channel, rootId, selfId, status, $thread }) {
         ]
       }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
-      jsx(Composer, { channel, placeholderName: 'this thread', threadParentId: rootId })
+      jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
     ]
   })
 }
 
-function MessageView({ channel, selfId, status, $thread }) {
+function MessageView({ channel, selfId, status, $thread, compact }) {
   const openThreadId = useValue($thread)
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
@@ -500,7 +604,7 @@ function MessageView({ channel, selfId, status, $thread }) {
   const messages = Array.isArray(data) ? data : []
   const title = threadTitle(channel, selfId)
   if (openThreadId) {
-    return jsx(ThreadView, { channel, rootId: openThreadId, selfId, status, $thread }, openThreadId)
+    return jsx(ThreadView, { channel, rootId: openThreadId, selfId, status, $thread, compact }, openThreadId)
   }
   const openThread = id => $thread.set(id)
   let body
@@ -535,12 +639,24 @@ function MessageView({ channel, selfId, status, $thread }) {
         ]
       }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
-      jsx(Composer, { channel, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
+      jsx(Composer, { channel, compact, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
     ]
   })
 }
 
-function Composer({ channel, placeholderName, threadParentId }) {
+function Composer({ channel, compact, placeholderName, threadParentId }) {
+  const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
+  // Each composer keys its own autocomplete, so a dropdown opened in the pane can
+  // never render (or mangle a draft) in the page — or the other way round.
+  const $mention = compact ? mentionState.pane : mentionState.page
+  const mention = useValue($mention)
+  const items = mention ? mentionCandidates(participants, mention.query) : []
+  const menuOpen = items.length > 0
+  const activeIndex = mention ? Math.min(mention.index, items.length - 1) : 0
+  const pick = (form, item) => {
+    const textarea = form && form.elements.content
+    if (textarea && mention) insertMention(textarea, mention, item.handle, $mention)
+  }
   const send = useMutation({
     mutationFn: ({ content }) =>
       api('/channels/' + encodeURIComponent(channel.id) + '/messages', {
@@ -557,7 +673,7 @@ function Composer({ channel, placeholderName, threadParentId }) {
     }
   })
   return jsxs('form', {
-    className: 'flex flex-col gap-1.5 border-t border-(--ui-stroke-secondary) p-2',
+    className: 'relative flex flex-col gap-1.5 border-t border-(--ui-stroke-secondary) p-2',
     onSubmit: e => {
       e.preventDefault()
       const form = e.currentTarget
@@ -565,12 +681,37 @@ function Composer({ channel, placeholderName, threadParentId }) {
       if (content.trim() && !send.isPending) send.mutate({ content, form })
     },
     children: [
+      menuOpen ? jsx(MentionMenu, { items, index: activeIndex, onPick: pick }) : null,
       jsx(Textarea, {
         name: 'content',
         rows: 2,
         placeholder: threadParentId ? 'Reply in thread' : 'Message ' + placeholderName,
         'aria-label': 'Message',
+        onChange: e => $mention.set(mentionAtCaret(e.currentTarget)),
+        onClick: e => $mention.set(mentionAtCaret(e.currentTarget)),
+        onBlur: () => $mention.set(null),
+        onKeyUp: e => {
+          if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) $mention.set(mentionAtCaret(e.currentTarget))
+        },
         onKeyDown: e => {
+          if (menuOpen && !e.nativeEvent.isComposing) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              const next = e.key === 'ArrowDown' ? Math.min(items.length - 1, activeIndex + 1) : Math.max(0, activeIndex - 1)
+              $mention.set({ ...mention, index: next })
+              return
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+              e.preventDefault()
+              pick(e.currentTarget.form, items[activeIndex])
+              return
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              $mention.set(null)
+              return
+            }
+          }
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             const form = e.currentTarget.form
@@ -673,7 +814,7 @@ function HerdView({ compact }) {
             $menu
           }),
           selected
-            ? jsx(MessageView, { channel: selected, selfId, status, $thread }, selected.id)
+            ? jsx(MessageView, { channel: selected, selfId, status, $thread, compact }, selected.id)
             : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
         ]
       })
@@ -708,6 +849,8 @@ export default {
     plusMenu.pane.set(false)
     thread.page.set(null)
     thread.pane.set(null)
+    mentionState.page.set(null)
+    mentionState.pane.set(null)
     ctx.onDispose(() => {
       rest = null
     })
