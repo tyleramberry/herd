@@ -164,6 +164,186 @@ Test on the receiving Mac (B); the mentioning human is on A.
 
 Known limit: `author_type` is set by the sending gateway, so a rogue linked peer could label an agent post as `human`. Bounded by the rate cap, the owner's approvals, and the fact that the peer already holds our API key.
 
+## 6c. TC-5 — Two-way peer registration states (S-8; due Nov 6)
+
+Ground rules (code + S-8 repro, pinned so Smith and QA build the same thing):
+
+- Herd consumes ONLY its own join form (Settings → Plugins → Herd →
+  `peer_name` / `peer_url` / `peer_key`, or the pane's "Connect a teammate"
+  button). Core `hermes peer add` registers a gateway with Hermes CORE —
+  Herd never reads it (Q-3 CA-4; rule-11 ruling stripped `use_hermes_peers`).
+- One registered side carries BOTH directions: the registered side pushes its
+  own and pulls the peer's messages every 3 s, and the unregistered side
+  still receives them via its own `POST /herd/v1/sync` endpoint. The S-8
+  defect is the UNREGISTERED side's pane state: it must tell its owner what
+  to do, not sit on a bare "No teammate connected".
+- Run the whole matrix on two clean instances (§2 topology), same plugin
+  SHA both sides (ENV-1). Every cell: record pane copy verbatim + screenshot.
+
+- [ ] TC-5.1 **Neither side registered.** Both panes show an unconnected
+      state with the connect affordance. Local features work with no peer at
+      all (create channel, post, read — the pane must not require a peer).
+      A post on A does not appear on B.
+- [ ] TC-5.2 **One-way registration = the S-8 repro.** Register A→B only
+      (A's join form: B's name, URL, key). (a) Messages still flow BOTH
+      ways within one sync tick: post on A appears on B, post on B appears
+      on A — a regression here is **S1** (it breaks the SPINE contract that
+      one-sided linking is enough). (b) B's pane shows the actionable
+      waiting state — "waiting for YOUR peer add" (or equivalent) with the
+      exact steps, naming HERD'S OWN join form, not core `hermes peer add`.
+      A bare "No teammate connected" on B is a FAIL of this TC.
+- [ ] TC-5.3 **Second registration converges.** B registers A → both panes
+      show Connected within one sync tick (~3 s), no restart; each side's
+      participants list shows the other's correct display name (not the
+      "peer" fallback), DMs between the two open to the same channel both
+      sides.
+- [ ] TC-5.4 **Wrong URL / wrong key.** Bad key → the "Add X's key" /
+      auth-failure state; bad URL → "Can't reach X" state; neither crashes
+      the pane or the backend. Fix the field → link recovers and back-syncs
+      everything missed (cursors were not advanced past undelivered rows).
+- [ ] TC-5.5 **Rename / re-register must not replay.** Change `peer_name`
+      (or re-enter the same URL) on A → no duplicate participant rows, no
+      message re-flood (push/pull cursors keyed by URL survive), status
+      label shows the new name.
+- [ ] TC-5.6 **Unregister.** Clear A's peer fields → sync stops (posts stay
+      local on both sides), pane returns to the unconnected state, history
+      intact. Re-register → converges again.
+- [ ] TC-5.7 **Ambiguity trap (docs/copy).** Run core `hermes peer add`
+      alone (no Herd form) → Herd pane still shows unconnected and no sync
+      runs; the pane copy must not imply core registration connects Herd.
+      If Smith's fix auto-detects via core peers instead of the form, rerun
+      the catalog audit (TC-0.8) — reading core peers was ruled out in Q-3.
+
+## 6d. TC-6 — @-mention autocomplete (S-9; due Nov 6)
+
+Acceptance per spec: typing @ in the composer opens a dropdown of taggable
+participants — humans AND agents — keyboard navigable, Enter/Tab selects,
+and the inserted token renders highlighted and RELIABLY triggers the S-7
+wake. The wake contract is `mention_handles()` in `herd_store.py`: display
+name → slug (`[^a-z0-9]+`→`-`) → handles `{@slug, @slug-hermes}`, and BOTH
+handles wake the peer's agent. The invariant under test:
+
+**every token the dropdown can insert is in `mention_handles()` of that
+participant** — a token that renders pretty but never matches is a silent
+wake failure (S2).
+
+- [ ] TC-6.1 **Dropdown contents.** On a channel after both sides have
+      posted: typing @ lists the remote human participant AND the remote
+      agent (the `-hermes` handle). Self may appear but must be harmless.
+- [ ] TC-6.2 **Keyboard nav.** ↑/↓ move the highlight, Enter or Tab selects,
+      Esc closes, further typing filters, click also selects. No selection
+      + Enter = posts the text as typed (Slack parity).
+- [ ] TC-6.3 **Inserted token matches the wake contract.** For a multiword
+      name ("Tyler Amberry") the dropdown inserts `@tyler-amberry` (the
+      slug), NOT `@Tyler` or `@Tyler Amberry`. For names with emoji/unicode,
+      the slug still matches `mention_handles` on the receiving side.
+- [ ] TC-6.4 **Wake round-trip (S-9 × S-7; run after TC-4).** All three
+      opt-ins on B; on A send a mention chosen from the dropdown → exactly
+      one wake on B, quoted + labelled, per TC-4.4. Then select YOURSELF
+      from the dropdown on A → renders highlighted but never wakes (own
+      `gateway_id` guard). Then a plain `@typo-name` from the dropdown-less
+      path → no wake (TC-4.8 regression intact).
+- [ ] TC-6.5 **Dropdown edges.** @ with no participants yet → no crash;
+      `a@tyler` mid-word → no dropdown (matches the `(?<![\w@])@` regex);
+      selecting does not eat surrounding text; backspace past @ closes it;
+      long names truncate with layout intact (S3 otherwise).
+- [ ] TC-6.6 **Duplicate slugs.** Two participants whose names slug to the
+      same handle → dropdown shows both, distinguished; the ambiguous
+      handle's wake behavior is documented and tested (S3 if it silently
+      picks one).
+- [ ] TC-6.7 **Cross-gateway rendering.** The chosen @token syncs verbatim
+      and renders highlighted on the other gateway; the TC-4.5 no-loop
+      guard still holds (agent replies never wake anything).
+
+## 6e. TC-7 — Threads (S-11; due Nov 7)
+
+Sync model to hold Smith to: a thread reply is a MESSAGE (same UUID
+idempotency, same push/pull cursor, same `INSERT OR IGNORE` ingest) plus a
+parent reference to the root message's ID — never to a local seq or
+timestamp. Threads converge across gateways exactly like messages do;
+anything with a second, separate sync path is a red flag.
+
+- [ ] TC-7.1 **Thread UI.** Reply-in-thread opens a thread view
+      (Slack-like); replies live in the thread; the root shows a reply
+      count / jump affordance; the channel timeline is not polluted by the
+      replies.
+- [ ] TC-7.2 **A→B.** Root + replies posted on A render on B as the SAME
+      thread within one sync tick, order stable (id/seq sort), no reload —
+      event path first, then again with the event path down (poll fallback,
+      TC-2.5 analog).
+- [ ] TC-7.3 **B→A into the SAME thread.** B replies to a root that came
+      from A → the reply lands in A's existing thread (parent resolves by
+      message UUID on both sides), not a new or orphan thread.
+- [ ] TC-7.4 **Convergence & dup delivery.** The same reply delivered twice
+      → one row (ingest idempotent). Reply arrives before its root
+      (offline catch-up / reordering) → no crash; the thread reattaches
+      when the root lands; replies whose root never arrives degrade
+      visibly but sanely.
+- [ ] TC-7.5 **Cross-feature.** @-autocomplete works in the thread composer
+      (S-9 × S-11); a thread reply from the other gateway that mentions
+      the peer agent still wakes per TC-4 (or the limitation is
+      documented); reactions work on thread replies (S-12 × S-11); threads
+      in a DM are allowed or cleanly absent.
+- [ ] TC-7.6 **Persistence & migration.** Restart B → thread history intact
+      (TC-2.6 analog). Upgrade-in-place: a pre-threads `herd.db` (0.1.0
+      message history) + new plugin → schema migrates without crash and
+      the old history stays readable (migration documented in the PR;
+      S2 if upgrade wipes or refuses the old DB). Fresh
+      uninstall/reinstall still passes TC-3.7.
+- [ ] TC-7.7 **Ordering & load.** 3 quick replies → order 1,2,3 on both
+      sides (TC-2.4 analog); a 50-reply thread renders without noticeable
+      jank.
+
+## 6f. TC-8 — Message reactions (S-12; due Nov 7)
+
+Locked set (per N-4 re-baseline): 👍 ❤️ 👁️ 🎉 — exactly these four, no
+free-form emoji. Reactions are TOGGLEABLE state, not append-only messages,
+so this is the most dangerous sync surface of the new scope: dup delivery
+must not inflate counts, and a remove must not resurrect. Every TC below
+ends with both sides showing the SAME reaction state.
+
+- [ ] TC-8.1 **Add UI.** Hover a message → the four reactions are offered
+      (only these four); click adds my reaction: count 1, visibly mine.
+- [ ] TC-8.2 **Toggle & aggregate.** Click again removes mine: count
+      decrements, empty state clean. Second person reacts the same emoji →
+      count 2; one row per (message, reactor, emoji) — the dedup contract,
+      the reaction analog of message UUID idempotency.
+- [ ] TC-8.3 **A→B sync.** A reacts → appears on B within one sync tick, no
+      reload (event path), and via the poll fallback when the event path
+      is down.
+- [ ] TC-8.4 **Convergence & dup delivery.** B reacts 👍 on the same
+      message after A → count 2 with TWO distinct rows (per-reactor
+      identity — beware the gateway_id / display_name mismatch that yields
+      two rows for one person). The same reaction event delivered twice →
+      no count inflation.
+- [ ] TC-8.5 **Remove-then-add across offline.** A adds 👍 then removes it
+      while B is offline; B comes back → converges to REMOVED (no
+      resurrection after catch-up). A re-adds after B caught up →
+      converges to ADDED. Interleave add/remove between the sides in both
+      orders → final state identical on both sides after every
+      interleaving.
+- [ ] TC-8.6 **Edges.** React to a message not yet synced / unknown id →
+      no crash, no phantom row; reactions on thread replies; the four
+      emoji render correctly and distinctly on both Macs at UI size;
+      reaction state survives gateway restart (SQLite) and plugin
+      disable/re-enable (TC-3.6).
+- [ ] TC-8.7 **Scope guard.** No new agent tool for reactions without a
+      scope-change ruling (N-1 locks 3 tools): TC-0.8 catalog audit must
+      still pass with 3 tools; any new endpoint stays in the
+      `/api/plugins/herd/` + `/herd/v1/` namespaces (TC-0.7); reaction UI
+      is human-only.
+
+## 6g. TC-9 — Single + button (S-10; due Nov 6; polish)
+
+- [ ] TC-9.1 One + affordance replaces New Message / New Channel; opens a
+      small menu with exactly those two items.
+- [ ] TC-9.2 Menu closes on Esc / click-outside with no action; New
+      Message → DM picker; New Channel → create dialog; TC-1.3's
+      empty-state create affordance still works (no regression).
+- [ ] TC-9.3 Keyboard accessible; menu teardown disposes its
+      listeners/interval (TC-1.7 pattern); no hardcoded colors in the new
+      code (TC-0.6 grep).
+
 ## 7. Bug reporting (to @smith, loop until clean)
 
 Every bug back to Smith carries: **ID, severity, TC id, repro steps (exact
@@ -184,6 +364,9 @@ Severity:
 
 Nov 5 night: report to @foreman — SPINE PASS/FAIL, TC-2.x evidence, open
 bug list by severity. SPINE FAIL = escalate same night (S-2 rule).
-Nov 6–7 (Q-2): full board (TC-0…TC-3) against Smith's PRs; when clean,
+Nov 6–7 (Q-2): full board (TC-0…TC-9) against Smith's PRs, including the new-scope sections TC-5…TC-9 (S-8 two-way peer registration, S-9 autocomplete,
+S-10 + button, S-11 threads, S-12 reactions — N-4 re-baselines the cut-list:
+threads + reactions IN with the four emojis, autocomplete and + button IN as
+polish) as each PR lands; when clean,
 sign off explicitly ("QA passed: PR #N, tests X/Y green, edge cases covered")
 and route the assessment to @foreman.
