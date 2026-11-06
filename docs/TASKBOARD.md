@@ -10,7 +10,7 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 | Date | Milestone |
 |---|---|
 | Thu Nov 5 | **SPINE:** two gateways exchange one real message through the plugin |
-| Sat Nov 7 | Validate + doctor clean; demo script final; polish pass done |
+| Sat Nov 7 | Validate + doctor clean; demo script final; polish pass done · **12:00 CUT #1 = F4/S-16** · **18:00 CUT #2 = F3/S-15** |
 | Sun Nov 8 | **CODE FREEZE** · catalog PR opened · demo video recorded |
 | Mon Nov 9 | Clean-install rehearsal (fresh HERMES_HOME, 2-gateway smoke test) |
 | Tue Nov 10 | Video posted to X (@NousResearch) · entry form submitted |
@@ -27,6 +27,11 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 - [ ] ⬜ **S-5 (due Nov 7): Fix Sentry's QA round-1 bugs**; `hermes plugins validate` + `doctor` clean; screenshots for catalog PR.
 - [ ] ⬜ **S-6 (Nov 8): Freeze** — bug fixes only.
 - [ ] 🔵 **S-7 (stretch, gated): @mention wake** — **Tyler approved the build (Nov 5): "Yes, build it."** Smith is starting. Gate stands: **Foreman go/no-go Fri Nov 6 noon** (board previously said "Fri Nov 7"; Nov 7 is Saturday). Go only if TC-2 (two real gateways) has passed on real hardware; otherwise cut it, no freeze slip. Default off (ctx.inject_message + allow_gateway_injection). Rule-13 disclosure and H-2 capabilities must be updated if it ships.
+- [ ] ⬜ **S-13 (Nov 6, Tyler directive F1): Promote a private DM into a shared room** — one action in an open DM ("Share to a channel") creates a named channel and replays the DM's messages into it in order; appears on both gateways within a cycle; DM untouched. `PROTOCOL_VERSION` bump. **Done means:** see `docs/product/N-5-CUT-LIST-AMENDMENT.md` §1 F1. Must pass two-gateway, not just unit tests (R-5). QA: Q-7. Est 4 h.
+- [ ] ⬜ **S-14 (Nov 6, Tyler directive F2): Assignment context on @mention wake** — wake text carries who asked (+channel), what is expected, where to report back (`herd_post` ref). All S-7 guards unchanged: mentions only, one wake per message, agent messages never wake, default off, `allow_gateway_injection`. QA: Q-7 (extends TC-4). Est 3 h. **Never cut.**
+- [ ] ⬜ **S-15 (Nov 7, Tyler directive F3): Live supervision status line + speaker badge** — one short phrase from a fixed vocabulary (`reading the code` / `writing the code` / `reviewing` / `done` / `idle`) beside in-flight agent work, plus a human/agent badge per message. No tool-activity stream. Rides existing `broadcast_plugin_event` + 3 s poll. New tool → `provides_tools` + `herd.yaml` capability + rule-13. **Cut #2 if not merged by Sat 18:00.** QA: Q-7. Est 6 h.
+- [ ] ⬜ **S-16 (Nov 7, Tyler directive F4): Agent response links to the Kanban board** — an agent's channel answer tied to a Kanban task id shows a link/badge with id + title that opens the task on the `herd` board. Tie is explicit, never guessed. **BLOCKED pending Sentry ruling Q-8** (may a plugin read `kanban.db`?); id-only fallback if no. **Cut #1 if not merged by Sat 12:00.** Est 6 h.
+- [ ] ⛔ **NOT BUILT (Tyler, Nov 6): identities & permissions (directive #1) · concurrency safety (directive #6).** No design, no branch. Post-hackathon.
 
 ## @sentry — QA
 
@@ -35,6 +40,8 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 - [ ] 🔵 **Q-3 (due Nov 7): Catalog-rules audit** — security scan findings, capability declarations match reality, no core-UI touching, secrets policy. **Round 1 done Nov 5: `docs/qa/Q3-CATALOG-AUDIT.md` + `scripts/qa/catalog_audit.py`. All 3 S1s fixed in #9 (merged); audit on main = 0 FAIL. Re-run at freeze.**
 - [ ] ⬜ **Q-4 (due Nov 9): Clean-install rehearsal** — fresh HERMES_HOME, install by repo, enable, two-gateway smoke test, report pass/fail to Foreman. Script ready: `docs/qa/Q4-CLEAN-INSTALL.md`.
 - [ ] ⬜ **Q-5 (Nov 10): Regression pass on any post-freeze fixes.**
+- [ ] ⬜ **Q-7 (Nov 6–7, new scope): QA plan + loop for S-13/S-14/S-15** — extend Q-6 with a promote-share case (message order preserved, DM intact, both gateways converge), a wake-context case (who/what/where present, all S-7 guards still hold — extend TC-4), and a status case (fixed vocabulary only, no phrase invented when unset, badge correct). Bugs back to Smith with repro steps.
+- [ ] ⬜ **Q-8 (Nov 6, 13:00 — RULING FIRST): May a catalog plugin read `~/.hermes/kanban/boards/<slug>/kanban.db`?** Written yes/no to Foreman before S-16 is started. If no, S-16 ships id-only. Owner: Sentry.
 
 ## @northstar — Product
 
@@ -47,7 +54,8 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 - [ ] 🔵 **H-1 (due Nov 7): Demo script draft** — <90s, hook = join flow, demo = Tyler + wife's two instances. Nov 8 recording date is real. **Status: draft v6 (docs/submission/H-1-demo-script.md) — ~80s. People-first hook ("Hermes is single-player. We made it multiplayer."), shot 2 = Add-teammate form, Brooklyn approves her agent on camera. Shot 5 recorded both ways (5A baseline, 5B @mention); Foreman go/no-go Fri noon. Final pass Nov 7.**
 - [ ] ⬜ **H-2 (due Nov 7): Catalog PR package ready** — plugin-catalog/herd.yaml draft (entry schema, 40-char SHA, quoted version), PR description w/ surfaces + rule-13 disclosures. **Opens only after Foreman review + Tyler sign-off Nov 8.** **Status: draft v2 (docs/submission/H-2-catalog-pr-package.md) — checked against live catalog README: fixed capability keys (`provides_*`), category → desktop, added image/screenshots. Capabilities from Smith; requires_hermes ">=0.22.0" per Sentry (oldest verified, Tyler's Mac); rule-11 Q1 resolved (strip use_hermes_peers).**
 - [ ] ⬜ **H-3 (due Nov 8): Catalog PR opened** (post-approval) · demo video recorded.
-- [ ] ⬜ **H-4 (due Nov 10): Video posted to X tagged @NousResearch · entry form submitted with both links** · report form confirmation to Foreman.
+- [ ] ⬜ **H-4 (Nov 10): Video posted to X tagged @NousResearch · entry form submitted with both links** · report form confirmation to Foreman.
+- [ ] ⬜ **H-6 (Nov 6–7, Tyler directive): Submission surfaces for the new scope** — update H-1 demo script, the `herd.yaml` capability list, and the rule-13 disclosures to cover S-13 (new promote-write path + protocol bump), S-15 (new tool + status surface) and S-16 (Kanban link) **only if each is actually merged at freeze**. Cut features must not appear in the script or the catalogue entry. Needs Smith's capability list before H-2 is final.
 
 ## @foreman — Project management
 
@@ -59,4 +67,4 @@ Board owner: Foreman (PM). Update your own rows by editing this file in your PR.
 
 ## Post-hackathon backlog (do NOT build before Nov 11)
 
-Threads · reactions · file sharing · presence indicators · voice · channel permissions · message search · Herd for >2 gateways · MySI plugin.
+File sharing · presence/typing indicators · voice · channel permissions · message search · Herd for >2 gateways · full tool-activity stream (F3 ships one phrase only) · Kanban link beyond id-only (if F4 is cut or id-only) · identities & permissions (Tyler, Nov 6: wait) · concurrency safety hardening (Tyler, Nov 6: not yet) · MySI plugin.
