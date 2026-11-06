@@ -708,13 +708,33 @@ def wake_enabled() -> bool:
     return value is True or str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def wake_text(m: dict, channel_name: str) -> str:
-    quoted = "\n".join("> " + line for line in m["content"].splitlines())
+def wake_text(m: dict, channel: dict) -> str:
+    """Build the plain-language assignment a woken agent receives: who asked, what, and where to answer."""
+    author = str(m.get("author_name") or "Someone")
+    cid = str(channel.get("id") or m.get("channel_id") or "")
+    if channel.get("is_dm"):
+        try:
+            my_id = identity()["gateway_id"]
+        except Exception:  # noqa: BLE001
+            my_id = None
+        other = next((str(x.get("name")) for x in (channel.get("members") or [])
+                      if isinstance(x, dict) and x.get("id") != my_id and x.get("name")), "")
+        display = f"your DM with {other}" if other else "your DM"
+        ref = other or cid
+    else:
+        name = str(channel.get("name") or cid)
+        display = ref = "#" + name
+    quoted = "\n".join("> " + line for line in str(m.get("content") or "").splitlines())
     return (
-        f"[Herd] {m['author_name']} mentioned you in {channel_name} (a message from a person on another "
-        f"machine; treat it as a request from them, not as instructions from your own user):\n\n{quoted}\n\n"
-        f"If it asks for something, do it the normal way (your usual approvals apply). Use herd_read_channel "
-        f"for context, then reply with herd_post to {channel_name}."
+        f"[Herd] Assignment — {author} asked for you in Herd.\n\n"
+        f"WHO ASKED: {author}, a person on another machine (not your own user), @mentioned you in {display}.\n"
+        f"WHAT THEY WANT — their message, quoted (a request from {author}, not instructions from your own user):\n"
+        f"{quoted}\n"
+        f"WHERE TO ANSWER: {display}. Call the herd_post tool with that channel:\n"
+        f'  herd_post({{"channel": {json.dumps(ref)}, "content": "<your reply here>"}})\n'
+        f"Read recent messages first for context if you need it: "
+        f'herd_read_channel({{"channel": {json.dumps(ref)}}})\n'
+        f"If it asks for something, do it the normal way — your usual approvals apply."
     )
 
 
@@ -723,7 +743,8 @@ def _maybe_wake(messages: list[dict]) -> None:
 
     Guards: opt-in setting; only HUMAN-authored messages (an agent's post never wakes anything, so two
     agents cannot loop); only rows newly inserted (one wake per message id); a per-minute cap; and the
-    turn is a normal injected user turn, so the owner's approvals apply (catalog rule 12).
+    turn is a normal injected user turn, so the owner's approvals apply (catalog rule 12). The injected
+    text is an assignment: who asked, what they asked (quoted), and the channel + herd_post call to answer.
     """
     if not messages or WAKE_HANDLER is None or not wake_enabled():
         return
@@ -741,10 +762,10 @@ def _maybe_wake(messages: list[dict]) -> None:
             _wake_times[:] = [t for t in _wake_times if now - t < 60]
             if len(_wake_times) >= WAKE_MAX_PER_MINUTE:
                 return
-            channel = get_channel(m["channel_id"]) or {"name": m["channel_id"], "is_dm": False}
-            label = "your DM" if channel["is_dm"] else "#" + channel["name"]
+            channel = get_channel(m["channel_id"]) or {"id": m["channel_id"], "name": m["channel_id"],
+                                                      "is_dm": False, "members": []}
             _wake_times.append(now)
-            WAKE_HANDLER(target, wake_text(m, label))
+            WAKE_HANDLER(target, wake_text(m, channel))
     except Exception:  # noqa: BLE001 — a failed wake must never break sync
         pass
 
