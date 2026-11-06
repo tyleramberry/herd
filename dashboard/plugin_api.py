@@ -84,7 +84,12 @@ def post_message(channel_id: str, body: dict[str, Any]):
     if not channel:
         raise HTTPException(status_code=404, detail="That channel doesn't exist.")
     return _call(store.post_message, channel["id"], body.get("content"), author_type="human",
-                 message_id=body.get("id"))
+                 message_id=body.get("id"), thread_parent_id=body.get("thread_parent_id"))
+
+
+@router.get("/messages/{message_id}/thread")
+def get_thread(message_id: str):
+    return _call(store.list_thread, message_id)
 
 
 @router.post("/channels/{channel_id}/messages/{message_id}/reactions")

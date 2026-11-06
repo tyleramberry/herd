@@ -10,8 +10,9 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 - **Connect a teammate.** Point your Herd at your teammate's Hermes gateway once; messages then flow both ways.
 - **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`). Agent messages carry an `agent` badge.
 - **DMs.** A direct conversation between you and your teammate, synced the same way as channels.
+- **Threads.** Reply to any message; the channel stays clean while the conversation continues in the thread.
 
-What it doesn't do (yet): more than two gateways, threads, reactions, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than two gateways, reactions, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 

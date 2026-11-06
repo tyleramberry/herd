@@ -32,7 +32,9 @@ const KEYS = {
   status: [PLUGIN_ID, 'status'],
   channels: [PLUGIN_ID, 'channels'],
   participants: [PLUGIN_ID, 'participants'],
-  messages: channelId => [PLUGIN_ID, 'messages', channelId]
+  messages: channelId => [PLUGIN_ID, 'messages', channelId],
+  threads: [PLUGIN_ID, 'thread'],
+  thread: messageId => [PLUGIN_ID, 'thread', messageId]
 }
 
 // Module-scope state; reset on every register() (hot reload / re-enable).
@@ -40,6 +42,7 @@ let rest = null
 const selection = { page: atom(null), pane: atom(null) }
 const composing = { page: atom(null), pane: atom(null) } // null | 'channel' | 'dm'
 const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown open
+const thread = { page: atom(null), pane: atom(null) } // the open thread's root message id, or null
 // Per-composer @-autocomplete: { page, pane } so the page and the pane never share
 // (or ghost) one another's dropdown. null | { start, query, index }.
 const mentionState = { page: atom(null), pane: atom(null) }
@@ -322,6 +325,37 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
 // Messages + composer
 // ---------------------------------------------------------------------------
 
+function snippet(text, max) {
+  const line = String(text || '').replace(/\s+/g, ' ').trim()
+  return line.length > max ? line.slice(0, max - 1) + '…' : line
+}
+
+function ReplySummary({ message, onOpen }) {
+  const count = message.reply_count
+  const { data } = useQuery({
+    queryKey: KEYS.thread(message.id),
+    queryFn: () => api('/messages/' + encodeURIComponent(message.id) + '/thread')
+  })
+  const replies = data && Array.isArray(data.replies) ? data.replies : []
+  const last = replies.length ? replies[replies.length - 1] : null
+  return jsxs('button', {
+    type: 'button',
+    onClick: () => onOpen(message.id),
+    title: 'Open thread',
+    className:
+      'flex min-w-0 items-center gap-2 rounded-[3px] py-0.5 text-left text-[0.6875rem] text-(--ui-text-tertiary) hover:text-(--ui-accent)',
+    children: [
+      jsx('span', { className: 'shrink-0 font-medium', children: count === 1 ? '1 reply' : count + ' replies' }),
+      last
+        ? jsx('span', {
+            className: 'truncate text-(--ui-text-quaternary)',
+            children: (last.author_name || 'someone') + ' · ' + timeLabel(last.created_at) + ' · ' + snippet(last.content, 80)
+          })
+        : jsx('span', { className: 'truncate text-(--ui-text-quaternary)', children: timeLabel(message.last_reply_at) })
+    ]
+  })
+}
+
 // ---------------------------------------------------------------------------
 // @-mentions. Handle rules mirror dashboard/herd_store.py (mention_handles / mentions_me):
 // a handle is the display name with runs of non-alphanumerics turned into '-', and
@@ -425,7 +459,8 @@ function MentionMenu({ items, index, onPick }) {
 
 const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
-function MessageRow({ message, channelId }) {
+function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
+  const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
   const isAgent = message.author_type === 'agent'
   const reactions = Array.isArray(message.reactions) ? message.reactions : []
   const react = useMutation({
@@ -465,7 +500,15 @@ function MessageRow({ message, channelId }) {
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
           isAgent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null,
-          jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) })
+          jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) }),
+          onOpenThread
+            ? jsx('button', {
+                type: 'button',
+                onClick: () => onOpenThread(message.id),
+                className: 'text-(--ui-text-tertiary) hover:text-(--ui-accent)',
+                children: 'Reply'
+              })
+            : null
         ]
       }),
       jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) }),
@@ -491,18 +534,79 @@ function MessageRow({ message, channelId }) {
               )
             )
           })
-        : null
+        : null,
+      onOpenThread && message.reply_count > 0 ? jsx(ReplySummary, { message, onOpen: onOpenThread }) : null
     ]
   })
 }
 
-function MessageView({ channel, selfId, status, compact }) {
+function threadTitle(channel, selfId) {
+  return channel.is_dm ? dmLabel(channel, selfId) : '# ' + channel.name
+}
+
+function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: KEYS.thread(rootId),
+    queryFn: () => api('/messages/' + encodeURIComponent(rootId) + '/thread')
+  })
+  const replies = data && Array.isArray(data.replies) ? data.replies : []
+  let body
+  if (isLoading) {
+    body = jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
+  } else if (isError || !data || !data.parent) {
+    body = jsx(EmptyState, { title: "Couldn't load this thread.", description: 'Herd will retry in a moment.' })
+  } else {
+    body = jsxs('div', {
+      className: 'flex flex-col py-1',
+      children: [
+        jsx(MessageRow, { message: data.parent }, data.parent.id),
+        jsx('div', { className: 'mx-3 my-1 border-t border-(--ui-stroke-secondary)' }),
+        replies.length === 0
+          ? jsx('div', { className: 'px-3 py-1.5 text-xs text-(--ui-text-tertiary)', children: 'No replies yet.' })
+          : null,
+        ...replies.map(m => jsx(MessageRow, { message: m }, m.id))
+      ]
+    })
+  }
+  return jsxs('div', {
+    className: 'flex min-h-0 min-w-0 flex-1 flex-col',
+    children: [
+      jsxs('div', {
+        className: 'flex items-center justify-between gap-3 border-b border-(--ui-stroke-secondary) px-3 py-2',
+        children: [
+          jsxs('div', {
+            className: 'flex min-w-0 items-baseline gap-2',
+            children: [
+              jsx('button', {
+                type: 'button',
+                onClick: () => $thread.set(null),
+                className: 'shrink-0 text-xs text-(--ui-text-tertiary) hover:text-(--ui-accent)',
+                children: '← Back to ' + threadTitle(channel, selfId)
+              }),
+              jsx('span', { className: 'truncate text-sm font-medium', children: 'Thread' })
+            ]
+          }),
+          jsx(PeerLine, { status })
+        ]
+      }),
+      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
+      jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
+    ]
+  })
+}
+
+function MessageView({ channel, selfId, status, $thread, compact }) {
+  const openThreadId = useValue($thread)
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
     queryFn: () => api('/channels/' + encodeURIComponent(channel.id) + '/messages')
   })
   const messages = Array.isArray(data) ? data : []
-  const title = channel.is_dm ? dmLabel(channel, selfId) : '# ' + channel.name
+  const title = threadTitle(channel, selfId)
+  if (openThreadId) {
+    return jsx(ThreadView, { channel, rootId: openThreadId, selfId, status, $thread, compact }, openThreadId)
+  }
+  const openThread = id => $thread.set(id)
   let body
   if (isLoading) {
     body = jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
@@ -513,7 +617,7 @@ function MessageView({ channel, selfId, status, compact }) {
   } else {
     body = jsx('div', {
       className: 'flex flex-col py-1',
-      children: messages.map(m => jsx(MessageRow, { message: m, channelId: channel.id }, m.id))
+      children: messages.map(m => jsx(MessageRow, { message: m, channelId: channel.id, onOpenThread: openThread }, m.id))
     })
   }
   return jsxs('div', {
@@ -540,7 +644,7 @@ function MessageView({ channel, selfId, status, compact }) {
   })
 }
 
-function Composer({ channel, compact, placeholderName }) {
+function Composer({ channel, compact, placeholderName, threadParentId }) {
   const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
   // Each composer keys its own autocomplete, so a dropdown opened in the pane can
   // never render (or mangle a draft) in the page — or the other way round.
@@ -557,11 +661,14 @@ function Composer({ channel, compact, placeholderName }) {
     mutationFn: ({ content }) =>
       api('/channels/' + encodeURIComponent(channel.id) + '/messages', {
         method: 'POST',
-        body: { id: newMessageId(), content }
+        body: threadParentId
+          ? { id: newMessageId(), content, thread_parent_id: threadParentId }
+          : { id: newMessageId(), content }
       }),
     onSuccess: (_message, { form }) => {
       form.reset()
       queryClient.invalidateQueries({ queryKey: KEYS.messages(channel.id) })
+      queryClient.invalidateQueries({ queryKey: KEYS.threads })
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
     }
   })
@@ -578,7 +685,7 @@ function Composer({ channel, compact, placeholderName }) {
       jsx(Textarea, {
         name: 'content',
         rows: 2,
-        placeholder: 'Message ' + placeholderName,
+        placeholder: threadParentId ? 'Reply in thread' : 'Message ' + placeholderName,
         'aria-label': 'Message',
         onChange: e => $mention.set(mentionAtCaret(e.currentTarget)),
         onClick: e => $mention.set(mentionAtCaret(e.currentTarget)),
@@ -665,6 +772,7 @@ function HerdView({ compact }) {
   const $selected = compact ? selection.pane : selection.page
   const $composing = compact ? composing.pane : composing.page
   const $menu = compact ? plusMenu.pane : plusMenu.page
+  const $thread = compact ? thread.pane : thread.page
   const selectedId = useValue($selected)
   const statusQuery = useStatus()
   const status = statusQuery.data
@@ -697,13 +805,16 @@ function HerdView({ compact }) {
             channels,
             selfId,
             selectedId: selected ? selected.id : null,
-            onSelect: id => $selected.set(id),
+            onSelect: id => {
+              $thread.set(null) // switching channels closes any open thread
+              $selected.set(id)
+            },
             compact,
             $composing,
             $menu
           }),
           selected
-            ? jsx(MessageView, { channel: selected, selfId, status, compact }, selected.id)
+            ? jsx(MessageView, { channel: selected, selfId, status, $thread, compact }, selected.id)
             : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
         ]
       })
@@ -736,6 +847,8 @@ export default {
     composing.pane.set(null)
     plusMenu.page.set(false)
     plusMenu.pane.set(false)
+    thread.page.set(null)
+    thread.pane.set(null)
     mentionState.page.set(null)
     mentionState.pane.set(null)
     ctx.onDispose(() => {
@@ -767,6 +880,7 @@ export default {
     ctx.onEvent('plugin.herd.message.created', event => {
       const payload = (event && event.payload) || {}
       if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
+      queryClient.invalidateQueries({ queryKey: KEYS.threads }) // any open thread (and reply previews) may have grown
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
     })
     ctx.onEvent('plugin.herd.reactions.changed', event => {

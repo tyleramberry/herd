@@ -14,7 +14,8 @@ HERD_POST = {
     "name": "herd_post",
     "description": (
         "Post a message to a Herd channel or DM. Everyone in it, including people and agents on "
-        "the other machine, will see it. Use for sharing results or handing off a task."
+        "the other machine, will see it. Use for sharing results or handing off a task. "
+        "To answer a specific message, pass its id as reply_to."
     ),
     "parameters": {
         "type": "object",
@@ -24,8 +25,15 @@ HERD_POST = {
                 "description": "Channel name (e.g. 'general'), channel id, or the other person's name for a DM.",
             },
             "content": {"type": "string", "description": "The message text."},
+            "reply_to": {
+                "type": "string",
+                "description": (
+                    "Message id to reply to — puts your message in that message's thread. "
+                    "With reply_to, channel is optional (the message's own channel is used)."
+                ),
+            },
         },
-        "required": ["channel", "content"],
+        "required": ["content"],
         "additionalProperties": False,
     },
 }
@@ -34,14 +42,18 @@ HERD_READ_CHANNEL = {
     "name": "herd_read_channel",
     "description": (
         "Read recent messages from a Herd channel or DM, newest last. Use before replying or when "
-        "asked to pick up a task from a channel."
+        "asked to pick up a task from a channel. Each message has an id and a replies count; "
+        "pass a message id as thread to read that message's replies."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "channel": {
                 "type": "string",
-                "description": "Channel name (e.g. 'general'), channel id, or the other person's name for a DM.",
+                "description": (
+                    "Channel name (e.g. 'general'), channel id, or the other person's name for a DM. "
+                    "Required unless thread is given."
+                ),
             },
             "limit": {
                 "type": "integer",
@@ -49,8 +61,12 @@ HERD_READ_CHANNEL = {
                 "minimum": 1,
                 "maximum": 100,
             },
+            "thread": {
+                "type": "string",
+                "description": "Message id to read the thread of: returns that message and its replies, oldest first.",
+            },
         },
-        "required": ["channel"],
+        "required": [],
         "additionalProperties": False,
     },
 }
