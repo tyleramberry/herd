@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import math
 import re
 import socket
 import sqlite3
@@ -1100,18 +1101,43 @@ def set_status(phrase: Any) -> dict:
     return {"phrase": text, "at": _now(), "agent": me["display_name"], "ttl_s": STATUS_TTL_S}
 
 
+def _as_finite_float(value: Any) -> Optional[float]:
+    """The value as a finite float, or None when it is not a real, finite number.
+
+    Rejects bool (an int subclass, so ``True`` is not a timestamp), NaN and infinity.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
 def agent_status(now: Optional[float] = None) -> Optional[dict]:
-    """The agent's supervision phrase, or None when unset/expired. Never guesses. No DB access."""
+    """The agent's supervision phrase, or None when unset/expired. Never guesses. No DB access.
+
+    Fails closed: a malformed in-memory record - not a dict, no/unknown phrase, missing,
+    non-numeric or unformattable ``at`` - reads exactly like an unset one, so a bad record can
+    never raise out of ``status()`` (and 500 the /status route). Defensive only: ``set_status``
+    is the sole writer and always stores ``at: time.time()``.
+    """
     with _status_lock:
         entry = _status
-    if not entry or entry.get("phrase") not in STATUS_PHRASES:
+    if not isinstance(entry, dict):
         return None
-    now = time.time() if now is None else float(now)
-    age = max(0.0, now - float(entry["at"]))
+    phrase = entry.get("phrase")
+    at = _as_finite_float(entry.get("at"))
+    if not isinstance(phrase, str) or phrase not in STATUS_PHRASES or at is None:
+        return None
+    now_f = time.time() if now is None else _as_finite_float(now)
+    if now_f is None:
+        return None
+    age = max(0.0, now_f - at)
     if age >= STATUS_TTL_S:
         return None
-    return {"phrase": entry["phrase"], "agent": str(entry.get("agent") or ""),
-            "at": datetime.fromtimestamp(float(entry["at"]), timezone.utc).isoformat(timespec="milliseconds"),
+    try:  # a finite but absurd ``at`` (e.g. 1e300) still cannot format - treat it as unset too
+        stamp = datetime.fromtimestamp(at, timezone.utc).isoformat(timespec="milliseconds")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+    return {"phrase": phrase, "agent": str(entry.get("agent") or ""), "at": stamp,
             "age_s": round(age, 3)}
 
 

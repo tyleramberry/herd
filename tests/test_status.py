@@ -26,6 +26,29 @@ _, store, tools = _pkg.load()
 ROOT = _pkg.ROOT
 SOURCE = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
 
+# S3 hardening (t_1f78eb04): shapes that must read as unset, never raise. Nothing writes these
+# today (set_status always stores a float `at`); they stand in for a corrupted in-memory record.
+# `at` is <1s old at the tests' `now=1000`, so TTL expiry is not what makes a record read as unset -
+# only the defect below does.
+FRESH_AT = 999.0
+MALFORMED_STATUS_RECORDS = (
+    {"phrase": "idle"},                        # missing at
+    {"phrase": "idle", "at": "oops"},          # non-numeric at
+    {"phrase": "idle", "at": None},
+    {"phrase": "idle", "at": True},            # bool is an int subclass, still not a timestamp
+    {"phrase": "idle", "at": float("nan")},
+    {"phrase": "idle", "at": float("inf")},
+    {"phrase": "idle", "at": 1e300},           # numeric, but no datetime can format it
+    {"at": FRESH_AT},                          # missing phrase
+    {"phrase": "almost done", "at": FRESH_AT},  # invented phrase
+    {"phrase": 123, "at": FRESH_AT},           # non-string phrase
+    {"phrase": ["idle"], "at": FRESH_AT},      # unhashable phrase
+    {},
+    None,
+    "idle",                                    # not a dict at all
+    ["idle"],
+)
+
 
 class StatusTest(unittest.TestCase):
     def setUp(self):
@@ -47,6 +70,31 @@ class StatusTest(unittest.TestCase):
         self.assertIsNone(store.agent_status())
         self.assertIn("agent_status", store.status())
         self.assertIsNone(store.status()["agent_status"])
+
+    # S3 hardening (t_1f78eb04): a malformed in-memory record reads as unset - it never raises out
+    # of agent_status()/status() and so can never turn GET /status into a 500.
+    def test_malformed_status_record_fails_closed(self):
+        store._status = {"phrase": "idle", "at": FRESH_AT}
+        self.assertEqual(store.agent_status(now=1000)["phrase"], "idle")  # control: fresh + valid
+        for record in MALFORMED_STATUS_RECORDS:
+            with self.subTest(record=record):
+                store._status = record
+                self.assertIsNone(store.agent_status(now=1000))
+                self.assertIsNone(store.status()["agent_status"])
+
+    def test_malformed_record_does_not_poison_a_later_valid_set(self):
+        store._status = {"phrase": "idle"}          # missing `at`
+        self.assertIsNone(store.agent_status())
+        store.set_status("reviewing")               # the setter still works, and replaces it
+        self.assertEqual(store.agent_status()["phrase"], "reviewing")
+        self.assertEqual(store.status()["agent_status"]["phrase"], "reviewing")
+
+    def test_agent_status_never_raises_on_a_bad_now(self):
+        store.set_status("idle")
+        for bad_now in ("oops", [], {}, True, float("nan")):
+            with self.subTest(now=bad_now):
+                self.assertIsNone(store.agent_status(now=bad_now))
+        self.assertEqual(store.agent_status()["phrase"], "idle")   # the clock path is untouched
 
     def test_vocabulary_accepted_exactly(self):
         self.assertEqual(store.STATUS_PHRASES,
@@ -230,6 +278,24 @@ class StatusRouteTest(unittest.TestCase):
         at = store._status["at"]
         store._status = {**store._status, "at": at - store.STATUS_TTL_S - 1}
         self.assertIsNone(client.get(url).json()["agent_status"])           # past the bound -> nothing
+
+    # S3 hardening (t_1f78eb04): the card's regression - a malformed record must answer 200 with
+    # agent_status: null, not bubble KeyError/ValueError out of the route as a 500.
+    @unittest.skipIf(TestClient is None, "fastapi/httpx not installed")
+    def test_route_fails_closed_on_malformed_record(self):
+        import herd.dashboard.plugin_api as api
+
+        app = FastAPI()
+        app.include_router(api.router, prefix="/api/plugins/herd")
+        client = TestClient(app)
+        url = "/api/plugins/herd/status"
+
+        for record in ({"phrase": "idle"}, {"phrase": "idle", "at": "oops"}):
+            with self.subTest(record=record):
+                store._status = record
+                res = client.get(url)
+                self.assertEqual(res.status_code, 200)
+                self.assertIsNone(res.json()["agent_status"])
 
 
 class PaneRenderTest(unittest.TestCase):
