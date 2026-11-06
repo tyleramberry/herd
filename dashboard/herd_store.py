@@ -150,6 +150,23 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def _ts(value: Any) -> datetime:
+    """Order timestamps by instant, not spelling (peers may send 'Z' or no offset).
+
+    Unparsable or absent values sort as oldest so a malformed row can never displace
+    a row we already hold.
+    """
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return oldest
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return oldest
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def db_path() -> Path:
     if DB_PATH_OVERRIDE is not None:
         return Path(DB_PATH_OVERRIDE)
@@ -689,6 +706,13 @@ def ingest(batch: dict) -> int:
                 continue
             r["channel_id"] = msg["channel_id"]
             r["id"] = f"{r['message_id']}|{r['emoji']}|{r['gateway_id']}"[:200]
+            existing = conn.execute("SELECT created_at FROM reactions WHERE id = ?", (r["id"],)).fetchone()
+            if existing is not None and _ts(existing["created_at"]) > _ts(r["created_at"]):
+                # A replayed row that is OLDER than what we hold must not win: a re-linked
+                # peer re-pushing a full history (TC-5.9) can resend an add we have since
+                # removed, and INSERT OR REPLACE used to resurrect the reaction. Newest
+                # created_at wins, so convergence is by time, not arrival order (TC-8.5).
+                continue
             conn.execute(
                 "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, "
                 "created_at) VALUES (:id, :message_id, :channel_id, :emoji, :gateway_id, :active, :created_at)", r)

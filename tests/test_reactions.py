@@ -119,6 +119,35 @@ class LocalTests(Base):
 
 
 class SyncTests(Base):
+    def test_replayed_older_reaction_does_not_resurrect(self):
+        """QA S2 (PR #24): a re-linked peer's full re-push replays an add we removed.
+
+        INSERT OR REPLACE used to revive it; newest created_at must win so convergence
+        depends on time, not arrival order.
+        """
+        with self.A:
+            mid = store.post_message("general", "hi")["id"]
+            early = {"message_id": mid, "emoji": UP, "gateway_id": "riley", "active": 1,
+                     "created_at": "2026-11-06T12:00:00.000+00:00"}
+            store.ingest({"reactions": [early]})
+            self.assertEqual(self.reactions_of(self.A, mid), [{"emoji": UP, "count": 1, "mine": False}])
+            store.ingest({"reactions": [dict(early, active=0,
+                                             created_at="2026-11-06T12:00:05.000+00:00")]})
+            self.assertEqual(self.reactions_of(self.A, mid), [])
+            store.ingest({"reactions": [early]})  # the replayed old add
+            self.assertEqual(self.reactions_of(self.A, mid), [])
+            # A genuinely newer add still applies: the rule is last-write-wins, not freeze.
+            store.ingest({"reactions": [dict(early, active=1,
+                                             created_at="2026-11-06T12:00:09.000+00:00")]})
+            self.assertEqual(self.reactions_of(self.A, mid), [{"emoji": UP, "count": 1, "mine": False}])
+
+    def test_timestamp_ordering_ignores_spelling(self):
+        # Peers may spell the same instant differently; ordering is by instant.
+        self.assertGreater(store._ts("2026-11-06T12:00:01Z"), store._ts("2026-11-06T12:00:00.500+00:00"))
+        self.assertEqual(store._ts("2026-11-06T12:00:00+00:00"), store._ts("2026-11-06T12:00:00Z"))
+        self.assertLess(store._ts("garbage"), store._ts("2026-01-01T00:00:00+00:00"))
+        self.assertLess(store._ts(""), store._ts("2026-01-01T00:00:00+00:00"))
+
     def test_flow_both_ways_tombstone_and_idempotency(self):
         with self.A:
             mid = store.post_message("general", "hello")["id"]
