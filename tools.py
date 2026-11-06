@@ -95,3 +95,12 @@ def herd_read_channel(args: dict, **kwargs: Any) -> str:
         })
     except Exception as exc:  # noqa: BLE001
         return _fail(exc)
+
+
+def herd_set_status(args: dict, **kwargs: Any) -> str:
+    try:
+        args = args or {}
+        entry = _store().set_status(args.get("status"))
+        return json.dumps({"ok": True, "status": entry["phrase"]})
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)

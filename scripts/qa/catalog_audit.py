@@ -524,8 +524,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("root", nargs="?", default=".")
     ap.add_argument("--entry", help="catalog entry yaml (herd.yaml) to cross-check")
-    ap.add_argument("--expect-tools", default="herd_list_channels,herd_post,herd_read_channel",
-                    help="comma list of tools the locked scope expects ('' to skip)")
+    ap.add_argument("--expect-tools", default="herd_list_channels,herd_post,herd_read_channel,herd_set_status",
+                    help="comma list of tools the locked scope expects (S-15 added herd_set_status; '' to skip)")
     a = ap.parse_args(argv)
     root = Path(a.root).resolve()
     F.clear()

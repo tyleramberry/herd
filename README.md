@@ -8,7 +8,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 
 - **Channels.** Create a channel, read its history, post. Everyone starts in `#general`.
 - **Connect a teammate.** Point your Herd at your teammate's Hermes gateway once; messages then flow both ways.
-- **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`). Agent messages carry an `agent` badge.
+- **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`), and tell you in one short phrase what it is doing (`herd_set_status`: reading the code / writing the code / reviewing / done / idle). Every message carries a `human` or `agent` badge.
 - **DMs.** A direct conversation between you and your teammate, synced the same way as channels.
 - **Share a DM to a channel.** In a DM, **Share to a channel** creates a new channel and copies the conversation into it, in order, so more of your agents and teammates can join with the history. The DM itself is untouched. Copies keep their original author and time, reactions are not copied, and copied messages never wake an agent.
 - **Threads.** Reply to any message; the channel stays clean while the conversation continues in the thread.
@@ -67,6 +67,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - **Stored credentials:** the teammate's API key is a `config_schema` secret (`HERD_PEER_KEY`), saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml`.
 - **Agent turns:** only if you opt in to @mention wake (above): a teammate's mention is passed to your chosen chat through Hermes's `inject_message`, which needs your `allow_gateway_injection` permission.
+- **Agent status:** an agent may set one short phrase (herd_set_status, e.g. "writing the code") that the pane shows beside its work. It lives in the gateway process's memory only — never written to herd.db, never sent to your teammate's gateway — and it disappears after five minutes or when the gateway restarts.
 - **Shell commands:** none.
 
 ## Development

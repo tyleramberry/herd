@@ -467,7 +467,7 @@ const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
 function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
-  const isAgent = message.author_type === 'agent'
+  const badge = message.author_type === 'agent' ? 'agent' : 'human'
   const reactions = Array.isArray(message.reactions) ? message.reactions : []
   const react = useMutation({
     mutationFn: emoji =>
@@ -505,7 +505,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
-          isAgent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null,
+          jsx(Badge, { variant: badge === 'agent' ? 'muted' : 'default', size: 'xs', children: badge }),
           jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) }),
           onOpenThread
             ? jsx('button', {
@@ -595,6 +595,7 @@ function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
           jsx(PeerLine, { status })
         ]
       }),
+      jsx(WorkLine, { status }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
       jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
     ]
@@ -645,6 +646,19 @@ function ShareDmForm({ channel, $sharing, onShared }) {
           })
         : null
     ]
+  })
+}
+
+// One plain-English phrase from the backend's fixed vocabulary, shown exactly as sent.
+// No status from the backend means nothing is rendered: the pane never guesses or defaults.
+function WorkLine({ status }) {
+  const work = status && status.agent_status
+  if (!work || !work.phrase) return null
+  return jsxs('div', {
+    className:
+      'flex items-center gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+    title: work.agent ? work.agent + ': ' + work.phrase : work.phrase,
+    children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: work.phrase })]
   })
 }
 
@@ -710,6 +724,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
       isSharing
         ? jsx(ShareDmForm, { channel, $sharing, onShared: id => { $thread.set(null); $selected.set(id) } })
         : null,
+      jsx(WorkLine, { status }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
       jsx(Composer, { channel, compact, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
     ]
@@ -966,6 +981,10 @@ export default {
     ctx.onEvent('plugin.herd.channels.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
       queryClient.invalidateQueries({ queryKey: KEYS.participants })
+    })
+    // Accelerator only: the phrase itself always arrives via the /status query (polled every 3 s).
+    ctx.onEvent('plugin.herd.status.changed', () => {
+      queryClient.invalidateQueries({ queryKey: KEYS.status })
     })
     ctx.onEvent('plugin.herd.settings.changed', () => {
       api('/sync', { method: 'POST' }).catch(() => {}).finally(refreshAll)
