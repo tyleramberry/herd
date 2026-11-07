@@ -413,6 +413,114 @@ class MentionWakeTest(unittest.TestCase):
         store.WAKE_HANDLER = boom
         self.assertEqual(store.ingest(self.peer_msg("@tyler hi", "f1")), 1)
 
+    # --- first-contact guard, refused-injection cap accounting, status surface -----------------
+
+    def _two_gateways(self):
+        root = Path(self.tmp.name)
+        A, B = Gateway(root, "tyler", peer="brooklyn"), Gateway(root, "brooklyn")
+        A.settings.update({"mention_wake": True})
+        B.settings.update({"mention_wake": True})
+
+        def transport(peer, body):
+            with B:
+                return json.loads(json.dumps(store.handle_peer_sync(json.loads(json.dumps(body)))))
+        store.TRANSPORT = transport
+        return A, B
+
+    def test_first_sync_with_peer_never_wakes_then_later_mention_does(self):
+        A, B = self._two_gateways()
+        try:
+            with B:
+                store.post_message("#general", "@tyler old rehearsal ask 1")
+                store.post_message("#general", "@tyler old rehearsal ask 2")
+            with A:
+                store.set_mention_target("ses_abc")
+                [res] = store.sync_all()
+                self.assertTrue(res["ok"], res)
+                self.assertEqual(res["pulled"], 2)
+                self.assertEqual(self.woken, [])  # history: stored, not woken
+                self.assertEqual(len(store.list_messages("general")), 2)
+            with B:
+                store.post_message("#general", "@tyler fresh ask")
+            with A:
+                store.sync_all()
+            self.assertEqual(len(self.woken), 1)
+            self.assertIn("[Herd assignment]", self.woken[0][1])
+            self.assertIn("> @tyler fresh ask", self.woken[0][1])
+        finally:
+            store.TRANSPORT = None
+
+    def test_server_side_first_push_never_wakes_then_later_does(self):
+        A, B = self._two_gateways()
+        try:
+            with B:
+                store.set_mention_target("ses_b")  # listening BEFORE the first push (the demo's setup order)
+            with A:
+                store.post_message("#general", "@brooklyn old ask")
+                store.sync_all()
+            with B:
+                self.assertEqual(len(store.list_messages("general")), 1)
+            self.assertEqual(self.woken, [])
+            with A:
+                store.post_message("#general", "@brooklyn fresh ask")
+                store.sync_all()
+            self.assertEqual([k for k, _ in self.woken], ["ses_b"])
+        finally:
+            store.TRANSPORT = None
+
+    def test_missing_sender_gateway_id_does_not_suppress(self):
+        body = self.peer_msg("@tyler hi", "ng1")
+        body["from"] = {}
+        store.handle_peer_sync(body)
+        self.assertEqual(len(self.woken), 1)
+
+    def test_direct_ingest_still_wakes_once(self):
+        store.ingest(self.peer_msg("@tyler hi", "d1"))
+        self.assertEqual(len(self.woken), 1)
+
+    def test_refused_injection_does_not_consume_cap(self):
+        store.WAKE_HANDLER = lambda k, t: self.woken.append(1) or False
+        for i in range(store.WAKE_MAX_PER_MINUTE):
+            store.ingest(self.peer_msg("@tyler go", f"x{i}"))
+        self.assertEqual(len(store._wake_times), 0)
+        self.woken.clear()
+        store.WAKE_HANDLER = lambda k, t: self.woken.append((k, t)) or True
+        store.ingest(self.peer_msg("@tyler real one", "real"))
+        self.assertEqual(len(self.woken), 1)
+
+    def test_none_return_still_consumes_cap(self):
+        store.WAKE_HANDLER = lambda k, t: self.woken.append(1)  # returns None
+        for i in range(8):
+            store.ingest(self.peer_msg("@tyler go", f"n{i}"))
+        self.assertEqual(len(self.woken), store.WAKE_MAX_PER_MINUTE)
+
+    def test_true_return_cap_enforced(self):
+        for i in range(store.WAKE_MAX_PER_MINUTE + 2):
+            store.ingest(self.peer_msg("@tyler go", f"t{i}"))
+        self.assertEqual(len(self.woken), store.WAKE_MAX_PER_MINUTE)
+
+    def test_status_mention_wake_reports_refusal_and_never_raises(self):
+        saved = dict(store._wake_blocked)
+        try:
+            store._wake_blocked.update(reason=None, at=None)
+            st = store.status()["mention_wake"]
+            self.assertEqual((st["enabled"], st["target"], st["blocked"]), (True, True, None))
+            store.WAKE_HANDLER = lambda k, t: False
+            store.ingest(self.peer_msg("@tyler hi", "s1"))
+            st = store.status()["mention_wake"]
+            self.assertTrue(st["blocked"])
+            self.assertTrue(st["blocked_at"])
+            self.assertEqual(st["delivered_last_minute"], 0)
+            json.dumps(store.status())
+            orig = store.connect
+            store.connect = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down"))
+            try:
+                self.assertIsInstance(store.wake_status(), dict)
+            finally:
+                store.connect = orig
+        finally:
+            store._wake_blocked.update(saved)
+
     def test_listen_command_and_wiring(self):
         herd, _s, _t = _pkg.load()
         ctx = type("C", (), {})()
