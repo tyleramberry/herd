@@ -74,12 +74,21 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 
 ## Development
 
+The plugin's runtime is stdlib-only — it imports nothing outside the Python standard
+library in the gateway process, so installing Herd never needs a dependency step. Only
+the verification suite below needs packages:
+
 ```bash
-python -m pytest tests/ -q          # or: python -m unittest discover -s tests
+python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -q   # or: python -m unittest discover -s tests
 node --check desktop/plugin.js
 hermes plugins validate .
 hermes plugins doctor . --ci
 ```
+
+`requirements-dev.txt` lists what the suite uses (pytest, fastapi, httpx, PyYAML). Each is
+optional: tests that need FastAPI/httpx or PyYAML are skip-guarded, so a bare `pytest` run
+reports skips instead of errors.
 
 For live desktop development, link the checkout into your plugins folder: `ln -s ~/src/herd ~/.hermes/plugins/herd`.
 

@@ -7,6 +7,11 @@ import sys
 import unittest
 from pathlib import Path
 
+try:  # PyYAML is a test-only dependency (the plugin's runtime is stdlib-only); skip cleanly without it
+    import yaml
+except Exception:  # noqa: BLE001
+    yaml = None
+
 sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
@@ -16,8 +21,7 @@ SOURCE = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
 
 
 def _manifest():
-    import yaml
-
+    assert yaml is not None  # ManifestTest is skip-guarded on this; keeps type checkers honest
     return yaml.safe_load((ROOT / "plugin.yaml").read_text(encoding="utf-8"))
 
 
@@ -39,6 +43,7 @@ class FakeCtx:
         return True
 
 
+@unittest.skipUnless(yaml is not None, "PyYAML not installed (pip install -r requirements-dev.txt)")
 class ManifestTest(unittest.TestCase):
     def test_provides_tools_matches_register(self):
         ctx = FakeCtx()
