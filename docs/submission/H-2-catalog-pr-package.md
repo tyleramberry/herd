@@ -1,9 +1,10 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v5, Nov 7 — B1 fix verified at PR #45 head)
+# H-2 — Catalog PR Package: Herd (DRAFT v6, Nov 7 — PIN CANDIDATE VERIFIED, awaiting sign-off)
 
 > **Status: PREPARED ONLY — NOT PIN-READY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
-> **Pin blocked on the B1 fix MERGING** (QA pre-flight audit, `docs/qa/catalog-preflight-audit-nov7.md`):
-> the fix is written and verified in **PR #45** (`093b63a06e790da0b493cda8e0fe234fc3f544f3`, OPEN/MERGEABLE),
-> but the pin must be the **post-merge HEAD of `main`** — never the pre-fix HEAD. See §0.
+> **Pin candidate: `5686f0b43aca3580d10b0cb1864b02406cefa5df`** = `origin/main` HEAD with **PR #45 (B1) merged**
+> (`git merge-base --is-ancestor 093b63a… 5686f0b` → true). Verified locally at that SHA (see §0): in-tree
+> `hermes plugins validate . --install-deps` **passed**, and the draft entry at that pin returns
+> **`catalog_audit: 0 FAIL, 0 WARN`**. PR still opens ONLY after Foreman review + Tyler sign-off (Nov 8).
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
 
 ## 0. Pin-readiness block (added Nov 7 from QA's pre-flight audit)
@@ -12,9 +13,9 @@
 
 | # | Gate | State | Owner |
 |---|---|---|---|
-| 1 | **B1 fix merged** (`herd_store.py` — the `open_credentialed_url` import + `urlopen` fallback are **deleted**; `_NoRedirect` handler + module-level `_OPEN_PEER` opener added; no manifest/tool/env/secret change) | **FIXED IN PR #45** @ `093b63a` — verified by me at that head (OPEN, MERGEABLE, waiting on merge). Pre-fix `main` @ `61c9068` is **not** pin-valid. | Smith → merge |
-| 2 | **Real 40-char SHA** — `git rev-parse HEAD` on `origin/main` **after** #45 merges (if it lands as a merge commit the SHA differs from `093b63a` — always take main's HEAD, then confirm `_NoRedirect` is present at that SHA), validate there | blocked by 1 | Herald |
-| 3 | **Media** — `docs/media/*` referenced but **empty** (`git ls-files docs/media` → nothing) | open — see decision below | Herald |
+| 1 | **B1 fix merged** (`herd_store.py` — the `open_credentialed_url` import + `urlopen` fallback are **deleted**; `_NoRedirect` handler + module-level `_OPEN_PEER` opener added; no manifest/tool/env/secret change) | **MERGED** — #45 landed on `main` @ `5686f0b` (QA-confirmed; `_NoRedirect`/`_OPEN_PEER` present, no `urllib_security` import anywhere). Pre-fix `61c9068` stays non-pin-valid. | ✅ closed |
+| 2 | **Real 40-char SHA** — `5686f0b43aca3580d10b0cb1864b02406cefa5df`, verified to contain #45 | ✅ closed | Herald |
+| 3 | **Media** — `docs/media/*` referenced but **empty** (`git ls-files docs/media` → nothing) | **open** — ship without the fields unless files are committed before the freeze commit | Herald |
 
 **Decision on media (rule-safe default):** the catalog treats `image`/`screenshots` as *cosmetic*, and a
 link to a file that does not exist at the pinned SHA renders a broken gallery. So: **ship the entry
@@ -28,8 +29,8 @@ URLs to the same SHA. Never reference a file that is not in the pinned tree.
   - *(refuse-redirects fix — audit's recommended one)*: "Outbound sync sets the bearer header only for
     the teammate gateway URL you configured; a redirect from that URL is **refused, never followed**, so
     the key is never re-sent to another host (a redirecting peer shows an HTTP 30x error)."
-  - *(helper-only path)*: "Outbound sync drops the credential if your teammate's gateway redirects to a
-    different host (via `hermes_cli.urllib_security.open_credentialed_url`)."
+  - *(helper-only path)* — **RETIRED, do not use.** PR #45 deleted that import, so this sentence would
+    describe code that is not in the tree.
   **No "credential is dropped on redirect" claim may remain unless it is true for every path in the
   pinned tree.**
 - **WARN 3 (audit):** `scripts/qa/catalog_audit.py:176` shells out to `git` via `subprocess`, while the PR
@@ -107,7 +108,7 @@ one persistent channel.
 - **Stored-secret path unchanged:** `peer_key` remains a `config_schema` secret read via `agent.secret_scope.get_secret`; PR #45 adds no env var and removes the only core-helper import on this path.
 - **Sync protocol version:** `PROTOCOL_VERSION` is **2** at this tree (S-13 promote, #37): a promoted DM is copied to a new channel and delivered over the existing `POST <url>/herd/v1/sync` write path; copied rows carry `origin_channel_id`/`promoted_from`, and a version **1** peer simply ignores the extra field (no 500, no corruption). Readable from `/herd/v1/ping` + `/status`. <!-- disclosure, not a marketing beat; keep even if S-13 is later reverted — then delete -->
 - **Local data:** channel history in a SQLite file under the plugin's data dir.
-- **Agent status (S-15 #41):** the status phrase is **local-gateway-agents only** — it lives in the gateway process's memory, is never written to `herd.db`, is **never sent to the teammate's gateway**, and clears after five minutes or on gateway restart.
+- **Agent status:** an agent may set one short phrase about what it is doing (`herd_set_status`, from a fixed five-phrase vocabulary) which the pane shows beside its work. It lives in the gateway process's memory only — never written to `herd.db`, never sent to the teammate's gateway — and clears itself after five minutes or on gateway restart. No new network calls, no new stored credential, no shell commands. <!-- H-6 §4 verbatim, applied now that S-15 is merged on main @5ab0a0b -->
 - **Telemetry:** none.
 
 ### Screenshots
@@ -115,9 +116,25 @@ one persistent channel.
      showing the shared channel, (3) cross-machine task handoff. Same shots as
      the demo video session on Nov 8. -->
 
-### Validation
-- `hermes plugins validate /path/to/herd --install-deps` run at the pinned commit — green.
-  <!-- PASTE ACTUAL OUTPUT AT FREEZE -->
+### Validation (run by me at the pin candidate `5686f0b`, Nov 7)
+```
+$ git -C /tmp/herd-pin rev-parse HEAD
+5686f0b43aca3580d10b0cb1864b02406cefa5df
+$ hermes plugins validate . --install-deps
+✓ config schema — shape valid          ✓ declared tools — matches registrations
+✓ requires_env — all entries UPPER_SNAKE ✓ declared hooks — matches registrations
+✓ oauth — not declared                 ✓ declared middleware — matches registrations
+✓ loadable — entry: __init__.py, desktop/plugin.js
+✓ python dependencies — none declared  ✓ built-in tool collisions — no collisions
+✓ capability probe — register() ran in isolation
+✓ security scan — safe                 ✓ no core override — no runtime rebinds of Hermes core
+✓ desktop surface — stays inside the plugin SDK surface
+Validation passed.
+
+$ python3 scripts/qa/catalog_audit.py <herd-tree> --entry herd.yaml
+catalog_audit: 0 FAIL, 0 WARN  (tools registered: ['herd_list_channels','herd_post','herd_read_channel','herd_set_status'])
+```
+Re-run both at the actual freeze SHA before opening the PR. <!-- artifacts/screenshots go in the PR body -->
 
 ### Checklist (tick only when true at the pinned commit)
 - [ ] One file added: `plugin-catalog/herd.yaml`
