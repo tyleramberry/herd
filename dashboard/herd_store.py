@@ -964,18 +964,29 @@ def configured_peers() -> list[dict]:
     return out
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects rather than follow them with the bearer key attached.
+
+    urllib copies the Authorization header onto the redirect target, and the 3xx is
+    handled before any same-origin check, so a redirecting peer (or anything sitting
+    between us and it) could hand our key to a different origin. Returning None makes
+    urllib surface the 3xx as an HTTPError instead, so the request is never re-sent.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPEN_PEER = urllib.request.build_opener(_NoRedirect()).open
+
+
 def _http_sync(peer: dict, body: dict) -> dict:
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         peer["url"] + PEER_SYNC_PATH, data=data, method="POST",
         headers={"Authorization": f"Bearer {peer['key']}", "Content-Type": "application/json",
                  "User-Agent": "hermes-herd/0.1"})
-    try:
-        # Strips the bearer key if the peer redirects cross-origin (same helper `hermes peer` uses).
-        from hermes_cli.urllib_security import open_credentialed_url as _open
-    except Exception:
-        _open = urllib.request.urlopen
-    with _open(req, timeout=SYNC_TIMEOUT_S) as resp:
+    with _OPEN_PEER(req, timeout=SYNC_TIMEOUT_S) as resp:
         parsed = json.loads(resp.read().decode("utf-8", "replace"))
     if not isinstance(parsed, dict):
         raise RuntimeError("peer returned a non-object")
