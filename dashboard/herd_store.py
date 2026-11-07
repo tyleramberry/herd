@@ -792,12 +792,45 @@ def _valid_reaction(r: Any) -> Optional[dict]:
             "active": 1 if r.get("active") else 0, "created_at": str(r.get("created_at") or _now())[:40]}
 
 
-def ingest(batch: dict, suppress_wakes: bool = False) -> int:
+def _local_gateway_id(conn: sqlite3.Connection) -> str:
+    """This gateway's own id, read from the same connection the ingest is writing on."""
+    row = conn.execute("SELECT value FROM meta WHERE key='gateway_id'").fetchone()
+    return str(row[0]) if row else ""
+
+
+def _bound_gateway_id(claimed: Any, sender_gid: str, local_gid: str) -> Optional[str]:
+    """The gateway id a synced row may be stored under (S-21).
+
+    Returns the id to store — the authenticated sender's — or ``None`` when the row must be dropped:
+    a row may never claim THIS gateway's id, and a peer may only sync rows that claim its own id.
+    An *absent* claim is not a wrong one: it binds to the sender. A real peer's export always sets
+    the field; a hand-built batch may omit it, and the row then belongs to whoever authenticated.
+    """
+    claimed = str(claimed or "").strip()[:64]
+    if claimed and local_gid and claimed == local_gid:
+        return None
+    if claimed and sender_gid and claimed != sender_gid:
+        return None
+    return sender_gid or claimed
+
+
+def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str) -> str:
+    """``gateway_name`` follows the authenticated sender, not the row (S-21)."""
+    return sender_name if sender_gid else row_name
+
+
+def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = None) -> int:
     """Store channels + messages received from a peer. Idempotent. Returns rows newly inserted.
 
     ``suppress_wakes``: store everything but never wake the agent (a peer's first exchange is history).
+
+    ``stats``: optional dict filled with ``{"accepted": <inserted>, "dropped": <refused>}``. A row is
+    refused when the gateway id it claims is not the authenticated sender's (S-21) — the batch is
+    untrusted input, so a synced row's identity comes from ``batch["from"]``, never from the row.
     """
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
+    sender_gid = str(sender.get("gateway_id") or "").strip()[:64]
+    sender_name = _clean_name(sender.get("display_name"), "")
     channels = batch.get("channels") if isinstance(batch.get("channels"), list) else []
     messages = batch.get("messages") if isinstance(batch.get("messages"), list) else []
     reactions = batch.get("reactions") if isinstance(batch.get("reactions"), list) else []
@@ -806,6 +839,8 @@ def ingest(batch: dict, suppress_wakes: bool = False) -> int:
     rtouched: set[str] = set()
     wakes: list[dict] = []
     with connect() as conn:
+        local_gid = _local_gateway_id(conn)
+        dropped = 0
         if sender.get("gateway_id"):
             _touch_participant(conn, str(sender["gateway_id"])[:64],
                                _clean_name(sender.get("display_name"), "peer"), False)
@@ -816,6 +851,12 @@ def ingest(batch: dict, suppress_wakes: bool = False) -> int:
             m = _valid_message(raw)
             if not m:
                 continue
+            gid = _bound_gateway_id(m["gateway_id"], sender_gid, local_gid)
+            if gid is None:
+                dropped += 1
+                continue
+            m["gateway_id"] = gid
+            m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid)
             if not conn.execute("SELECT 1 FROM channels WHERE id = ?", (m["channel_id"],)).fetchone():
                 continue
             tid = m.get("thread_parent_id")
@@ -850,6 +891,11 @@ def ingest(batch: dict, suppress_wakes: bool = False) -> int:
             r = _valid_reaction(raw)
             if not r:
                 continue
+            rgid = _bound_gateway_id(r["gateway_id"], sender_gid, local_gid)
+            if rgid is None:
+                dropped += 1
+                continue
+            r["gateway_id"] = rgid
             msg = conn.execute("SELECT channel_id FROM messages WHERE id = ?", (r["message_id"],)).fetchone()
             if not msg:
                 continue
@@ -866,6 +912,9 @@ def ingest(batch: dict, suppress_wakes: bool = False) -> int:
                 "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, "
                 "created_at) VALUES (:id, :message_id, :channel_id, :emoji, :gateway_id, :active, :created_at)", r)
             rtouched.add(r["channel_id"])
+    if isinstance(stats, dict):
+        stats["accepted"] = inserted
+        stats["dropped"] = dropped
     if not suppress_wakes:
         _maybe_wake(wakes)
     for channel_id in touched:
@@ -933,7 +982,8 @@ def handle_peer_sync(body: Any) -> dict:
     if sender_gid:
         with connect() as conn:
             first_contact = not _peer_wake_primed(conn, sender_gid)
-    accepted = ingest(body, suppress_wakes=first_contact)
+    counts: dict = {}
+    accepted = ingest(body, suppress_wakes=first_contact, stats=counts)
     if first_contact:
         with connect() as conn:
             _prime_peer_wake(conn, sender_gid)
@@ -947,7 +997,8 @@ def handle_peer_sync(body: Any) -> dict:
     except (TypeError, ValueError):
         raise HerdError(422, "after_rseq must be an integer.")
     out = export_batch(after_seq, exclude_gateway=str(sender.get("gateway_id") or ""), after_rseq=after_rseq)
-    return {"v": PROTOCOL_VERSION, "from": identity(), "accepted": accepted, **out}
+    return {"v": PROTOCOL_VERSION, "from": identity(), "accepted": accepted,
+            "dropped": counts.get("dropped", 0), **out}
 
 
 # ---------------------------------------------------------------------------

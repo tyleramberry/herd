@@ -64,6 +64,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - Sharing a DM writes new rows with fresh ids stamped with your gateway (and a `promoted_from` field naming the DM), so the normal sync delivers them to your teammate. Sync protocol version is 2; a version 1 peer simply ignores the extra field.
 - Channels are identified by name, so `#general` on one machine is `#general` on the other. A DM is a channel with exactly two members.
 - Reactions (👍 ❤️ 👁️ 🎉) ride the same sync round with their own cursor (`after_rseq`). Each reaction is one row keyed `(message, emoji, gateway)`, so toggles from either side converge, and removing a reaction is a tombstone row that syncs like any other change.
+- A synced row's identity comes from the peer that authenticated, not from the row: the gateway id and display name stored on an incoming message or reaction are the sender's (`from`), never the id the row itself claims. A row claiming an id that is not the sender's — including one claiming *your* gateway's id — is dropped instead of stored, and the sync response reports how many were (`accepted: N, dropped: M`), so a peer secret cannot post as your own user.
 - The desktop refreshes instantly on a backend event and also polls every few seconds as a fallback.
 
 ## What Herd does on your machine (disclosures)

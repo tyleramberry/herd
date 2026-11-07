@@ -623,5 +623,142 @@ class WakeContextTest(MentionWakeTest):
         self.assertEqual(len(self.woken), 1)
 
 
+class SyncedIdentityTest(unittest.TestCase):
+    """S-21: a synced row's identity is the authenticated sender's, never the row's own claim."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        store.AUTO_SYNC = False
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "s21.db"
+        store.SETTINGS_OVERRIDE = {"display_name": "tyler"}
+        store._wake_times.clear()
+
+    def tearDown(self):
+        store.AUTO_SYNC = False
+        store.WAKE_HANDLER = None
+        store.DB_PATH_OVERRIDE = None
+        store.SETTINGS_OVERRIDE = None
+        self.tmp.cleanup()
+
+    def peer(self, rows, reactions=(), gw="peer-gw", name="Brooklyn"):
+        return {"from": {"gateway_id": gw, "display_name": name},
+                "channels": [], "messages": list(rows), "reactions": list(reactions)}
+
+    def msg(self, mid, gid, content="hello", **extra):
+        return dict({"id": mid, "channel_id": "general", "author_type": "human", "author_name": "Brooklyn",
+                     "gateway_id": gid, "gateway_name": "Brooklyn", "content": content,
+                     "created_at": "2026-11-07T00:00:00.000+00:00"}, **extra)
+
+    def test_message_claiming_local_gateway_id_is_dropped(self):
+        local = store.identity()["gateway_id"]
+        counts = {}
+        self.assertEqual(store.ingest(self.peer([self.msg("spoof-1", local)]), stats=counts), 0)
+        self.assertEqual(counts, {"accepted": 0, "dropped": 1})
+        self.assertIsNone(store.get_message("spoof-1"))
+        self.assertEqual(store.list_messages("general"), [])
+        resp = store.handle_peer_sync(self.peer([self.msg("spoof-2", local)]))
+        self.assertEqual(resp["accepted"], 0)
+        self.assertEqual(resp["dropped"], 1)
+        self.assertIsNone(store.get_message("spoof-2"))
+        self.assertEqual(store.list_messages("general"), [])
+
+    def test_message_claiming_a_third_gateway_is_dropped_and_counted(self):
+        counts = {}
+        n = store.ingest(self.peer([self.msg("third-1", "some-other-gw"), self.msg("own-1", "peer-gw")]),
+                         stats=counts)
+        self.assertEqual(n, 1)
+        self.assertEqual(counts, {"accepted": 1, "dropped": 1})
+        self.assertIsNone(store.get_message("third-1"))
+        self.assertEqual([m["id"] for m in store.list_messages("general")], ["own-1"])
+
+    def test_reaction_claiming_local_gateway_id_is_dropped(self):
+        local = store.identity()["gateway_id"]
+        mid = store.post_message("general", "local words")["id"]
+        reaction = {"message_id": mid, "emoji": "\U0001f44d", "gateway_id": local, "active": True,
+                    "created_at": "2026-11-07T00:00:00.000+00:00"}
+        counts = {}
+        store.ingest(self.peer([], [reaction]), stats=counts)
+        self.assertEqual(counts["dropped"], 1)
+        with store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reactions").fetchone()[0], 0)
+        self.assertEqual(store.list_messages("general")[0]["reactions"], [])
+        # Positive control: the same reaction claiming the peer's own id is stored.
+        counts = {}
+        store.ingest(self.peer([], [dict(reaction, gateway_id="peer-gw")]), stats=counts)
+        self.assertEqual(counts["dropped"], 0)
+        self.assertEqual(store.list_messages("general")[0]["reactions"],
+                         [{"emoji": "\U0001f44d", "count": 1, "mine": False}])
+
+    def test_peer_own_id_still_ingests_and_stays_idempotent(self):
+        batch = self.peer([self.msg("own-2", "peer-gw", gateway_name="some-lie")])
+        self.assertEqual(store.ingest(batch), 1)
+        row = store.get_message("own-2")
+        self.assertEqual(row["gateway_id"], "peer-gw")
+        self.assertEqual(row["gateway_name"], "Brooklyn")
+        counts = {}
+        self.assertEqual(store.ingest(batch, stats=counts), 0)
+        self.assertEqual(counts["dropped"], 0)
+        self.assertEqual(len(store.list_messages("general")), 1)
+
+    def test_rows_stored_before_the_fix_are_untouched(self):
+        store.identity()  # initialize the schema + #general
+        with store.connect() as conn:
+            conn.execute(
+                "INSERT INTO messages(id, channel_id, author_type, author_name, gateway_id, gateway_name, "
+                "content, created_at) VALUES ('old-1', 'general', 'human', 'Old', 'old-gw', 'Old', 'kept', "
+                "'2026-11-01T00:00:00.000+00:00')")
+        resp = store.handle_peer_sync(self.peer([self.msg("old-1", "peer-gw", content="rewritten")]))
+        self.assertEqual(resp["accepted"], 0)
+        self.assertEqual(resp["dropped"], 0)
+        with store.connect() as conn:
+            row = conn.execute("SELECT gateway_id, gateway_name, content FROM messages WHERE id='old-1'").fetchone()
+        self.assertEqual(tuple(row), ("old-gw", "Old", "kept"))
+
+    def test_hostile_batch_degrades_and_never_raises(self):
+        local = store.identity()["gateway_id"]
+        batch = self.peer(
+            [self.msg("h-local", local), self.msg("h-ok", "peer-gw"), self.msg("h-other", "other-gw")],
+            [{"message_id": "h-ok", "emoji": "\U0001f44d", "gateway_id": local, "active": True,
+              "created_at": "2026-11-07T00:00:00.000+00:00"}])
+        resp = store.handle_peer_sync(batch)
+        self.assertIsInstance(resp, dict)
+        self.assertEqual(resp["accepted"], 1)
+        self.assertEqual(resp["dropped"], 3)
+        self.assertEqual([m["id"] for m in store.list_messages("general")], ["h-ok"])
+        with store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reactions").fetchone()[0], 0)
+        resp = store.handle_peer_sync(self.peer([self.msg("h-next", "peer-gw")]))
+        self.assertEqual((resp["accepted"], resp["dropped"]), (1, 0))
+
+    def test_row_claiming_local_id_is_dropped_without_a_sender(self):
+        # The "never write as us" clause is unconditional: it also holds for a batch that carries
+        # no authenticated sender id at all (three existing tests ingest without one, so those rows
+        # keep their own claimed id — except a row claiming this gateway's own id).
+        local = store.identity()["gateway_id"]
+        counts = {}
+        n = store.ingest({"messages": [self.msg("nosender-local", local),
+                                       self.msg("nosender-other", "other-gw")]}, stats=counts)
+        self.assertEqual(n, 1)
+        self.assertEqual(counts, {"accepted": 1, "dropped": 1})
+        self.assertIsNone(store.get_message("nosender-local"))
+        self.assertEqual([m["id"] for m in store.list_messages("general")], ["nosender-other"])
+
+    def test_read_surface_and_wake_unchanged_for_normal_peer_rows(self):
+        store.SETTINGS_OVERRIDE = {"display_name": "tyler", "mention_wake": True}
+        store.set_mention_target("ses_s21")
+        woken = []
+        store.WAKE_HANDLER = lambda key, text: woken.append((key, text)) or True
+        store.ingest(self.peer([self.msg("n-1", "peer-gw", "@tyler check this")]))
+        read = json.loads(tools.herd_read_channel({"channel": "general"}))
+        self.assertEqual(len(read["messages"]), 1)
+        m = read["messages"][0]
+        self.assertEqual(m["author"], "Brooklyn")
+        self.assertEqual(m["author_type"], "human")
+        self.assertEqual(m["from_machine"], "Brooklyn")
+        self.assertEqual(m["text"], "@tyler check this")
+        self.assertEqual(len(woken), 1)
+        self.assertIn("WHO: Brooklyn (on Brooklyn's machine) asked you, in #general", woken[0][1])
+
+
 if __name__ == "__main__":
     unittest.main()
