@@ -45,6 +45,12 @@ Cost: one more handler against tables S-1 already creates.
 - Message history sync for peers who join late (new peers see messages from join onward)
 - Encryption beyond whatever the transport already gives
 - MySI plugin, any second plugin
+- **Per-task Kanban deep link** — opening *one specific card* when a message's task badge is
+  clicked. Core's contributed-route contract has no per-task route (`apps/desktop/src/app/routes.ts`:
+  "Absolute path, e.g. `/kanban`. One segment; no params."; the Kanban page reads no query/hash), so
+  S-16's badge opens the `herd` board board-level, by design (Foreman ruling, Sat Nov 7, 2026 —
+  `docs/pm/2026-11-07-s16-click-ruling.md`). Needs a supported route/param in core or the Kanban
+  plugin first; not fixable from a plugin without DOM poking, which desktop lint forbids.
 
 ## Stretch (gated; pending Tyler's call, Nov 5)
 

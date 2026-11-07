@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterator, Optional
 PLUGIN_ID = "herd"
 DEFAULT_CHANNEL = "general"
 PEER_SYNC_PATH = "/herd/v1/sync"
-PROTOCOL_VERSION = 2  # 2: messages may carry promoted_from (S-13); v1 peers ignore the field
+PROTOCOL_VERSION = 2  # 2: messages may carry promoted_from (S-13) and an optional task_id (S-16); older peers ignore fields they don't know.
 
 MAX_CONTENT = 20_000
 MAX_NAME = 64
@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
     thread_parent_id TEXT,
-    promoted_from TEXT
+    promoted_from TEXT,
+    task_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at, id);
 CREATE TABLE IF NOT EXISTS participants (
@@ -199,6 +200,8 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_parent_id)")
         if "promoted_from" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
             conn.execute("ALTER TABLE messages ADD COLUMN promoted_from TEXT")
+        if "task_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
+            conn.execute("ALTER TABLE messages ADD COLUMN task_id TEXT")
         # Pre-S-12 DBs have peer_state without the reaction cursors (CREATE IF NOT EXISTS won't add them).
         have = {r[1] for r in conn.execute("PRAGMA table_info(peer_state)").fetchall()}
         for col in ("push_rseq", "pull_rseq"):
@@ -374,7 +377,7 @@ def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
         raise HerdError(404, "Pick a direct message to share.")
     with connect() as conn:
         src = conn.execute(
-            "SELECT id, author_type, author_name, gateway_name, content, created_at, thread_parent_id "
+            "SELECT id, author_type, author_name, gateway_name, content, created_at, thread_parent_id, task_id "
             "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
     if not src:
         raise HerdError(422, "This conversation has no messages to share yet.")
@@ -386,9 +389,10 @@ def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
             parent = ids.get(r["thread_parent_id"] or "")
             conn.execute(
                 "INSERT INTO messages(id, channel_id, author_type, author_name, gateway_id, gateway_name, "
-                "content, created_at, thread_parent_id, promoted_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "content, created_at, thread_parent_id, promoted_from, task_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (ids[r["id"]], channel["id"], r["author_type"], r["author_name"], me, r["gateway_name"],
-                 r["content"], r["created_at"], parent, dm["id"]))
+                 r["content"], r["created_at"], parent, dm["id"], r["task_id"]))
     _notify("channels.changed", {})
     _notify("message.created", {"channel_id": channel["id"]})
     request_sync()
@@ -451,7 +455,7 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
 # ---------------------------------------------------------------------------
 
 _MESSAGE_COLS = ("seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, "
-                 "created_at, thread_parent_id, promoted_from")
+                 "created_at, thread_parent_id, promoted_from, task_id")
 # Same columns qualified for the reply-count queries, plus the per-message thread summary.
 _MESSAGE_SELECT = (
     ", ".join("m." + c.strip() for c in _MESSAGE_COLS.split(","))
@@ -460,6 +464,26 @@ _MESSAGE_SELECT = (
     ", (SELECT MAX(r.created_at) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
     " AS last_reply_at"
 )
+
+
+_kanban_module = None
+
+
+def _kanban():
+    """The read-only Kanban reader (dashboard/kanban_tasks.py), loaded by path when needed."""
+    global _kanban_module
+    if _kanban_module is None:
+        try:
+            from . import kanban_tasks  # type: ignore[import-not-found]
+            _kanban_module = kanban_tasks
+        except ImportError:
+            import importlib.util
+            path = Path(__file__).resolve().parent / "kanban_tasks.py"
+            spec = importlib.util.spec_from_file_location("herd_kanban_tasks", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _kanban_module = module
+    return _kanban_module
 
 
 def _notify(event: str, payload: dict) -> None:
@@ -473,7 +497,8 @@ def _notify(event: str, payload: dict) -> None:
 
 
 def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
-                 author_name: Any = None, message_id: Any = None, thread_parent_id: Any = None) -> dict:
+                 author_name: Any = None, message_id: Any = None, thread_parent_id: Any = None,
+                 task_id: Any = None) -> dict:
     text = str(content or "")
     if not text.strip():
         raise HerdError(422, "Message is empty.")
@@ -490,11 +515,14 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
     if len(mid) > 64:
         raise HerdError(422, "Message id is too long.")
     tid = str(thread_parent_id or "").strip() or None
+    clean_task = _kanban().normalize_task_id(task_id)
+    if task_id and str(task_id).strip() and clean_task is None:
+        raise HerdError(422, "task_id must be a Kanban task id like 't_e7741438'.")
     row = {
         "id": mid, "channel_id": channel["id"], "author_type": author_type,
         "author_name": _clean_name(author_name, default_author), "gateway_id": me["gateway_id"],
         "gateway_name": me["display_name"], "content": text, "created_at": _now(),
-        "thread_parent_id": None,
+        "thread_parent_id": None, "task_id": clean_task,
     }
     with connect() as conn:
         if tid:
@@ -502,8 +530,9 @@ def post_message(channel_ref: str, content: Any, *, author_type: str = "human",
         _touch_participant(conn, me["gateway_id"], me["display_name"], True)
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-            "gateway_name, content, created_at, thread_parent_id) VALUES (:id, :channel_id, :author_type, "
-            ":author_name, :gateway_id, :gateway_name, :content, :created_at, :thread_parent_id)", row)
+            "gateway_name, content, created_at, thread_parent_id, task_id) VALUES (:id, :channel_id, "
+            ":author_type, :author_name, :gateway_id, :gateway_name, :content, :created_at, "
+            ":thread_parent_id, :task_id)", row)
         inserted = bool(cur.rowcount)
         stored = dict(conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (mid,)).fetchone())
     if not inserted:
@@ -672,6 +701,8 @@ def _valid_message(m: Any) -> Optional[dict]:
             "content": str(m.get("content") or ""), "created_at": str(m.get("created_at") or _now())[:40],
             "thread_parent_id": str(m.get("thread_parent_id") or "")[:64],
             "promoted_from": str(m.get("promoted_from") or "")[:200],
+            # Explicit tie only: a peer value that isn't a clean Kanban id is dropped, never repaired.
+            "task_id": _kanban().normalize_task_id(m.get("task_id")) or "",
         }
     except (KeyError, TypeError):
         return None
@@ -739,9 +770,10 @@ def ingest(batch: dict) -> int:
                 # parent arrives; dropping it would be silent data loss.
             cur = conn.execute(
                 "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-                "gateway_name, content, created_at, thread_parent_id, promoted_from) VALUES (:id, "
+                "gateway_name, content, created_at, thread_parent_id, promoted_from, task_id) VALUES (:id, "
                 ":channel_id, :author_type, :author_name, :gateway_id, :gateway_name, :content, "
-                ":created_at, NULLIF(:thread_parent_id, ''), NULLIF(:promoted_from, ''))", m)
+                ":created_at, NULLIF(:thread_parent_id, ''), NULLIF(:promoted_from, ''), "
+                "NULLIF(:task_id, ''))", m)
             if cur.rowcount:
                 inserted += 1
                 touched.add(m["channel_id"])

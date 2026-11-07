@@ -3,6 +3,7 @@
 import {
   Badge,
   Button,
+  Codicon,
   EmptyState,
   Input,
   PANES_AREA,
@@ -33,6 +34,7 @@ const KEYS = {
   channels: [PLUGIN_ID, 'channels'],
   participants: [PLUGIN_ID, 'participants'],
   messages: channelId => [PLUGIN_ID, 'messages', channelId],
+  task: id => [PLUGIN_ID, 'task', id],
   threads: [PLUGIN_ID, 'thread'],
   thread: messageId => [PLUGIN_ID, 'thread', messageId]
 }
@@ -507,6 +509,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
           jsx(Badge, { variant: badge === 'agent' ? 'muted' : 'default', size: 'xs', children: badge }),
           jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) }),
+          message.task_id ? jsx(TaskBadge, { taskId: message.task_id }) : null,
           onOpenThread
             ? jsx('button', {
                 type: 'button',
@@ -645,6 +648,31 @@ function ShareDmForm({ channel, $sharing, onShared }) {
             children: errorText(share.error, "Couldn't share this conversation.")
           })
         : null
+    ]
+  })
+}
+
+// The explicit tie an agent put on its own answer (F4): the task id it passed, plus the title read
+// read-only from the local Kanban DB by our backend. No id means no badge — the pane never guesses
+// one from the message text, and no title (missing DB / unknown id) means the id alone.
+function TaskBadge({ taskId }) {
+  const id = typeof taskId === 'string' ? taskId.trim() : ''
+  const { data } = useQuery({
+    queryKey: KEYS.task(id),
+    enabled: Boolean(id),
+    queryFn: () => api('/tasks/' + encodeURIComponent(id))
+  })
+  if (!id) return null
+  const rawTitle = data && typeof data.title === 'string' ? data.title.trim() : ''
+  return jsxs('button', {
+    type: 'button',
+    title: rawTitle ? id + ' — ' + rawTitle + ' · open the Kanban board' : id + ' · open the Kanban board',
+    onClick: () => host.navigate('/kanban'),
+    className: 'flex min-w-0 max-w-full items-center gap-1 rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.6875rem] text-(--ui-text-secondary) hover:text-(--ui-accent)',
+    children: [
+      jsx(Codicon, { name: 'project', size: '0.7rem' }),
+      jsx('span', { className: 'shrink-0', children: id }),
+      rawTitle ? jsx('span', { className: 'truncate text-(--ui-text-quaternary)', children: '· ' + rawTitle }) : null
     ]
   })
 }

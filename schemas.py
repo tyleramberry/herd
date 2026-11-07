@@ -25,6 +25,14 @@ HERD_POST = {
                 "description": "Channel name (e.g. 'general'), channel id, or the other person's name for a DM.",
             },
             "content": {"type": "string", "description": "The message text."},
+            "task_id": {
+                "type": "string",
+                "description": (
+                    "Optional: the Kanban task id this answer is about (e.g. 't_e7741438'), when you are "
+                    "deliberately answering that task. Herd never guesses it from the message text — pass it "
+                    "only when you mean it. The pane then shows the task id and title with the message."
+                ),
+            },
             "reply_to": {
                 "type": "string",
                 "description": (
