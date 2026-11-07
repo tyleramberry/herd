@@ -21,6 +21,7 @@ const work = mkdtempSync(join(tmpdir(), 's15-probe-'))
 writeFileSync(join(work, 'sdk.mjs'), `
 export const Badge = 'Badge'
 export const Button = 'Button'
+export const Codicon = 'Codicon'
 export const EmptyState = 'EmptyState'
 export const Input = 'Input'
 export const ScrollArea = 'ScrollArea'

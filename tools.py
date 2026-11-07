@@ -40,7 +40,7 @@ def herd_list_channels(args: dict, **kwargs: Any) -> str:
 def _brief_message(m: dict) -> dict:
     return {"id": m["id"], "author": m["author_name"], "author_type": m["author_type"],
             "from_machine": m["gateway_name"], "at": m["created_at"], "text": m["content"],
-            "replies": m.get("reply_count", 0)}
+            "replies": m.get("reply_count", 0), "task_id": m.get("task_id")}
 
 
 def herd_post(args: dict, **kwargs: Any) -> str:
@@ -49,6 +49,7 @@ def herd_post(args: dict, **kwargs: Any) -> str:
         channel = str(args.get("channel") or "").strip()
         content = str(args.get("content") or "")
         reply_to = str(args.get("reply_to") or "").strip()
+        task_id = str(args.get("task_id") or "").strip() or None
         store = _store()
         if reply_to:
             parent = store.get_message(reply_to)
@@ -61,9 +62,10 @@ def herd_post(args: dict, **kwargs: Any) -> str:
             channel = parent["channel_id"]
         if not channel:
             return json.dumps({"ok": False, "error": "channel is required"})
-        message = store.post_message(channel, content, author_type="agent", thread_parent_id=reply_to or None)
+        message = store.post_message(channel, content, author_type="agent", thread_parent_id=reply_to or None,
+                                     task_id=task_id)
         return json.dumps({"ok": True, "message": {k: message[k] for k in
-                                                   ("id", "channel_id", "author_name", "created_at")}})
+                                                   ("id", "channel_id", "author_name", "created_at", "task_id")}})
     except Exception as exc:  # noqa: BLE001
         return _fail(exc)
 
