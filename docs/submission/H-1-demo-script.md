@@ -82,7 +82,7 @@ left screen for 3s after Brooklyn or her agent posts, and never cut away early. 
 sync, so from Brooklyn to Tyler the same up-to-3s poll applies: in shot 5A-reaction, hold on the left
 screen until the 👍 lands.**
 
-**Total ~81s** (≤85s target, 90s cap). Shot 5 gets the most time; trim shots 6–7 first if over.
+**Total 79s** (≤85s target, 90s cap; matches the shot table 0:00–1:19). Shot 5 gets the most time; trim shots 6–7 first if over.
 
 **Task for shot 5 (must need *her* Mac):** "summarize the notes file on Brooklyn's desktop" or "what's on
 Brooklyn's calendar Friday?". Never a task either agent could do alone.
@@ -93,7 +93,7 @@ from 5 on. Never narrate the reaction or the `@` menu: they are glance beats, si
 
 **Fallback:** if the mention take flakes live, cut in **take 5-baseline** for shot 5 (recorded Nov 8, or
 Sentry's pre-recorded copy). If only the reaction take flakes, drop **shot 5A-reaction** (−4s; shots 6–8
-each start 4s earlier, total ~77s). Shots 2–4 must be live. Never cut the hook or shots 2–4.
+each start 4s earlier, total ~75s). Shots 2–4 must be live. Never cut the hook or shots 2–4.
 
 ## Copy
 
