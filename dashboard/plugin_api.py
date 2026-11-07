@@ -34,7 +34,21 @@ def _load_store():
         return module
 
 
+def _load_kanban():
+    try:
+        from . import kanban_tasks  # type: ignore[import-not-found]
+
+        return kanban_tasks
+    except ImportError:
+        path = Path(__file__).resolve().parent / "kanban_tasks.py"
+        spec = importlib.util.spec_from_file_location("herd_kanban_tasks", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+
 store = _load_store()
+kanban = _load_kanban()
 router = APIRouter()
 
 
@@ -106,3 +120,12 @@ def post_reaction(channel_id: str, message_id: str, body: dict[str, Any]):
 @router.get("/participants")
 def get_participants():
     return _call(store.list_participants)
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: str):
+    """Kanban badge for one explicitly-passed task id (F4). Read-only, never raises."""
+    try:
+        return kanban.task_link(task_id)
+    except Exception:
+        return {"task_id": str(task_id or "")[:64], "valid": False, "title": None, "board": ""}
