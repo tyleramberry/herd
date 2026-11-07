@@ -157,6 +157,13 @@ CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji,
 _init_lock = threading.Lock()
 _initialized: set[str] = set()
 
+# What a usable Herd DB must have. Checked per connect so a database replaced under a live
+# process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
+# erroring on every query until the gateway restarts.
+_REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions")
+_REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
+                          "promoted_from", "task_id")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -187,11 +194,28 @@ def db_path() -> Path:
     return Path(plugin_data_dir(PLUGIN_ID)) / "herd.db"
 
 
+def _schema_usable(conn: sqlite3.Connection) -> bool:
+    """Does this connection actually have the schema Herd queries assume? Never raises.
+
+    A fresh or replaced file answers no, so ``_ensure_schema`` runs its idempotent
+    create/migrate pass again; a live database answers yes from the cheap sqlite_master
+    lookup, so the normal path pays two small queries and no writes.
+    """
+    try:
+        have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not set(_REQUIRED_TABLES) <= have:
+            return False
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        return set(_REQUIRED_MESSAGE_COLS) <= cols
+    except sqlite3.DatabaseError:
+        return False
+
+
 def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
-    if key in _initialized:
+    if key in _initialized and _schema_usable(conn):
         return
     with _init_lock:
-        if key in _initialized:
+        if key in _initialized and _schema_usable(conn):
             return
         conn.executescript(_SCHEMA)
         # CREATE TABLE IF NOT EXISTS never adds columns to an existing table: migrate older DBs.
