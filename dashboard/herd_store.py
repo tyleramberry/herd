@@ -468,6 +468,29 @@ def dm_channel_id(a: str, b: str) -> str:
     return "dm:" + "+".join(sorted([a, b]))
 
 
+def dm_member_ids(channel_id: Any) -> set[str]:
+    """The two gateway ids inside a ``dm:<a>+<b>`` channel id (empty for anything else).
+
+    ``dm_channel_id()`` builds the id from the two member ids, and ``_upsert_channel()`` only stores a
+    DM whose id equals ``dm_channel_id(<its members>)``, so the id is the authoritative member list.
+    """
+    cid = str(channel_id or "")
+    if not cid.startswith("dm:"):
+        return set()
+    return {part.strip()[:64] for part in cid[3:].split("+") if part.strip()}
+
+
+def _dm_export_allowed(channel_id: Any, viewer_gateway: str) -> bool:
+    """May this channel be exported to ``viewer_gateway``? Public channels: always. DMs: members only."""
+    cid = str(channel_id or "")
+    if not cid.startswith("dm:"):
+        return True
+    viewer = str(viewer_gateway or "").strip()[:64]
+    if not viewer:
+        return False  # an unidentified caller is a member of no DM: fail closed
+    return viewer in dm_member_ids(cid)
+
+
 def open_dm(participant_id: str) -> dict:
     """Get or create the DM between this gateway's human and a peer gateway's human."""
     me = identity()
@@ -927,20 +950,32 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
 
 
 def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_LIMIT,
-                 after_rseq: int = 0) -> dict:
-    """Our channels + messages after ``after_seq`` (skipping ones that came from ``exclude_gateway``)."""
+                 after_rseq: int = 0, viewer_gateway: str = "") -> dict:
+    """Our channels + messages after ``after_seq`` (skipping ones that came from ``exclude_gateway``).
+
+    ``viewer_gateway`` is the requesting gateway's id, as the call site authenticated it (never read
+    from a row). A DM — its channel, its messages, and reactions on it — is only returned to a member
+    of that DM; public channels go to every caller. An empty ``viewer_gateway`` gets no DMs at all.
+    """
     with connect() as conn:
         examined = conn.execute(
             f"SELECT {_MESSAGE_COLS} FROM messages WHERE seq > ? ORDER BY seq LIMIT ?",
             (int(after_seq), int(limit))).fetchall()
         channels = [_channel_row(r) for r in conn.execute("SELECT * FROM channels").fetchall()]
+        channels = [c for c in channels if _dm_export_allowed(c["id"], viewer_gateway)]
         rexamined = conn.execute(
             "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
             "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
-    # The cursor moves past excluded rows too (the peer already has its own messages).
-    rows = [dict(r) for r in examined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
+    # The cursor moves past excluded rows too (the peer already has its own messages), and past rows
+    # in a DM the viewer is not a member of (it may never have them): the filter runs after the
+    # LIMIT-bounded SELECT, so a filtered row is examined once and never re-pulled.
+    rows = [dict(r) for r in examined
+            if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
+            and _dm_export_allowed(r["channel_id"], viewer_gateway)]
     next_seq = examined[-1]["seq"] if examined else int(after_seq)
-    rrows = [dict(r) for r in rexamined if not exclude_gateway or r["gateway_id"] != exclude_gateway]
+    rrows = [dict(r) for r in rexamined
+             if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
+             and _dm_export_allowed(r["channel_id"], viewer_gateway)]
     next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
     return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit,
             "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit}
@@ -996,7 +1031,7 @@ def handle_peer_sync(body: Any) -> dict:
         after_rseq = max(0, int(body.get("after_rseq") or 0))
     except (TypeError, ValueError):
         raise HerdError(422, "after_rseq must be an integer.")
-    out = export_batch(after_seq, exclude_gateway=str(sender.get("gateway_id") or ""), after_rseq=after_rseq)
+    out = export_batch(after_seq, exclude_gateway=sender_gid, after_rseq=after_rseq, viewer_gateway=sender_gid)
     return {"v": PROTOCOL_VERSION, "from": identity(), "accepted": accepted,
             "dropped": counts.get("dropped", 0), **out}
 
@@ -1310,26 +1345,33 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
             with connect() as conn:
                 st = _peer_state(conn, peer)
             out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"],
-                               after_rseq=st["push_rseq"])
+                               after_rseq=st["push_rseq"], viewer_gateway=st["remote_gateway_id"])
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
                                     "messages": out["messages"], "after_seq": st["pull_seq"],
                                     "reactions": out["reactions"], "after_rseq": st["pull_rseq"]})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             pulled += ingest(resp, suppress_wakes=first_contact)
-            pushed += len(out["messages"])
-            rpushed += len(out["reactions"])
+            # Until we know who the peer is, the export carries no DMs (fail closed). Hold the push
+            # cursors for that round so the next round — peer now identified — re-sends the window
+            # with the DM it is a member of, instead of skipping it forever (ingest is idempotent).
+            identified = bool(st["remote_gateway_id"])
+            if identified:
+                pushed += len(out["messages"])
+                rpushed += len(out["reactions"])
             next_pull = resp.get("next_seq")
             next_rpull = resp.get("next_rseq")
             with connect() as conn:
                 conn.execute(
                     "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, remote_gateway_id = ?, remote_name = ?, "
                     "last_ok = ?, last_error = '' WHERE url = ?",
-                    (out["next_seq"], int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
-                     out["next_rseq"],
+                    (out["next_seq"] if identified else st["push_seq"],
+                     int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
+                     out["next_rseq"] if identified else st["push_rseq"],
                      int(next_rpull) if isinstance(next_rpull, int) else st["pull_rseq"],
                      str(remote.get("gateway_id") or st["remote_gateway_id"])[:64],
                      _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["url"]))
-            if not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
+            just_identified = not identified and bool(str(remote.get("gateway_id") or "").strip())
+            if not just_identified and not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
                 break
         return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled,
                 "reactions_pushed": rpushed}
