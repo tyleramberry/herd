@@ -2,7 +2,10 @@
 
 Owner: @herald · Prepared Fri Nov 6, 2026 · Applies to **H-1** (demo script), **H-2** (catalog entry
 `herd.yaml` + PR description / "surfaces used"), and the **README** rule-13 disclosures.
-Base: `origin/main` @ **cf5281f** (verified 2026-11-06 09:03 MST; includes S-12 #24, Sentry Q-7 plan #29, Foreman F-2 #28).
+Base: `origin/main` @ **5686f0b** (verified 2026-11-07; includes S-15 #41, S-18/B1 #45 and QA's pre-flight audit).
+**QA update (Nov 7):** #45 deleted the `hermes_cli.urllib_security` import, retiring the last rule-9 WARN — the
+catalog audit now reports **0 FAIL / 0 WARN**. Any disclosure line about a private-core import for
+`herd_store.py` is **moot and must be dropped**, not carried.
 
 > ## THE ONE RULE
 > **Nothing in this file goes into H-1, H-2, the catalog entry or the README until the feature it
@@ -53,7 +56,7 @@ Base timeline = main's H-1 **+ PR #25 (H-5 beats)** + **PR #27 (locked constants
 both touch this file, so apply H-6 *after* they merge or H-1 will conflict. Anchor the inserts by the
 quoted text below, not by line number, so they survive a rebase.
 
-### 2.1 — S-13: promote a DM into a shared room  ·  **MERGED #37 — HOLD: QA gate open**
+### 2.1 — S-13: promote a DM into a shared room  ·  **MERGED #37 — HOLD: QA gate open** *(disclosure fact already carried in H-2: PROTOCOL_VERSION 2)*
 
 > **Status check (Herald, Nov 6):** S-13 is merged to `origin/main` (`9d9c6e7`, protocol v2) but the
 > QA gate is **not** met — F-3 A6 needs the Q-9 evidence and TC-2.3/2.6 reported, and TC-10.4 is
@@ -72,7 +75,7 @@ New shot, ~5s, inserted **after shot 6** ("Back to him") and before the end card
 - Word rules unchanged: say **channel**, never "promote"/"migrate"/"SQLite".
 - Pre-req on camera: both Macs must show the promoted channel within one sync cycle (hold on the left ≤3s).
 
-### 2.2 — S-15: supervision status line + speaker badge  ·  **APPLY IF S-15 MERGED**
+### 2.2 — S-15: supervision status line + speaker badge  ·  **MERGED @5ab0a0b — ambient take only, no narrated beat**
 
 **Ambient by default; optional 2s glance.** Do **not** give it a narrated beat.
 
@@ -159,7 +162,7 @@ herd_post, herd_read_channel]`, empty hooks/middleware/env.
   peer does with a v2 body — Smith has confirmed no 500/corruption. The disclosure line in §4 carries
   the "sync protocol v2" fact; do not let the version go undisclosed.
 
-### 3.2 — S-15  ·  **APPLY IF S-15 MERGED**  *(facts from @smith, design pinned; PR not open yet)*
+### 3.2 — S-15  ·  **APPLIED (merged on main @5ab0a0b, #41)**  *(verified vs `plugin.yaml` Nov 7: 4 tools)*
 - **`capabilities.provides_tools`:** append **`herd_set_status`** — Smith: the exact name, no others
   (single argument `status`, a 5-value enum). Must match `plugin.yaml provides_tools` at the freeze SHA
   exactly (rule 6). **This is the 4th declared tool** — `herd.yaml` and `plugin.yaml` both go 3 → 4, and
@@ -224,7 +227,7 @@ Please answer in a comment on `S-13`/`S-15`/`S-16` (or on `H-6`):
    `__init__.py::register()` ⇒ 4th entry in **both** `plugin.yaml provides_tools` and
    `herd.yaml capabilities.provides_tools`; no new hook/middleware/`requires_env`; **local-only** (D-5,
    in gateway memory). Disclosure text staged in §3.2/§4. Reviewer-facing correction: any H-2/README copy
-   that says "three agent tools" moves to **four** — **only if S-15 is merged at freeze** (S-15 is cut #2).
+   that says "three agent tools" moves to **four** — **S-15 is merged (main @5ab0a0b), so this applies: four agent tools.**
 2. **S-13** — ✅ **ANSWERED** (Smith, Nov 6): no new tool; `PROTOCOL_VERSION` **1 → 2**; same
    `POST /herd/v1/sync` endpoint (new local-only backend route
    `POST /api/plugins/herd/channels/{id}/promote`; payload gains `origin_channel_id`; copies never
