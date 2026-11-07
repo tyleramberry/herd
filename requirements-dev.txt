@@ -1,0 +1,13 @@
+# Test-only dependencies. Herd's RUNTIME is stdlib-only: the plugin imports nothing
+# outside the Python standard library in the gateway process, so an install never needs
+# these. They exist to run the verification suite the README's Development block quotes.
+#
+#   python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest tests/ -q
+#
+# Every one of these is optional to the suite: tests that need fastapi/httpx or PyYAML
+# are skip-guarded, so a bare `pytest` run reports skips rather than errors.
+pytest
+fastapi
+httpx
+pyyaml
