@@ -1,4 +1,4 @@
-# H-1 — Demo Video Script: Herd (v10, Nov 7 — new scope woven in under F-3 REVISED)
+# H-1 — Demo Video Script: Herd (v10, Nov 7 — new scope woven in under F-3 REVISED; H-6 apply pass)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
@@ -6,24 +6,28 @@
 REVISED): the video may be **re-recorded any time up to Nov 10** if a later feature makes a better 90
 seconds — shots below are versioned so a re-take is a delta, not a rewrite.*
 **Timings sum to ~79s, leaving ~11s buffer under the 90s cap (≤85s target held).**
-**Base at prep:** `origin/main` @ `b69a9d0` (Nov 7). **The demo runs on the CURRENT build** — the old
+**Base at prep:** `origin/main` @ `cd6d46c` (Nov 7). **The demo runs on the CURRENT build** — the old
 two-Mac window ran 28 commits behind main and is not evidence (shots 3–5 must be re-verified on the build
 you record). Every `herd.yaml` SHA reference is re-pinned at open and at each bump.
 
-> **v9 change (H-1 final pass, Nov 6 — Foreman gate resolved):** the **@mention handoff is now the
+> **v10 change (Nov 7 — new scope woven in; F-3 REVISED):** **S-15** (status phrase, #41) and **S-16**
+> (task badge, #46) are merged + QA-green, so both are now **IN** this script — S-15 ambient in shot 5,
+> S-16 ambient at the end of shot 6. v9's shot-5 mention take, shot 5A reaction and the locked-constants
+> block are unchanged; §2.4 donors were re-timed (shot 7 12→9s, shot 8 5→4s) to fund them. **S-13**
+> (promote a DM, #37, protocol v2) is **merged and code-complete, but its 5s demo beat stays STAGED** in
+> `docs/submission/H-6-new-scope-surfaces.md` §2.1: its F-3 gate (two-gateway TC-10.4 on **two real
+> Macs**, F-3 B1) is being re-verified under Q-11 — add the beat only if that closes before recording,
+> then re-time to ≤85s. Its rule-13 **disclosure** ships regardless (the behaviour is merged).
+
+> **v9 change (H-1 final pass, Nov 6 — Foreman gate resolved):** the **@mention handoff is the
 > primary shot-5 take, not a fallback.** Foreman's go/no-go is **GO** — TC-2 (two real gateways) passed
 > on real hardware Nov 6 (Q-9, confirmed first-hand by Tyler), which was the stated precondition for
-> S-7. The three surfaces it needs are all **merged on `origin/main` @ `e967130` and QA-green**:
-> @-mention autocomplete **S-9 (#19)**, mention wake **S-7 (#13)**, and assignment context **S-14 (#33)**
-> (the wake now names *who* asked, *which channel*, *what is expected*, and the `herd_post` to answer
-> with). v9 keeps the v8 reaction beat (shot 5A-reaction, S-12 / #24), the v8 locked-constants block, and
-> the threads-ambient-only ruling; it renames the old "5A baseline" take to **take 5-baseline** so "5A"
-> means only the reaction. **Gated new-scope surfaces (S-13 promote, S-15 status line, S-16 Kanban link)
-> are NOT in this script — none is merged yet. They are staged in
-> `docs/submission/H-6-new-scope-surfaces.md` and are applied at the freeze pass only if their feature is
-> actually merged + QA-green (H-6 owns that check).**
+> S-7. The three surfaces it needs are all **merged and QA-green**: @-mention autocomplete **S-9 (#19)**,
+> mention wake **S-7 (#13)**, and assignment context **S-14 (#33)**. v9 keeps the reaction beat (shot 5A,
+> S-12 / #24), the locked-constants block and the threads-ambient-only ruling; it renames the old
+> "5A baseline" take to **take 5-baseline** so "5A" means only the reaction.
 
-## Shot-by-shot (v9, follows Northstar N-2 beats, PR #5)
+## Shot-by-shot (v10, follows Northstar N-2 beats, PR #5)
 
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
@@ -33,7 +37,7 @@ you record). Every `herd.yaml` SHA reference is re-pinned at open and at each bu
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Brooklyn replies → lands on the left. No VO, let it land. |
 | 5 | 0:26–0:48 | **Handoff (jaw-drop) — @mention, PRIMARY** | Both screens, side by side | Tyler types `@` in `#general`; the **mention menu opens as he types `@brooklyn`** (hold ~2s, no VO). He picks her agent and sends the ask. Cut to Brooklyn's Mac: her agent **wakes with the assignment** (S-14) — who asked, which channel, how to answer. **Brooklyn approves its action on camera (one click)**; it works on her Mac and posts the result back to `#general`; the result lands on both screens. **S-15 ambient:** one phrase from the fixed vocabulary (reading the code / writing the code / reviewing / done / idle) sits beside her agent's in-flight work — if the take shows it cleanly, hold 2s when it flips to `done`. Call out nothing. VO: "He asks her agent. She says yes. Her agent, her machine." |
 | 5A | 0:48–0:52 | **Reaction (S-12)** | Right, then LEFT | Brooklyn hovers her agent's result, the 4-emoji picker appears, she clicks **👍**, hard cut to the reaction landing **live on the left Mac**. No VO. |
-| 6 | 0:52–1:06 | Back to him + humans stay in charge (N-2 beat 5) **+ S-16 badge** | Left, then DM views both sides, then wide | Tyler's agent reads the result and uses it. Tyler DMs Brooklyn — "nice 😄 it actually worked". **Last 2s (S-16):** the agent's answer carries a **task badge (id + title — Q-8 = YES, live DB read)**; Tyler clicks it → the `herd` board opens on that task. One line: **"Every answer points back at the work."** Wide: "Two people. Two agents. One conversation." |
+| 6 | 0:52–1:06 | Back to him + humans stay in charge (N-2 beat 5) **+ S-16 badge** | Left, then DM views both sides, then wide | Tyler's agent reads the result and uses it. Tyler DMs Brooklyn — "nice 😄 it actually worked". **Last 2s (S-16):** the agent's answer carries a **task badge (id + title — Q-8 = YES, live DB read)**; Tyler clicks it → the `herd` board opens (**board-level**: the badge carries the task id; the card itself is **not** focused — PM ruling #47). One line: **"Every answer points back at the work."** Wide: "Two people. Two agents. One conversation." |
 | 7 | 1:06–1:15 | Name it | Wide → end card | "Herd. Multiplayer Hermes." **(donor: 12→9s)** |
 | 8 | 1:15–1:19 | End card | Static | Install one-liner + repo + @NousResearch **(donor: 5→4s)** |
 
@@ -141,9 +145,10 @@ post to. Shot 4 should be shot so it is obviously not a terminal DM.
 - ~~Smith surfaces~~ **verified via Q-9 (Nov 6):** two real gateways exchanged real messages — S-2 fan-out (shot 4), S-3 `herd_post` + `herd_read_channel` on two Macs (shot 5), Herd pane showing the registered peer (shot 3) all exercised. Confirm the exact on-camera `PEER_ADDR` value at rehearsal (constants block).
 - ~~Confirm wife's instance name~~ CLOSED (Tyler, Nov 5): **Brooklyn**, locked in the constants block
 - ~~v8 feature gates~~ S-12 (#24) and S-9 (#19) both merged + QA-green; S-9's round-1 findings were fixed in its merge. The "fall back to v7" clause is retired — the fallback is now take 5-baseline (± the reaction beat).
-- **GATED new-scope surfaces (S-13 promote, S-15 status line, S-16 Kanban link): NOT in this script — none merged at prep (`origin/main` @ `e967130`, Nov 6).** Staged in `docs/submission/H-6-new-scope-surfaces.md`; applied at the freeze pass **only if the feature is merged + QA-green**, then re-timed (H-6 §2.5 combination table). S-16 is cut #1 (Sat Nov 7 12:00), S-15 is cut #2 (Sat Nov 7 18:00).
+- **New-scope surfaces (S-13 promote, S-15 status line, S-16 Kanban link):** **S-15 (#41) and S-16 (#46) are merged + QA-green and are IN this script** (S-15 ambient in shot 5, S-16 badge at the end of shot 6). **S-13's 5s beat stays STAGED** in `docs/submission/H-6-new-scope-surfaces.md` §2.1 — merged (#37, protocol v2) but its F-3 gate (TC-10.4 on **two real Macs**) is open and being re-verified under Q-11; add it only if that closes before recording, then re-time to ≤85s (H-6 §2.5). **No cut or unmerged feature appears in this script.**
 - **⚠️ Demo-rig build lag (QA SPINE run log, Nov 6):** the two-Mac window that passed TC-2 ran a
-  build 28 commits behind main. The Nov 8 recording rig must be updated to the freeze build first;
-  treat every still-open fix merged after that old build (S-9 pick-tail + Shift+Enter #36, S-12 #34,
-  S-13 #37) as **unverified on camera** until the rehearsal re-runs shots 3–5 on the new build.
+  build 28 commits behind main. The recording rig must be updated to the current build first;
+  treat every fix merged after that old build (S-9 pick-tail + Shift+Enter #36, S-12 #34, S-13 #37,
+  S-15 #41, S-16 #46) as **unverified on camera** until the rehearsal re-runs shots 3–5 and the S-16
+  badge on the new build.
 - Screenshots for H-2 package can be pulled from this same session

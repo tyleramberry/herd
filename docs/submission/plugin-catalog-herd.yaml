@@ -4,7 +4,7 @@ description: >-
   Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
   your Hermes agents work together across two machines.
 repo: https://github.com/tyleramberry/herd
-sha: b69a9d03e99441c165d797ee60fa067fca00e1f9
+sha: cd6d46cc5f324ade11a814fa50889ce33324c607
 tier: community
 category: desktop
 maintainer: tyleramberry
