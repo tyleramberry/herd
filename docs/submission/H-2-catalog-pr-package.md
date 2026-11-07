@@ -1,10 +1,15 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v6, Nov 7 — PIN CANDIDATE VERIFIED, awaiting sign-off)
+# H-2 — Catalog PR Package: Herd (DRAFT v7, Nov 7 — PIN-READY under F-3 REVISED: open on Tyler's go, bump later)
 
 > **Status: PREPARED ONLY — NOT PIN-READY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
-> **Pin candidate: `5686f0b43aca3580d10b0cb1864b02406cefa5df`** = `origin/main` HEAD with **PR #45 (B1) merged**
-> (`git merge-base --is-ancestor 093b63a… 5686f0b` → true). Verified locally at that SHA (see §0): in-tree
-> `hermes plugins validate . --install-deps` **passed**, and the draft entry at that pin returns
-> **`catalog_audit: 0 FAIL, 0 WARN`**. PR still opens ONLY after Foreman review + Tyler sign-off (Nov 8).
+> **GATE CHANGE (F-3 REVISED, `docs/pm/F-3-gate-REVISED.md`):** the Nov 8 freeze is **cancelled**. The PR
+> **opens as soon as this package is pin-ready** — no freeze wait — and later improvements go in as
+> **SHA-bump PRs** (catalog rule 4). **Last pin bump: Nov 10, 18:00 MST.** Tyler approves *opening* the PR
+> (one screen: what is submitted, the pin, the disclosures); he is informed, not asked, at form submission.
+>
+> **Pin: `b69a9d03e99441c165d797ee60fa067fca00e1f9`** (`origin/main` HEAD, includes #45 B1, #41 S-15, #46 S-16).
+> Verified at that SHA: `hermes plugins validate . --install-deps` → **Validation passed**; draft entry →
+> **`catalog_audit: 0 FAIL, 0 WARN`**, 4 tools. Re-pin to the newest head before actually opening (main
+> moves daily until Nov 10).
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
 
 ## 0. Pin-readiness block (added Nov 7 from QA's pre-flight audit)
@@ -15,7 +20,7 @@
 |---|---|---|---|
 | 1 | **B1 fix merged** (`herd_store.py` — the `open_credentialed_url` import + `urlopen` fallback are **deleted**; `_NoRedirect` handler + module-level `_OPEN_PEER` opener added; no manifest/tool/env/secret change) | **MERGED** — #45 landed on `main` @ `5686f0b` (QA-confirmed; `_NoRedirect`/`_OPEN_PEER` present, no `urllib_security` import anywhere). Pre-fix `61c9068` stays non-pin-valid. | ✅ closed |
 | 2 | **Real 40-char SHA** — `5686f0b43aca3580d10b0cb1864b02406cefa5df`, verified to contain #45 | ✅ closed | Herald |
-| 3 | **Media** — `docs/media/*` referenced but **empty** (`git ls-files docs/media` → nothing) | **open** — ship without the fields unless files are committed before the freeze commit | Herald |
+| 3 | **Media** — `docs/media/*` is **empty** (`git ls-files docs/media` → nothing); the freeze no longer exists, so "before the freeze commit" now means "before the commit being pinned" | **DECIDED: ship WITHOUT `image:`/`screenshots:`.** Stills may be captured in the Nov 8 session and added via a SHA-bump PR; never link a file absent at the pin | Herald |
 
 **Decision on media (rule-safe default):** the catalog treats `image`/`screenshots` as *cosmetic*, and a
 link to a file that does not exist at the pinned SHA renders a broken gallery. So: **ship the entry
@@ -87,6 +92,7 @@ one persistent channel.
 <!-- v3: verified against plugin.yaml + tree on main (PRs #9–#13 merged). Re-check at freeze. -->
 - Agent tools: `herd_post`, `herd_read_channel`, `herd_list_channels`, `herd_set_status` (exact names from plugin.yaml — VERIFIED Nov 7; **4 tools**, matching S-15)
 - Promote a DM to a channel — a desktop action (local route `POST /api/plugins/herd/channels/{id}/promote`); the copy reaches the teammate over the existing `POST /herd/v1/sync` write path with a channel-create + message-replay payload (`PROTOCOL_VERSION` 1 → 2; copied rows carry `origin_channel_id`). **(S-13 #37 is merged at this tree — the disclosure line above carries the v2 fact; the *proof beat* for it stays staged in H-6 until QA is green.)**
+- Kanban link: an agent's answer carries a task badge (task id + title, read-only) that opens the `herd` board — board-level per the PM ruling (#47); per-task deep links are post-hackathon. **(S-16 #46 merged; `capabilities:` unchanged — no new tool)**
 - Agent status: `herd_set_status` lets an agent set one coarse phrase (reading the code / writing the code / reviewing / done / idle) shown beside its in-flight work; per-message human/agent badges are rendered in the pane. (S-15 #41 merged)
 - Chat command: `/herd-listen` (and `/herd-listen off`) registered via `ctx.register_command` — picks the chat that receives @mentions (S-7, PR #13)
 - Opt-in agent turns for @mention wake: teammate mention → `ctx.inject_message` (needs the user's `allow_gateway_injection` permission; off by default via `mention_wake: false`)
@@ -102,12 +108,12 @@ one persistent channel.
 - **Stored credentials:** one peer API key, declared as a `config_schema`
   secret (`peer_key`, env `HERD_PEER_KEY`) and stored by Hermes; Herd reads it
   only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
-- **Reads outside plugin data:** none. <!-- at freeze: if S-16 ships, this line is REPLACED by the read-only kanban.db read line (Q-8) — never keep both -->
+- **Reads outside plugin data (S-16 #46, Q-8 = YES — mandatory disclosure, replaces the old "none" line):** *"to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it."* <!-- README:69 verbatim. Verified in the tree at the pin: `dashboard/kanban_tasks.py` opens `mode=ro` URI, `PRAGMA busy_timeout=250`, and issues exactly `SELECT title FROM tasks WHERE id = ?` -->
 - **Shell commands:** none **in the runtime files** (`tools.py`, `__init__.py`, `schemas.py`, `dashboard/`). <!-- audit WARN 3: scripts/qa/catalog_audit.py:176 shells out to `git` via subprocess; disclose it as a dev-only script or leave scripts/qa/ out of the pin -->
 - **Peer key on redirect (B1) — SETTLED (PR #45, verified at its head):** *"Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as \"The peer answered HTTP 30x\" instead of being followed)."* Mirror this sentence into README + PR description **verbatim** at the pin. Do **not** name `hermes_cli.urllib_security.open_credentialed_url` anywhere — that import is deleted from the tree; a disclosure naming it would itself be inaccurate. Same-origin POST still returns 200; a redirecting peer now surfaces as an error rather than being silently followed.",
 - **Stored-secret path unchanged:** `peer_key` remains a `config_schema` secret read via `agent.secret_scope.get_secret`; PR #45 adds no env var and removes the only core-helper import on this path.
 - **Sync protocol version:** `PROTOCOL_VERSION` is **2** at this tree (S-13 promote, #37): a promoted DM is copied to a new channel and delivered over the existing `POST <url>/herd/v1/sync` write path; copied rows carry `origin_channel_id`/`promoted_from`, and a version **1** peer simply ignores the extra field (no 500, no corruption). Readable from `/herd/v1/ping` + `/status`. <!-- disclosure, not a marketing beat; keep even if S-13 is later reverted — then delete -->
-- **Local data:** channel history in a SQLite file under the plugin's data dir.
+- **Local data:** messages, channels and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the linked task's title (next bullet). <!-- README:68 verbatim -->
 - **Agent status:** an agent may set one short phrase about what it is doing (`herd_set_status`, from a fixed five-phrase vocabulary) which the pane shows beside its work. It lives in the gateway process's memory only — never written to `herd.db`, never sent to the teammate's gateway — and clears itself after five minutes or on gateway restart. No new network calls, no new stored credential, no shell commands. <!-- H-6 §4 verbatim, applied now that S-15 is merged on main @5ab0a0b -->
 - **Telemetry:** none.
 
@@ -116,10 +122,10 @@ one persistent channel.
      showing the shared channel, (3) cross-machine task handoff. Same shots as
      the demo video session on Nov 8. -->
 
-### Validation (run by me at the pin candidate `5686f0b`, Nov 7)
+### Validation (run by me at the pin `b69a9d0`, Nov 7)
 ```
-$ git -C /tmp/herd-pin rev-parse HEAD
-5686f0b43aca3580d10b0cb1864b02406cefa5df
+$ git rev-parse HEAD
+b69a9d03e99441c165d797ee60fa067fca00e1f9
 $ hermes plugins validate . --install-deps
 ✓ config schema — shape valid          ✓ declared tools — matches registrations
 ✓ requires_env — all entries UPPER_SNAKE ✓ declared hooks — matches registrations
@@ -134,7 +140,7 @@ Validation passed.
 $ python3 scripts/qa/catalog_audit.py <herd-tree> --entry herd.yaml
 catalog_audit: 0 FAIL, 0 WARN  (tools registered: ['herd_list_channels','herd_post','herd_read_channel','herd_set_status'])
 ```
-Re-run both at the actual freeze SHA before opening the PR. <!-- artifacts/screenshots go in the PR body -->
+Re-run both at the **exact** SHA being pinned, immediately before opening (and before every bump). <!-- screenshots go in the PR body even though the entry omits the fields -->
 
 ### Checklist (tick only when true at the pinned commit)
 - [ ] One file added: `plugin-catalog/herd.yaml`
@@ -142,7 +148,7 @@ Re-run both at the actual freeze SHA before opening the PR. <!-- artifacts/scree
 - [x] `version` quoted
 - [x] Rule 13 disclosures in description AND mirrored in README <!-- README verified Nov 5: disclosures section incl. @mention-wake/inject_message line -->
 - [x] `capabilities` match plugin.yaml at pin <!-- verified Nov 7 vs origin/main: 4 tools incl. herd_set_status -->
-- [ ] Screenshots attached (PR body) and listed in `screenshots:` — **or `image`/`screenshots` intentionally omitted because no files exist at the pin (see §0)**
+- [x] Screenshots/media — **entry ships WITHOUT `image`/`screenshots`** (no files at the pin); stills go in the PR body only (see §0)
 - [ ] `hermes plugins validate --install-deps` green locally
 - [ ] CI green
 - [ ] Foreman review + Tyler sign-off (Nov 8) — **gate before opening PR**
