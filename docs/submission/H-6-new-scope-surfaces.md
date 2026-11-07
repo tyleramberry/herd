@@ -1,247 +1,204 @@
-# H-6 — Submission surfaces for the new scope (S-13 / S-15 / S-16) — **GATED STAGING**
+# H-6 — Submission surfaces for the new scope (S-13 / S-15 / S-16) — **APPLIED (F-3 REVISED)**
 
-Owner: @herald · Prepared Fri Nov 6, 2026 · Applies to **H-1** (demo script), **H-2** (catalog entry
-`herd.yaml` + PR description / "surfaces used"), and the **README** rule-13 disclosures.
-Base: `origin/main` @ **5686f0b** (verified 2026-11-07; includes S-15 #41, S-18/B1 #45 and QA's pre-flight audit).
-**QA update (Nov 7):** #45 deleted the `hermes_cli.urllib_security` import, retiring the last rule-9 WARN — the
-catalog audit now reports **0 FAIL / 0 WARN**. Any disclosure line about a private-core import for
-`herd_store.py` is **moot and must be dropped**, not carried.
+Owner: @herald · Prepared Fri Nov 6, 2026 · **Applied Sat Nov 7, 2026** (Nov 8 freeze cancelled — F-3 REVISED)
+Applies to **H-1** (demo script), **H-2** (catalog entry `herd.yaml` + PR description / "surfaces used"),
+and the **README** rule-13 disclosures.
+Base: `origin/main` @ **`cd6d46c`** (verified 2026-11-07).
 
-> ## THE ONE RULE
-> **Nothing in this file goes into H-1, H-2, the catalog entry or the README until the feature it
-> describes is MERGED to `origin/main` at the freeze SHA *and* QA-green.** A cut feature must not
-> appear in the script or the catalog entry (N-5 §3, "out of the demo script the same hour it is cut").
-> This file is the **staging area** — the gated blocks are pre-written so freeze-day is mechanical.
->
-> Do **not** paste a block below into a canonical file while its feature is unmerged. If you are
-> reading a canonical file and see any of this text without its feature merged, delete it.
-
-Placeholders are marked **`TODO(at-freeze):`**. Capability names come from **Smith** (§5); the S-16
-disposition comes from **Sentry Q-8**.
+> ## THE RULE (post-freeze — `docs/pm/F-3-gate-REVISED.md`)
+> The Nov 8 freeze is **cancelled**. There is no freeze SHA to gate on any more; the gate is now
+> **merged to `origin/main` *and* QA-green at the head being pinned**, re-checked at every pin bump.
+> A **cut** feature must not appear in the script or the catalog entry (N-5 §3) — but a feature's
+> **behaviour is disclosed whenever its code ships**, even when its demo beat is held back. This file is
+> now the record of what was applied, to which file, and why; the one block **not** applied (S-13's demo
+> beat) is retained below with its own apply gate.
 
 ---
 
-## 0. Merge state at prep time — **re-verify at freeze**
+## 0. State at apply time (Nov 7, re-verified against `origin/main` @ `cd6d46c`)
 
-| Feature | Board | Branch / PR | State at prep | Gate to apply its block |
+| Feature | Board | Merge / QA verdict | Gate | Applied? |
 |---|---|---|---|---|
-| S-13 promote DM → channel (F1) | `S-13` | **MERGED #37 @ 9d9c6e7** (protocol v2) | merged; **QA gate NOT met** — F-3 A6 open (Q-9 evidence + TC-2.3/2.6 unreported; TC-10.4 flagged #44) | merged ✅ + QA Q-7 green (**pending**) + TC-2 (two-gateway) |
-| S-15 status line + badge (F3) | `S-15` | board says done, branch `feat/s15-status` — **no merge commit on `origin/main`** (verified Nov 6) | not merged | merged + QA Q-7 green |
-| S-16 Kanban link (F4) | `S-16` | none yet — **unblocked by Q-8** | not merged, **cut #1** | merged + Q-8 ruling recorded ✅ + QA green |
-| Smith capability list | — | H-6 dependency | **S-13 + S-15 received** (`herd_set_status` = the 4th tool); S-16 adds no tool per Q-8 (`capabilities:` unchanged either way) | §5 answered ✅ |
-| Sentry Q-8 ruling | `Q-8` | **DONE Nov 6 09:02** | **RULING: YES — read-only kanban.db read is permitted under rule 13**, 7 binding constraints (mode=ro URI, soft-degrade to id-only, profile-aware path, `SELECT title FROM tasks WHERE id=?` only, disclose in README+PR, no private core imports) | §3.3 **YES (DB read)** branch applies; id-only fallback also compliant |
+| **S-13** promote DM → channel (F1) | `S-13` | **merged #37 @ `9d9c6e7`** (protocol v2); Sentry Q-7 verdict **PASS** on `941e975` — TC-10.4 two-gateway **harness** pass | **F-3 gate B1 still open** — TC-10.4 on **two real Macs** not yet evidenced; re-verified under **Q-11** (`t_16d10f75` harness, `t_a23e959b` pin gate) | **Disclosure: APPLIED** (code ships). **Demo beat 6A: RETAINED** (§2.1) until Q-11 closes. |
+| **S-15** status line + badge (F3) | `S-15` | **merged #41 @ `5ab0a0b`**; Sentry QA **PASSED** on `6688b8b` | merged + QA-green ✅ | **APPLIED** — H-1 shot 5 (ambient); H-2 4 tools + rule-13; README. |
+| **S-16** Kanban link (F4) | `S-16` | **merged #46 @ `a20f742`**; Sentry QA **APPROVE** on `35debd8` | merged + QA-green ✅ (Q-8 = YES; board-level nav per PM ruling #47) | **APPLIED** — H-1 shot 6 (ambient); H-2 PR bullet + read line; README. |
+| Smith capability list | — | answered Nov 6 (S-13/S-15) + Nov 7 (S-16) | §5 closed ✅ | — |
+| Sentry Q-8 ruling | `Q-8` | **YES — read-only `kanban.db` under rule 13**, 7 constraints | recorded ✅ | §3.3 **DB-read** branch applied. |
 
-S-16 is **cut #1** (Sat Nov 7 12:00) and S-15 is **cut #2** (Sat Nov 7 18:00). The most likely freeze
-outcome is **S-13 alone, or S-13 + S-15**. The combination table in §2.5 covers every case.
-
----
-
-## 1. Freeze-day procedure (mechanical, ~30 min)
-
-1. `cd ~/herd && git fetch origin && git rev-parse origin/main` → **freeze SHA** (40 hex).
-2. For each feature, confirm it is actually in the freeze tree (not just a branch):
-   `git log origin/main --oneline | grep -iE "<feature word>"`, and confirm the S-* PR shows MERGED.
-3. Apply **only** the blocks whose gate is met (§2 for H-1, §3 for `herd.yaml`/H-2, §4 for rule-13
-   lines). Delete every block whose feature is not merged — **including the H-1 lines and README lines.**
-4. Re-time H-1 against the combination table (§2.5); the total must be **≤85s** (90s cap).
-5. Mirror the applied rule-13 lines into `README.md` **verbatim** (§4) — README and PR description
-   must carry identical lines (Q-3 CA-5).
-6. Hand the applied set to Sentry for the Q-3 re-audit at the freeze SHA (F-3 rows C3/C5).
+**Where each block landed:** H-1 v10 (`docs/submission/H-1-demo-script.md`), H-2 v7
+(`docs/submission/H-2-catalog-pr-package.md` + `docs/submission/plugin-catalog-herd.yaml`), README
+disclosures. **The only unapplied block is S-13's shot 6A beat** — see §2.1.
 
 ---
 
-## 2. H-1 — demo-script deltas
+## 1. Apply procedure used (mechanical)
 
-Base timeline = main's H-1 **+ PR #25 (H-5 beats)** + **PR #27 (locked constants)** — both still OPEN,
-both touch this file, so apply H-6 *after* they merge or H-1 will conflict. Anchor the inserts by the
-quoted text below, not by line number, so they survive a rebase.
+1. `git fetch origin && git rev-parse origin/main` → base `cd6d46c`.
+2. Confirm each feature is in the tree (not just on a branch): `git log origin/main --oneline` → **S-13 #37, S-15 #41, S-16 #46** all present; QA verdicts read from the cards (**S-13 PASS, S-15 PASS, S-16 APPROVE**).
+3. Apply the blocks whose gate is met; for S-13 apply the **disclosure** but hold its **beat** (F-3 B1 open).
+4. Re-time H-1 (§2.5); the total must stay **≤85s** (90s cap).
+5. Mirror the applied rule-13 lines into `README.md` **verbatim** (§4) — README and PR description must be identical for the new-scope lines (Q-3 CA-5).
+6. Hand the applied set to Sentry for the Q-3 re-audit at the pin, and re-run the two gates at every bump.
 
-### 2.1 — S-13: promote a DM into a shared room  ·  **MERGED #37 — HOLD: QA gate open** *(disclosure fact already carried in H-2: PROTOCOL_VERSION 2)*
+---
 
-> **Status check (Herald, Nov 6):** S-13 is merged to `origin/main` (`9d9c6e7`, protocol v2) but the
-> QA gate is **not** met — F-3 A6 needs the Q-9 evidence and TC-2.3/2.6 reported, and TC-10.4 is
-> flagged (#44). Per THE ONE RULE the block below stays **staged**, not applied, until QA is green.
-> Most likely shape at freeze: S-13 alone or S-13 + S-15.
+## 2. H-1 — demo-script deltas (status)
 
-New shot, ~5s, inserted **after shot 6** ("Back to him") and before the end card; call it **shot 6A**.
+Base timeline = H-1 **v10** (`origin/main` @ `cd6d46c`). v9's mention take (S-7/S-9/S-14), shot 5A
+reaction (S-12) and locked constants are unchanged.
+
+### 2.1 — S-13: promote a DM into a shared room  ·  **RETAINED — NOT applied** *(merged #37; F-3 B1 two-real-Mac gate open)*
+
+> **Why held:** S-13 is merged (protocol v2) and Sentry's Q-7 verdict is **PASS** (incl. a TC-10.4
+> two-gateway **harness** run). But the **F-3 gate B1** ("TC-10.4 on **two real gateways**") is still open
+> and is being re-verified under **Q-11**. Per the gate the demo beat stays out until that closes. Its
+> **rule-13 disclosure already ships** (§4) — a merged behaviour is disclosed even when its beat is held.
+
+New shot, ~5s, inserted **after shot 6** and before shot 7; call it **shot 6A**. **Apply only if Q-11
+closes before recording, then re-time to ≤85s** (v10 = 79s, so 6A at +5s lands cleanly at ~84s).
 
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
-| 6A | (5s) | **Private → shared** | Right pane, DM view → hard cut to both screens | Cut to the Tyler↔Brooklyn DM. Brooklyn clicks **Share to a channel**, names it `#project-notes`. Hard cut: the new channel appears **on both Macs** with the DM's messages replayed in order. No VO on the click; one line after: **"That private thread? One click and it's a room."** |
+| 6A | (+5s) | **Private → shared** | Right pane, DM view → hard cut to both screens | Cut to the Tyler↔Brooklyn DM. Brooklyn clicks **Share to a channel**, names it `#project-notes`. Hard cut: the new channel appears **on both Macs** with the DM's messages replayed in order. No VO on the click; one line after: **"That private thread? One click and it's a room."** |
 
-- Why it earns the 5s: it is the one beat that shows a DM becoming shared — the gap N-5 F1 exists to close.
-- Safety for the take: promote **copies**, so if it misbehaves the DM is still on screen — but do not
-  show a failed promote: re-take, do not narrate.
+- Why it earns the 5s: the one beat that shows a DM becoming shared — the gap N-5 F1 exists to close.
+- Promote **copies**, so a misbehaving take still leaves the DM on screen — but do not show a failed promote: re-take, do not narrate.
 - Word rules unchanged: say **channel**, never "promote"/"migrate"/"SQLite".
-- Pre-req on camera: both Macs must show the promoted channel within one sync cycle (hold on the left ≤3s).
+- Pre-req on camera: both Macs show the promoted channel within one sync cycle (hold on the left ≤3s).
+- **Cut checklist (§2.6) applies if Q-11 fails** — the beat, its rehearsal line and any H-1 mention come out.
 
-### 2.2 — S-15: supervision status line + speaker badge  ·  **MERGED @5ab0a0b — ambient take only, no narrated beat**
-
-**Ambient by default; optional 2s glance.** Do **not** give it a narrated beat.
+### 2.2 — S-15: supervision status line + speaker badge  ·  **APPLIED in shot 5 (ambient, no narrated beat)**
 
 - In **shot 5** (handoff), Brooklyn's agent's in-flight work shows one phrase from the fixed vocabulary
-  (`reading the code` · `writing the code` · `reviewing` · `done` · `idle`) beside it. If a take shows
-  it cleanly, hold **2s** on the pane when the phrase changes (e.g. `writing the code` → `done`).
+  (`reading the code` · `writing the code` · `reviewing` · `done` · `idle`) beside it. If a take shows it
+  cleanly, hold **2s** when the phrase flips (e.g. `writing the code` → `done`). No VO — ambient.
 - Human/agent **badges** are visible in every shot from 5 on (already required by N-2). Call out nothing.
 - **Scope (Sentry D-5, confirmed by Smith):** status is **local-gateway-agents only**, in the gateway
   process's memory (never `herd.db`, never peer-synced; `PROTOCOL_VERSION` untouched), delivered by
-  `_notify`→`broadcast_plugin_event` + the pane's 3s `/status` poll. In the split-screen take the agent's
-  phrase therefore shows on **the machine whose agent is working** — in shot 5 that is **Brooklyn's Mac**.
-- **Lifetime:** it clears after **5 minutes** or on gateway restart — so **set it fresh in each take**;
-  do not expect a phrase left over from a rehearsal to still be there.
-- If no status was ever set, the pane shows **nothing** — do not cut to an empty status slot expecting a phrase.
-- Add to the rehearsal checklist (for @sentry): "Status phrase shows only the fixed vocabulary; nothing
-  invented or stale when unset; badge correct on a human and on an agent message — 3× in a row (Q-7 TC-11.1–11.3, 11.6)."
+  `_notify`→`broadcast_plugin_event` + the pane's 3s `/status` poll — so the phrase shows on **the machine
+  whose agent is working** (in shot 5, **Brooklyn's Mac**).
+- **Lifetime:** clears after **5 minutes** or on gateway restart → **set it fresh in each take**.
+- Unset ⇒ the pane shows **nothing** — never cut to an empty status slot expecting a phrase.
+- Rehearsal line added to H-1 (for @sentry): phrase shows only the fixed vocabulary; nothing invented or
+  stale when unset; badge correct on a human and on an agent message (Q-7 TC-11.1–11.3, 11.6).
 
-### 2.3 — S-16: agent answer links to the Kanban board  ·  **APPLY IF S-16 MERGED**
+### 2.3 — S-16: agent answer links to the Kanban board  ·  **APPLIED in shot 6 (ambient glance, ≤2s)**
 
-**Ambient glance, ≤2s**, at the end of **shot 6**: the agent's answer message carries a task badge.
+**Ambient glance at the end of shot 6:** the agent's answer carries a task badge.
 
-- **If Q-8 = YES (DB read allowed):** the badge shows **task id + title**. Hold 2s; Tyler clicks it → the
-  `herd` board opens on that task. One line: **"Every answer points back at the work."**
-- **If Q-8 = NO (id-only fallback):** same beat, badge shows the **id only** (no title). Click still opens
-  the board. Do not show a title if the plugin is not allowed to read it.
-- This is the **first beat to drop** if the take runs long (matches N-5 §3: S-16 is cut first).
+- **Q-8 = YES (DB read):** the badge shows **task id + title**. Hold 2s; Tyler clicks it → the `herd`
+  board opens (**board-level**: the badge carries the task id; the card itself is **not** focused — PM
+  ruling #47, `docs/pm/2026-11-07-s16-click-ruling.md`). One line: **"Every answer points back at the work."**
+- The id-only fallback (Q-8 = NO) is **not** in play — Q-8 was ruled YES.
+- This is the **first beat to drop** if the take runs long (matches N-5 §3 cut order).
 
-### 2.4 — Time donors (pre-agreed; take seconds only from here)
+### 2.4 — Time donors (as applied to v10)
 
-| Beat | was | becomes | frees |
-|---|---|---|---|
-| Shot 5 handoff | 24s | 22s | −2s |
-| Shot 5A reaction (S-12) | 3s | 2s | −1s |
-| Shot 7 "Name it" | 12s | 9s | −3s |
-| Shot 8 end card | 5s | 4s | −1s |
-| **Total available** | | | **−7s** |
+| Beat | v9 → v10 as cut | frees |
+|---|---|---|
+| Shot 7 "Name it" | 12s → **9s** | −3s |
+| Shot 8 end card | 5s → **4s** | −1s |
+| **Total available** | | **−4s** |
 
-### 2.5 — Combination table (base v7 shot sum = **80s**; must stay ≤85s)
+Shot 5 (22s) is the @mention take by design and **cannot** donate. The S-16 glance **adds** 2s inside
+shot 6 (12s → 14s); the S-15 status phrase is **ambient** inside shot 5 (no added hold). Shot 5A stays 4s.
 
-| Merged at freeze | Donors applied | New seconds | Total | Verdict |
-|---|---|---|---|---|
-| none | — | 0 | **80s** | v7 as-is (PR #25) |
-| S-13 only | 5 → 22 (−2), 7 → 9 (−3) | +5 (6A) | **80s** | ✅ default if F3/F4 cut |
-| S-15 only | 7 → 9 (−3) + 5 → 23 (−1) | +2 | **79s** | ✅ |
-| S-16 only | 7 → 9 (−3) + 5 → 23 (−1) | +2 | **79s** | ✅ |
-| S-13 + S-15 | 5 → 22 (−2), 7 → 9 (−3), 8 → 4 (−1) | +7 | **81s** | ✅ **most likely** |
-| S-13 + S-16 | 5 → 22 (−2), 7 → 9 (−3), 8 → 4 (−1) | +7 | **81s** | ✅ |
-| S-15 + S-16 | 5 → 22 (−2), 7 → 9 (−3), 8 → 4 (−1) | +4 | **79s** | ✅ |
-| **all three** | all of §2.4 (−7) | +9 | **82s** | ✅ (7s under cap) |
+### 2.5 — Timing ledger
 
-If a take lands over 85s: drop the S-16 glance first, then the S-15 glance, then the S-13 shot — in that
-order (reverse of story value). Never cut the hook or shots 2–4.
+| State | Seconds |
+|---|---|
+| v9 base (shots 1–4, 5, 5A, 6–8) | 81s |
+| **v10 as cut** — S-15 ambient (shot 5) + S-16 +2 (shot 6); donors 7 −3 / 8 −1 | **79s** ✅ (11s under cap; ≤85s target held) |
+| *If S-13's beat is applied* (shot 6A +5s, no further donors) | **84s** ✅ (still ≤85s) |
 
-### 2.6 — Cut = must-not-appear checklist
+Everything stays under the 90s cap; the ≤85s target holds in both states. If a take lands over 85s: drop
+the S-16 glance first, then the S-15 glance, then the S-13 shot — reverse of story value. Never cut the
+hook or shots 2–4.
 
-When a feature is cut, confirm **none** of these remain anywhere:
-- [ ] No H-1 shot/row mentioning the feature (6A for S-13, the status phrase for S-15, the task badge for S-16).
-- [ ] No rehearsal-checklist line for the feature.
-- [ ] No `herd.yaml` capability, PR-description bullet or rule-13 line for the feature.
-- [ ] No README line for the feature.
-- [ ] Timings return to the combination table's "none"/applicable row.
+### 2.6 — Cut / not-applied = must-not-appear checklist
+
+For any block **not** applied (currently only S-13's beat), confirm **none** of these appear in H-1:
+- [ ] No H-1 shot/row mentioning the feature (no 6A row while S-13's beat is held).
+- [ ] No rehearsal-checklist line for the held feature.
+- [ ] No `herd.yaml` capability or PR-description **beat** for it — **but its rule-13 disclosure line stays** (behaviour ships).
+- [ ] Timings return to the applicable ledger row.
 
 ---
 
-## 3. H-2 — `herd.yaml` capability list + PR-description deltas
+## 3. H-2 — `herd.yaml` capability list + PR-description deltas (status)
 
 `herd.yaml` is the catalog entry added by H-3's PR to `NousResearch/hermes-agent`
-(`plugin-catalog/herd.yaml`); the `capabilities:` block must equal what the freeze SHA registers
-(**rule 6**). The current block on `origin/main` (`H-2` §1) is `provides_tools: [herd_list_channels,
-herd_post, herd_read_channel]`, empty hooks/middleware/env.
+(`plugin-catalog/herd.yaml`); the `capabilities:` block must equal what the pin registers (**rule 6**).
 
-### 3.1 — S-13  ·  **APPLY IF S-13 MERGED**  *(facts from @smith, branch `wt/s13-promote`)*
+### 3.1 — S-13  ·  **APPLIED (disclosure only)**  *(names corrected Nov 7 per Sentry Q-7)*
 - **`capabilities:` — NO CHANGE.** Promote adds no tool; `herd_list_channels` already lists the new channel.
-- **Write path (confirmed by Smith):** the desktop half calls a **local-only** backend route
-  `POST /api/plugins/herd/channels/{channel_id}/promote` (pane → Herd's own backend, no network); the
-  teammate's gateway is reached by the **same** `POST /herd/v1/sync` call already disclosed.
-  **`PROTOCOL_VERSION` 1 → 2**; the message payload gains `origin_channel_id` so both gateways converge on
-  the same rows. No new endpoint, host or credential.
-- **PR description → "Hermes surfaces used":** add
-  `- Promote a DM to a channel — a desktop action (local route `POST /api/plugins/herd/channels/{id}/promote`); the copy reaches the teammate over the existing `POST /herd/v1/sync` write path with a new channel-create + message-replay payload (`PROTOCOL_VERSION` 1 → 2; copied rows carry `origin_channel_id`).`
-- **Checklist:** tick "protocol version bump (1 → 2) disclosed".
-- **Protocol honesty (Sentry TC-10.11, merge gate):** state that the version is bumped **once** and is
-  readable from `/herd/v1/ping` + `/status`; note (verify from the diff at freeze) what an old **v1**
-  peer does with a v2 body — Smith has confirmed no 500/corruption. The disclosure line in §4 carries
-  the "sync protocol v2" fact; do not let the version go undisclosed.
+- **Write path (code of record, verified):** the desktop half calls a **local-only** backend route
+  **`POST /api/plugins/herd/channels/{channel_id}/share`** (`dashboard/plugin_api.py`); the teammate's
+  gateway is reached by the **same** `POST /herd/v1/sync` call already disclosed. **`PROTOCOL_VERSION`
+  1 → 2**; the message row gains **`promoted_from`** (the source DM id) so both gateways converge.
+  *(The earlier staged names `…/promote` and `origin_channel_id` were **wrong** — do not use them.)*
+- **Protocol honesty (Sentry TC-10.11):** the version is bumped **once**, readable from
+  `/herd/v1/ping` + `/status`; **peers do not enforce `v`** (`handle_peer_sync` reads no version field),
+  so a newer-protocol body is accepted, not refused (verified live: `{"v":3,…}` → HTTP **200**). Disclosed,
+  not a silent pass.
+- **Checklist:** "protocol version bump (1 → 2) disclosed" ✅.
 
-### 3.2 — S-15  ·  **APPLIED (merged on main @5ab0a0b, #41)**  *(verified vs `plugin.yaml` Nov 7: 4 tools)*
-- **`capabilities.provides_tools`:** append **`herd_set_status`** — Smith: the exact name, no others
-  (single argument `status`, a 5-value enum). Must match `plugin.yaml provides_tools` at the freeze SHA
-  exactly (rule 6). **This is the 4th declared tool** — `herd.yaml` and `plugin.yaml` both go 3 → 4, and
-  **Sentry TC-0.8: `catalog_audit.py` must show 4 tools, not 3.**
-- **Confirmed none:** no new hook, no new middleware, no `requires_env` (the phrase needs no credential;
-  nothing new stored as a secret).
-- **PR description → "Hermes surfaces used":** the tool list gains `herd_set_status`; add
-  `- Agent status: `herd_set_status` lets an agent set one coarse phrase (reading the code / writing the code / reviewing / done / idle) shown beside its in-flight work; per-message human/agent badges are rendered in the pane.`
-- **Rule-13 (Sentry TC-11.8 makes this a merge gate).** Apply the line in §4 verbatim: local-only, in
-  gateway memory only (D-5), no peer sync, no `herd.db` write, self-clears. Do **not** invent a network line.
+### 3.2 — S-15  ·  **APPLIED (merged on main @ `5ab0a0b`, #41)**
+- **`capabilities.provides_tools`:** `herd_set_status` appended — the exact name, no others (single arg
+  `status`, a 5-value enum). **The 4th declared tool** — `herd.yaml` and `plugin.yaml` both go 3 → 4, and
+  **`catalog_audit.py` shows 4 tools, not 3** (Sentry TC-0.8). ✅
+- **Confirmed none:** no new hook, no new middleware, no `requires_env`.
+- **Rule-13 line** (§4) applied: local-only, gateway-memory only (D-5), no peer sync, no `herd.db` write,
+  self-clears.
 
-### 3.3 — S-16  ·  **APPLY IF S-16 MERGED**  *(Q-8 = **YES, DB read** — this branch is the live one)*
-
-> **Q-8 answered (Sentry, Nov 6): YES — read-only kanban.db read is permitted under rule 13.** Use the
-> **DB-read** wording below (task-id **+ title**, read-only, degrades to id-only), plus Sentry's exact
-> constraints: `mode=ro` URI, `SELECT title FROM tasks WHERE id=?` only, profile-aware path (no bare
-> `os.environ`), never block the pane, disclose in README + PR description. **CA-7 line "reads outside
-> plugin data: none" must be deleted** and replaced by the §4 read line. The id-only fallback is also
-> compliant but is now the fallback, not the target. S-16 still needs merge + QA — cut #1 is Sat 12:00.
-- **If Q-8 = NO (id-only):** `capabilities:` **NO CHANGE**. Add PR-description bullet
-  `- Kanban link: an agent's answer can carry a task-id badge that opens that task on the herd board; the task id is passed explicitly by the agent and no Kanban data is read.`
-- **If Q-8 = YES (DB read allowed):** a local-DB read is **not** a `capabilities:` key — rule 6's block
-  covers tools/hooks/middleware/env only. It is a **rule-13** disclosure only (§4). Add the PR bullet
-  `- Kanban link: an agent's answer carries a task-id + title badge, read from the local Kanban DB (read-only); opens that task on the herd board.` and apply Sentry's exact constraint wording from Q-8.
-- **Checklist:** tick "S-16 disposition matches Q-8 ruling".
+### 3.3 — S-16  ·  **APPLIED (merged #46; Q-8 = YES, DB read)**
+- **`capabilities:` — NO CHANGE.** No new tool/hook/middleware/`requires_env`; `provides_tools` stays **4**,
+  so rule 6 is untouched and `catalog_audit.py --expect-tools` needs no edit.
+- **PR bullet (as shipped in PR #46):** `- Kanban link: an agent's answer can carry a task-id + title badge; the title is read from the local Kanban database (**read-only**), and clicking the badge opens the herd board. The task id is passed explicitly by the agent.` *(board-level, per PM ruling #47.)*
+- **Rule-13 line** (§4, reads-outside-own-data) applied verbatim to README + PR description.
+- **CA-7 ("reads outside plugin data: none") was deleted** and replaced by the read line (README + H-2). ✅
 
 ---
 
-## 4. Rule-13 disclosures — **append to PR description AND `README.md` verbatim**
+## 4. Rule-13 disclosures — **applied to PR description AND `README.md` verbatim**
 
-Rule 13 (*"Risky behaviour is disclosed"*) covers: network calls, reads outside the plugin's own data,
-shell commands, long-running background processes, stored credentials. Append only the lines whose
-feature merged; README and PR description must be **identical** (Q-3 CA-5).
+Rule 13 (*"Risky behaviour is disclosed"*): network calls, reads outside own data, shell commands,
+long-running background processes, stored credentials. README and PR description carry these **identical**
+(Q-3 CA-5).
 
-**S-13 — apply if merged** *(text authored by @smith, branch `wt/s13-promote`; H-6 owns it; needs Sentry Q-7 sign-off)*:
+**S-13 — APPLIED** *(authored by @smith; signed off by Sentry Q-7)*:
 > - **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command.
 
-**S-15 — apply if merged** *(Sentry TC-11.8 gate: a rule-13 line for the status write path; text from @smith)*:
-> - **Agent status:** an agent may set one short phrase about what it is doing (`herd_set_status`, from a fixed five-phrase vocabulary) which the pane shows beside its work. It lives in the gateway process's memory only — never written to `herd.db`, never sent to the teammate's gateway — and clears itself after five minutes or on gateway restart. No new network calls, no new stored credential, no shell commands.
+**S-15 — APPLIED** *(shipped README wording is canonical — H-2 copies it verbatim; Sentry TC-11.8 gate)*:
+> - **Agent status:** an agent may set one short phrase (herd_set_status, e.g. "writing the code") that the pane shows beside its work. It lives in the gateway process's memory only — never written to herd.db, never sent to your teammate's gateway — and it disappears after five minutes or when the gateway restarts.
 
-**S-16 — apply if merged, Q-8 = YES** (this is a **reads-outside-own-data** disclosure — mandatory under rule 13):
-> - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the
->   local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no
->   schema assumptions; if the file is missing or locked the pane shows the task id only.
+**S-16 — APPLIED (Q-8 = YES)** *(reads-outside-own-data — mandatory under rule 13)*:
+> - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it.
 
-**S-16 — apply if merged, Q-8 = NO** (no read; state it so reviewers don't suspect one):
-> - **Kanban link:** links an agent's message to a Kanban task by the task id the agent passes explicitly;
->   opens the task in the Kanban view. Herd does not read the Kanban database.
-
-Also update the README "What Herd does on your machine (disclosures)" heading area if any of the above
-add a new disclosure category (S-16 Q-8 = YES adds a **reads outside plugin data** line where README
-currently says "reads nothing outside its own data folder" — that line must change, not coexist).
+*(The S-16 "Q-8 = NO" id-only variant is retired — Q-8 was ruled YES.)*
 
 ---
 
-## 5. What H-6 needs from @smith (capability list) — **blocks H-2 final**
+## 5. What H-6 needed from @smith (capability list) — **CLOSED**
 
-Please answer in a comment on `S-13`/`S-15`/`S-16` (or on `H-6`):
-
-1. **S-15** — ✅ **ANSWERED** (Smith, Nov 6): tool **`herd_set_status`** (exact, no others; single arg
-   `status`, 5-value enum); it is an **agent tool** registered via `ctx.register_tool(...)` in
-   `__init__.py::register()` ⇒ 4th entry in **both** `plugin.yaml provides_tools` and
-   `herd.yaml capabilities.provides_tools`; no new hook/middleware/`requires_env`; **local-only** (D-5,
-   in gateway memory). Disclosure text staged in §3.2/§4. Reviewer-facing correction: any H-2/README copy
-   that says "three agent tools" moves to **four** — **S-15 is merged (main @5ab0a0b), so this applies: four agent tools.**
-2. **S-13** — ✅ **ANSWERED** (Smith, Nov 6): no new tool; `PROTOCOL_VERSION` **1 → 2**; same
-   `POST /herd/v1/sync` endpoint (new local-only backend route
-   `POST /api/plugins/herd/channels/{id}/promote`; payload gains `origin_channel_id`; copies never
-   wake an agent). Disclosure text staged in §4, awaiting Sentry Q-7.
-3. **S-16** — pending Q-8: if id-only, confirm **no** capability/declaration change; if DB-read is ruled
-   allowed, the exact path + read-only guarantee Sentry requires.
+1. **S-15** — ✅ answered: tool **`herd_set_status`** (exact, no others; single arg `status`, 5-value enum);
+   an **agent tool** registered via `ctx.register_tool(...)` in `__init__.py::register()` ⇒ 4th entry in
+   **both** `plugin.yaml provides_tools` and `herd.yaml capabilities.provides_tools`; no new
+   hook/middleware/`requires_env`; **local-only** (D-5, in gateway memory).
+2. **S-13** — ✅ answered: no new tool; `PROTOCOL_VERSION` **1 → 2**; route `…/share`; field `promoted_from`;
+   same `POST /herd/v1/sync` endpoint; copies never wake an agent.
+3. **S-16** — ✅ answered (Smith, Nov 7, PR #46): **no** capability/declaration change; title read is one
+   `SELECT title FROM tasks WHERE id = ?` over a `mode=ro` URI, profile-aware path, soft-degrade to id-only.
 
 ---
 
 ## 6. Open items
 
-- [x] @smith: **S-13** disclosure text received → staged in §3.1/§4 (needs Sentry Q-7 sign-off).
-- [x] @smith: **S-15** capability list received (`herd_set_status`, agent tool, 4th entry, local-only) → staged in §2.2/§3.2/§4.
-- [ ] @smith: **S-16** disposition — the last piece that **blocks H-2 final** (§5 item 3).
-- [ ] @sentry: Q-8 ruling on `kanban.db` — decides the S-16 lines in §3.3/§4.
-- [ ] PR #25 (H-5 beats) and PR #27 (constants) must merge **before** the H-1 deltas in §2 apply.
-- [ ] At freeze: run §1, then Sentry Q-3 re-audit at the freeze SHA (F-3 C3/C5).
+- [x] @smith: **S-13** disclosure text → applied (§3.1/§4).
+- [x] @smith: **S-15** capability list → applied (§2.2/§3.2/§4).
+- [x] @smith: **S-16** disposition → applied (§3.3/§4).
+- [x] @sentry: Q-8 ruling → applied (DB-read branch).
+- [x] H-1 v10 re-timed to ≤85s (§2.5); H-2 / `herd.yaml` updated; README mirrored (§4).
+- [ ] **S-13 demo beat (shot 6A)** — apply only if the F-3 B1 gate (TC-10.4 on two real Macs) closes under **Q-11**; then re-time and re-hand to Sentry.
+- [ ] At open (and every bump): re-run `hermes plugins validate . --install-deps` and
+  `catalog_audit.py --entry herd.yaml` at the exact pin; hand the applied set to Sentry for the Q-3 re-audit.
