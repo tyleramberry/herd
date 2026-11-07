@@ -104,6 +104,20 @@ function refusedPeers(status) {
 
 function PeerLine({ status }) {
   const peers = (status && status.peers) || []
+  // Only an explicit false: older/partial status payloads without the key render as before.
+  if (status && status.herd_secret_set === false) {
+    return jsxs('div', {
+      className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+      title: "Teammates can't sync with this gateway until it has a Herd secret.",
+      children: [
+        jsx(StatusDot, { tone: 'bad' }),
+        jsx('span', {
+          className: 'truncate',
+          children: 'This gateway has no Herd secret set. Set one in Settings → Plugins → Herd.'
+        })
+      ]
+    })
+  }
   if (peers.length === 0) {
     const refused = refusedPeers(status)
     if (refused.length) {
@@ -141,7 +155,7 @@ function PeerLine({ status }) {
   const label = peer.connected
     ? 'Connected to ' + name
     : !peer.has_key
-      ? 'Add ' + name + "'s key to connect"
+      ? 'Add ' + name + "'s Herd secret to connect"
       : peer.last_attempt
         ? "Can't reach " + name + ". Messages will send when they're back."
         : 'Connecting to ' + name + '…'
@@ -889,7 +903,7 @@ function NoTeammate({ incoming }) {
           jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             children:
-              "Settings → Plugins → Herd → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and API key (their API_SERVER_KEY)."
+              "Settings → Plugins → Herd → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and Teammate's Herd secret (the HERD_SECRET they set — not their API key)."
           })
         ]
       : [

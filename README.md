@@ -28,16 +28,21 @@ Then in the desktop app, turn on Herd's desktop half in **Capabilities → Plugi
 
 Only one of you needs to do this. Say Tyler connects to Brooklyn:
 
-1. **On Brooklyn's machine**, make sure the Hermes API server is reachable on your network: in `~/.hermes/.env` set `API_SERVER_KEY=<a long random key>` and `API_SERVER_HOST=0.0.0.0` (port `8642` by default), with the herd plugin enabled. Restart the gateway.
+1. **On Brooklyn's machine**, with the herd plugin enabled:
+   - Open **Settings → Plugins → Herd** and set *This gateway's Herd secret* (`HERD_SECRET`) to a long random value. This is Herd's own credential: it only opens Herd's `/herd/v1/*` routes, never the rest of the gateway. Tell Tyler this value — and only this value. Never share your `API_SERVER_KEY`.
+   - Make the Hermes API server reachable from Tyler's machine (port `8642` by default). Prefer a tailnet/VPN address; if you set `API_SERVER_HOST=0.0.0.0` in `~/.hermes/.env`, know that this opens the **whole** Hermes API surface to your network, and the Herd secret does **not** protect any of it — only `/herd/v1/*`. Keep `API_SERVER_KEY` set to its own long random key, and firewall the port to your teammate if you can. Restart the gateway.
 2. **On Tyler's machine**, open **Settings → Plugins → Herd** (or click **Connect a teammate** in the Herd pane) and fill in:
    - *Teammate's name*: `brooklyn`
    - *Teammate's gateway URL*: `https://brooklyn-mac.tailnet-name.ts.net:8642` (prefer `https://`, or your VPN/tailnet address — a plain `http://` URL to another machine is refused by default; see the warning below)
-   - *Teammate's API key*: Brooklyn's `API_SERVER_KEY` (masked; stored in Hermes's secret store, never in `config.yaml`)
+   - *Teammate's Herd secret* (`HERD_PEER_KEY`): the Herd secret Brooklyn set in step 1 (masked; stored in Hermes's secret store, never in `config.yaml`)
+   - *This gateway's Herd secret*: only needed if Brooklyn adds you back — set your own long random value and tell Brooklyn just that.
 3. Both of you can set *Your name*, which is how you appear in channels (defaults to the computer name).
 
-> **On the same Wi-Fi?** A plain `http://` URL sends Brooklyn's key on the wire in the clear, where anyone on that network can read it — and can forge replies Herd would store. Use `https://`, your VPN/tailnet address, or a TLS proxy. Herd refuses a non-loopback `http://` peer by default; the only way to override that is to switch on **Send the peer key in cleartext (unsafe)** in Herd's settings, knowingly.
+> **On the same Wi-Fi?** A plain `http://` URL sends Brooklyn's Herd secret on the wire in the clear, where anyone on that network can read it — and can forge replies Herd would store. Use `https://`, your VPN/tailnet address, or a TLS proxy. Herd refuses a non-loopback `http://` peer by default; the only way to override that is to switch on **Send the peer key in cleartext (unsafe)** in Herd's settings, knowingly.
 
 Within a few seconds the pane header shows **Connected to brooklyn**, and each of you appears in the other's **Direct messages → New message** list.
+
+> **Already linked before this change?** A *Teammate's Herd secret* saved by an older Herd still holds their old `API_SERVER_KEY`, which their gateway no longer accepts on `/herd/v1/*`. Each side sets a new *This gateway's Herd secret*, tells the other that value only, and the link recovers — the error line names which side is still missing one.
 
 ## Let your agent answer @mentions (optional, off by default)
 
@@ -52,7 +57,7 @@ Guards: only messages from people trigger it, never from agents (so two agents c
 ## How sync works
 
 - Every message has a globally unique id and is stored in a local SQLite file. Inserts ignore duplicates, so a message delivered twice is still one message.
-- The connected side (Tyler) sends one request to Brooklyn's gateway (`POST /herd/v1/sync` on Brooklyn's API server, authenticated with Brooklyn's `API_SERVER_KEY`) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Brooklyn's back, so linking one side is enough for both directions.
+- The connected side (Tyler) sends one request to Brooklyn's gateway (`POST /herd/v1/sync` on Brooklyn's API server, authenticated with Brooklyn's Herd secret, which Tyler stored as *Teammate's Herd secret*) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Brooklyn's back, so linking one side is enough for both directions.
 
 Once the first sync lands, the other side's Herd shows "{name} is connected" in the header and "{name} connected to you — add them back" in the empty state. Adding them back is optional for messaging (the linked side does the polling), but it shows link health on both sides.
 - Each side keeps cursors per peer and only advances them when a sync succeeds. If the teammate is offline, messages wait and send when they're back.
@@ -64,9 +69,9 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 ## What Herd does on your machine (disclosures)
 
 - **Network calls:** only to the one teammate gateway URL you enter, at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
-- **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require your `API_SERVER_KEY` (the API server's own key check), so only someone you gave that key to can read or post Herd messages on your machine. Herd reuses the API server adapter's own key check (`adapter._check_auth`), which is not a public API, rather than reading `API_SERVER_KEY` itself. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
+- **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require **this gateway's Herd secret** (`HERD_SECRET`, Herd's own credential, read through Hermes's secret store and compared in constant time). With no Herd secret set, both routes refuse every request (fail closed). Your gateway's `API_SERVER_KEY` is **not** accepted on `/herd/v1/*`, and the credential you hand a teammate is Herd-scoped — it is no longer your gateway API key, so it cannot reach the rest of your API server. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
-- **Stored credentials:** the teammate's API key is a `config_schema` secret (`HERD_PEER_KEY`), saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
+- **Stored credentials:** two `config_schema` secrets — the teammate's Herd secret (`HERD_PEER_KEY`, sent to their gateway) and this gateway's own Herd secret (`HERD_SECRET`, required from them) — saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the task title of a Kanban card an agent linked to its answer (next bullet).
 - **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command.
 - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it.
@@ -88,8 +93,8 @@ hermes plugins validate .
 hermes plugins doctor . --ci
 ```
 
-`requirements-dev.txt` lists what the suite uses (pytest, fastapi, httpx, PyYAML). Each is
-optional: tests that need FastAPI/httpx or PyYAML are skip-guarded, so a bare `pytest` run
+`requirements-dev.txt` lists what the suite uses (pytest, fastapi, httpx, PyYAML, aiohttp). Each is
+optional: tests that need FastAPI/httpx, PyYAML or aiohttp are skip-guarded, so a bare `pytest` run
 reports skips instead of errors.
 
 For live desktop development, link the checkout into your plugins folder: `ln -s ~/src/herd ~/.hermes/plugins/herd`.

@@ -98,7 +98,7 @@ class TwoGatewaysOverHttp(unittest.TestCase):
         self.use_a(key="wrong")
         [res] = store.sync_all()
         self.assertFalse(res["ok"])
-        self.assertIn("rejected the key", res["error"])
+        self.assertIn("rejected our Herd secret", res["error"])
 
     def test_herd_not_enabled_on_peer(self):
         self.use_a(url=self.url + "/nothing-here")

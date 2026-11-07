@@ -5,9 +5,12 @@
 #   python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 #   .venv/bin/python -m pytest tests/ -q
 #
-# Every one of these is optional to the suite: tests that need fastapi/httpx or PyYAML
-# are skip-guarded, so a bare `pytest` run reports skips rather than errors.
+# Every one of these is optional to the suite: tests that need fastapi/httpx, PyYAML or
+# aiohttp are skip-guarded, so a bare `pytest` run reports skips rather than errors.
+# aiohttp runs the peer-route tests (tests/test_peer_secret_scope.py) and, with uvicorn,
+# the two-gateway SPINE harness (scripts/qa/two_gateway_run.py).
 pytest
 fastapi
 httpx
 pyyaml
+aiohttp

@@ -22,6 +22,7 @@ Fan-out model (see README "How sync works"):
 from __future__ import annotations
 
 import contextvars
+import hmac
 import ipaddress
 import json
 import math
@@ -48,7 +49,11 @@ MAX_CONTENT = 20_000
 MAX_NAME = 64
 BATCH_LIMIT = 200
 SYNC_TIMEOUT_S = 10
-SECRET_ENV = "HERD_PEER_KEY"
+SECRET_ENV = "HERD_PEER_KEY"  # the PEER's Herd secret: what we present to their /herd/v1/*
+LOCAL_SECRET_ENV = "HERD_SECRET"  # THIS gateway's Herd secret: what a peer must present to ours
+# The 401 message our peer routes send when no local Herd secret is set. ``_describe_error`` looks
+# for this exact text in a peer's 401 body to tell "they have no secret" from "our secret is wrong".
+NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
 
 REACTIONS = ["👍", "❤️", "👁️", "🎉"]
 
@@ -292,6 +297,41 @@ def _secret(name: str) -> str:
         return str(get_secret(name, "") or "").strip()
     except Exception:
         return ""
+
+
+def herd_secret() -> str:
+    """This gateway's own Herd secret: what a peer must present on /herd/v1/*. Never the API key."""
+    return _secret(LOCAL_SECRET_ENV)
+
+
+def herd_secret_set() -> bool:
+    """Whether this gateway has a Herd secret configured. Never returns or logs the value."""
+    return bool(herd_secret())
+
+
+def bearer_token(authorization: Any) -> str:
+    """The `Bearer <token>` value from an Authorization header, or '' when absent/malformed."""
+    if not isinstance(authorization, str):
+        return ""
+    scheme, _, token = authorization.strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()
+
+
+def inbound_authorized(authorization: Any) -> bool:
+    """Constant-time check of a request's Bearer against this gateway's Herd secret.
+
+    Fails closed: no local Herd secret set means nothing is authorized. The gateway
+    API_SERVER_KEY is never accepted here.
+    """
+    secret = herd_secret()
+    if not secret:
+        return False
+    token = bearer_token(authorization)
+    # Bytes, not str: compare_digest raises TypeError on non-ASCII str, and the token is raw
+    # client input, so a stray byte must be a plain mismatch (401), never a 500.
+    return hmac.compare_digest(token.encode("utf-8", "surrogatepass"), secret.encode("utf-8", "surrogatepass"))
 
 
 def _clean_name(value: Any, fallback: str = "") -> str:
@@ -858,7 +898,7 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
 
 
 def _record_incoming(sender: dict) -> None:
-    """Remember who synced to us. The route is already authenticated with our API_SERVER_KEY."""
+    """Remember who synced to us. The route is already authenticated with our Herd secret (HERD_SECRET)."""
     gid = str(sender.get("gateway_id") or "").strip()[:64]
     if not gid:
         return
@@ -1175,10 +1215,25 @@ def _peer_state(conn: sqlite3.Connection, peer: dict) -> sqlite3.Row:
     return conn.execute("SELECT * FROM peer_state WHERE url = ?", (peer["url"],)).fetchone()
 
 
+def _peer_reports_no_secret(exc: urllib.error.HTTPError) -> bool:
+    """Whether a peer's 401 body says it has no Herd secret set. Never raises."""
+    try:
+        raw = exc.read(4096)
+        body = json.loads(raw.decode("utf-8", "replace")) if raw else {}
+    except Exception:  # noqa: BLE001 — an unreadable body is just "not that case"
+        return False
+    err = body.get("error") if isinstance(body, dict) else None
+    text = err.get("message") if isinstance(err, dict) else err
+    return isinstance(text, str) and NO_LOCAL_SECRET in text
+
+
 def _describe_error(exc: Exception) -> str:
     if isinstance(exc, urllib.error.HTTPError):
         if exc.code == 401:
-            return "The peer rejected the key (check its API_SERVER_KEY)."
+            if _peer_reports_no_secret(exc):
+                return "The peer has no Herd secret set — ask them to set one in Settings → Plugins → Herd."
+            return ("The peer rejected our Herd secret (check the secret you saved for them in "
+                    "Settings → Plugins → Herd).")
         if exc.code == 404:
             return "The peer doesn't have Herd enabled yet."
         return f"The peer answered HTTP {exc.code}."
@@ -1228,7 +1283,8 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
         return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled,
                 "reactions_pushed": rpushed}
     except Exception as exc:  # noqa: BLE001 — a peer being down is a normal state, not a crash
-        message = ("No key set for this peer." if isinstance(exc, PermissionError)
+        message = ("No Herd secret saved for this peer — add your teammate's Herd secret in "
+                   "Settings → Plugins → Herd." if isinstance(exc, PermissionError)
                    else str(exc) if isinstance(exc, PeerRefusedError)
                    else _describe_error(exc))
         with connect() as conn:
@@ -1364,4 +1420,5 @@ def status() -> dict:
         })
     refused = refused_peers()
     return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
-            "agent_status": agent_status(), "mention_wake": wake_status()}
+            "agent_status": agent_status(), "mention_wake": wake_status(),
+            "herd_secret_set": herd_secret_set()}
