@@ -1,12 +1,14 @@
-# H-1 — Demo Video Script: Herd (v9, Nov 6 — final-pass draft ahead of Nov 7)
+# H-1 — Demo Video Script: Herd (v10, Nov 7 — new scope woven in under F-3 REVISED)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
-**Record date: Nov 8 — code freeze. Rehearse with Sentry before recording.**
-**Timings sum to ~81s, leaving ~9s buffer under the 90s cap (≤85s target held).**
-**Base pinned at prep:** `origin/main` @ `e967130` (Nov 6). **The demo runs on the FROZEN build** — at
-freeze (Nov 8) H-6's §1 procedure re-verifies surfaces and re-pins every referenced SHA (this base, and
-`herd.yaml`'s `sha:`) to the **freeze SHA**, never a pre-freeze one.
+**Record: Nov 8 session (planned). Rehearse with Sentry first.** *The **Nov 8 freeze is CANCELLED** (F-3
+REVISED): the video may be **re-recorded any time up to Nov 10** if a later feature makes a better 90
+seconds — shots below are versioned so a re-take is a delta, not a rewrite.*
+**Timings sum to ~79s, leaving ~11s buffer under the 90s cap (≤85s target held).**
+**Base at prep:** `origin/main` @ `b69a9d0` (Nov 7). **The demo runs on the CURRENT build** — the old
+two-Mac window ran 28 commits behind main and is not evidence (shots 3–5 must be re-verified on the build
+you record). Every `herd.yaml` SHA reference is re-pinned at open and at each bump.
 
 > **v9 change (H-1 final pass, Nov 6 — Foreman gate resolved):** the **@mention handoff is now the
 > primary shot-5 take, not a fallback.** Foreman's go/no-go is **GO** — TC-2 (two real gateways) passed
@@ -29,11 +31,14 @@ freeze (Nov 8) H-6's §1 procedure re-verifies surfaces and re-pins every refere
 | 2 | 0:05–0:13 | One step | Left Mac, Hermes desktop: Settings → Plugins → Herd → Add teammate | "Add Brooklyn:" paste her address and key (key masked), Save. One side is enough. |
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Brooklyn appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Brooklyn replies → lands on the left. No VO, let it land. |
-| 5 | 0:26–0:48 | **Handoff (jaw-drop) — @mention, PRIMARY** | Both screens, side by side | Tyler types `@` in `#general`; the **mention menu opens as he types `@brooklyn`** (hold ~2s, no VO — discoverable, not magic). He picks her agent with Enter and sends the ask. Cut to Brooklyn's Mac: her agent **wakes with the assignment** (S-14) — it names who asked, the channel, and how to answer. **Brooklyn approves its action on camera (one click)**; it does the work on her Mac and posts the result back to `#general`; the result lands on both screens. VO: "He asks her agent. She says yes. Her agent, her machine." |
-| 5A | 0:48–0:52 | **Reaction (S-12)** | Right, then LEFT | Brooklyn hovers her agent's result message, the 4-emoji picker appears, she clicks **👍**, then a hard cut to the reaction landing **live on the left Mac**. No VO. |
-| 6 | 0:52–1:04 | Back to him + humans stay in charge (N-2 beat 5) | Left, then DM views both sides, then wide | Tyler's agent reads the result from the channel and uses it. Tyler DMs Brooklyn privately — "nice 😄 it actually worked" — DM lands on her screen while agent pills keep posting in `#general`. Wide: one thread, two humans, two agents. "Two people. Two agents. One conversation." |
-| 7 | 1:04–1:16 | Name it | Wide → end card | "Herd. Multiplayer Hermes." |
-| 8 | 1:16–1:21 | End card | Static | Install one-liner + repo + @NousResearch |
+| 5 | 0:26–0:48 | **Handoff (jaw-drop) — @mention, PRIMARY** | Both screens, side by side | Tyler types `@` in `#general`; the **mention menu opens as he types `@brooklyn`** (hold ~2s, no VO). He picks her agent and sends the ask. Cut to Brooklyn's Mac: her agent **wakes with the assignment** (S-14) — who asked, which channel, how to answer. **Brooklyn approves its action on camera (one click)**; it works on her Mac and posts the result back to `#general`; the result lands on both screens. **S-15 ambient:** one phrase from the fixed vocabulary (reading the code / writing the code / reviewing / done / idle) sits beside her agent's in-flight work — if the take shows it cleanly, hold 2s when it flips to `done`. Call out nothing. VO: "He asks her agent. She says yes. Her agent, her machine." |
+| 5A | 0:48–0:52 | **Reaction (S-12)** | Right, then LEFT | Brooklyn hovers her agent's result, the 4-emoji picker appears, she clicks **👍**, hard cut to the reaction landing **live on the left Mac**. No VO. |
+| 6 | 0:52–1:06 | Back to him + humans stay in charge (N-2 beat 5) **+ S-16 badge** | Left, then DM views both sides, then wide | Tyler's agent reads the result and uses it. Tyler DMs Brooklyn — "nice 😄 it actually worked". **Last 2s (S-16):** the agent's answer carries a **task badge (id + title — Q-8 = YES, live DB read)**; Tyler clicks it → the `herd` board opens on that task. One line: **"Every answer points back at the work."** Wide: "Two people. Two agents. One conversation." |
+| 7 | 1:06–1:15 | Name it | Wide → end card | "Herd. Multiplayer Hermes." **(donor: 12→9s)** |
+| 8 | 1:15–1:19 | End card | Static | Install one-liner + repo + @NousResearch **(donor: 5→4s)** |
+
+**Total 79s** — 11s under the cap. If S-13's QA closes before recording, add its 5s beat
+(after shot 6, `H-6 §2.1`) and re-time to ≤85s.
 
 **Shot 5, primary take (record this):** as in the table above — the `@` menu glance, the mention that
 wakes Brooklyn's agent with a real assignment, Brooklyn's on-camera approval, the result on her Mac. This
@@ -99,9 +104,9 @@ each start 4s earlier, total ~77s). Shots 2–4 must be live. Never cut the hook
 ## Rehearsal checklist (for @sentry)
 - [ ] **PREREQ — update the demo rig to the current build before anything else.** The live two-Mac
       SPINE window (QA Q-10 run log) ran a build **28 commits behind main**, so it did not exercise
-      S-9's pick-tail fix (#36), S-12 reply-resurrection (#34) or S-13 (#37). Rehearse and record on the
-      freeze build, not the old one; re-verify shot 3 (peer visible), shot 4 (fan-out) and shot 5
-      (@mention) on the updated build — a green old-build run is not evidence for the video build.
+      S-9's pick-tail fix (#36), S-12 reply-resurrection (#34), S-13 (#37), S-15 (#41) or S-16 (#46).
+      Rehearse and record on the build you will actually show; re-verify shot 3 (peer visible), shot 4
+      (fan-out), shot 5 (@mention) and the S-16 badge on it — a green old-build run is **not** evidence.
 - [ ] Full dry run timed — MUST land ≤85s with natural pacing
 - [ ] Settings > Plugins > Herd connect flow works on BOTH Macs from clean state (key field masked on screen)
 - [ ] **Shot 5 mention (primary; S-9 #19 + S-7 #13 + S-14 #33): typing `@brooklyn` opens the mention
@@ -116,6 +121,8 @@ each start 4s earlier, total ~77s). Shots 2–4 must be live. Never cut the hook
 - [ ] Screen recording at final resolution; captions legible at 100% zoom
 - [ ] Key in demo command is masked/redacted on screen
 - [ ] Backup: pre-recorded fallback of shot 5 (take 5-baseline) in case the live mention take flakes
+- [ ] **S-16 badge (S-16 #46): click opens the `herd` board; badge shows id + title on both Macs within one sync cycle**
+- [ ] **S-15 ambient status: the phrase flips to `done` and is legible; if it is not clean on the take, skip it — it is ambient, never narrated**
 - [ ] Post copy reviewed; @NousResearch tag present
 
 ## Why shot 2 is the Settings form (v4)
