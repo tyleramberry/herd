@@ -31,9 +31,11 @@ Only one of you needs to do this. Say Tyler connects to Brooklyn:
 1. **On Brooklyn's machine**, make sure the Hermes API server is reachable on your network: in `~/.hermes/.env` set `API_SERVER_KEY=<a long random key>` and `API_SERVER_HOST=0.0.0.0` (port `8642` by default), with the herd plugin enabled. Restart the gateway.
 2. **On Tyler's machine**, open **Settings → Plugins → Herd** (or click **Connect a teammate** in the Herd pane) and fill in:
    - *Teammate's name*: `brooklyn`
-   - *Teammate's gateway URL*: `http://brooklyn-mac.local:8642`
+   - *Teammate's gateway URL*: `https://brooklyn-mac.tailnet-name.ts.net:8642` (prefer `https://`, or your VPN/tailnet address — a plain `http://` URL to another machine is refused by default; see the warning below)
    - *Teammate's API key*: Brooklyn's `API_SERVER_KEY` (masked; stored in Hermes's secret store, never in `config.yaml`)
 3. Both of you can set *Your name*, which is how you appear in channels (defaults to the computer name).
+
+> **On the same Wi-Fi?** A plain `http://` URL sends Brooklyn's key on the wire in the clear, where anyone on that network can read it — and can forge replies Herd would store. Use `https://`, your VPN/tailnet address, or a TLS proxy. Herd refuses a non-loopback `http://` peer by default; the only way to override that is to switch on **Send the peer key in cleartext (unsafe)** in Herd's settings, knowingly.
 
 Within a few seconds the pane header shows **Connected to brooklyn**, and each of you appears in the other's **Direct messages → New message** list.
 
@@ -61,7 +63,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 
 ## What Herd does on your machine (disclosures)
 
-- **Network calls:** only to the one teammate gateway URL you enter, at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry.
+- **Network calls:** only to the one teammate gateway URL you enter, at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
 - **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require your `API_SERVER_KEY` (the API server's own key check), so only someone you gave that key to can read or post Herd messages on your machine. Herd reuses the API server adapter's own key check (`adapter._check_auth`), which is not a public API, rather than reading `API_SERVER_KEY` itself. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
 - **Stored credentials:** the teammate's API key is a `config_schema` secret (`HERD_PEER_KEY`), saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.

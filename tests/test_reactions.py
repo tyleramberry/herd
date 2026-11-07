@@ -201,7 +201,7 @@ class MigrationTest(unittest.TestCase):
                          "remote_gateway_id TEXT NOT NULL DEFAULT '', remote_name TEXT NOT NULL DEFAULT '', "
                          "last_attempt TEXT NOT NULL DEFAULT '', last_ok TEXT NOT NULL DEFAULT '', "
                          "last_error TEXT NOT NULL DEFAULT '')")
-            conn.execute("INSERT INTO peer_state(url, push_seq) VALUES ('http://riley.test:8642', 0)")
+            conn.execute("INSERT INTO peer_state(url, push_seq) VALUES ('http://127.0.0.1:8642', 0)")  # matches the Gateway fixture's loopback peer URL
             conn.commit()
             conn.close()
             root = Path(tmp)

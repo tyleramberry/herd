@@ -22,6 +22,7 @@ Fan-out model (see README "How sync works"):
 from __future__ import annotations
 
 import contextvars
+import ipaddress
 import json
 import math
 import re
@@ -1041,24 +1042,98 @@ def _maybe_wake(messages: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def configured_peers() -> list[dict]:
-    """The peer to sync with, from Herd's own settings (Settings → Plugins → Herd).
+# ---------------------------------------------------------------------------
+# Cleartext policy (the key may travel in the clear only where nobody else is)
+# ---------------------------------------------------------------------------
 
-    The key is a declared ``config_schema`` secret read only through
-    ``agent.secret_scope.get_secret`` (catalog rule 11). Returned as a list so the sync loop
-    stays shape-stable; v1 links exactly two gateways (N-1 cut-list).
+CLEARTEXT_REFUSED = ("peer_url is http:// on a non-loopback host — refused. Use https, a VPN/tailnet, "
+                     "or turn on 'Send the peer key in cleartext (unsafe)'.")
+
+
+class PeerRefusedError(RuntimeError):
+    """This peer URL may not carry the key (see ``_peer_url_refusal``)."""
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True for 127.0.0.0/8, ::1 and localhost — the addresses a peer key may travel in the clear."""
+    name = (host or "").strip().strip("[]").rstrip(".").lower()
+    if not name:
+        return False
+    if name == "localhost" or name.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def _allow_cleartext() -> bool:
+    """The owner's explicit opt-in to send the peer key in the clear off loopback (default off)."""
+    value = settings().get("allow_cleartext_peer")
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _peer_url_refusal(url: str) -> str:
+    """Why this peer URL may not carry the peer key, or '' when it may.
+
+    https is always fine. http is fine on loopback (the two-gateway harness) and, off loopback, only
+    when the owner has switched on 'Send the peer key in cleartext (unsafe)'.
+    """
+    scheme = urllib.parse.urlsplit(url).scheme.lower()
+    if scheme == "https":
+        return ""
+    if scheme != "http":
+        return "peer_url must start with http:// or https:// — refused."
+    if _is_loopback_host(urllib.parse.urlsplit(url).hostname or ""):
+        return ""
+    if _allow_cleartext():
+        return ""
+    return CLEARTEXT_REFUSED
+
+
+def _peer_candidates() -> list[dict]:
+    """The configured peer(s) exactly as typed, before the cleartext policy is applied.
+
+    Non-http(s) URLs keep the historical behaviour: silently ignored (never a peer, never a status
+    entry). Returned as a list so the sync loop stays shape-stable; v1 links two gateways (N-1).
     """
     cfg = settings()
-    peers: list[dict] = []
     url = str(cfg.get("peer_url") or "").strip().rstrip("/")
-    if url:
-        peers.append({"name": _clean_name(cfg.get("peer_name"), "peer"), "url": url, "key": _secret(SECRET_ENV)})
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return []
+    return [{"name": _clean_name(cfg.get("peer_name"), "peer"), "url": url, "key": _secret(SECRET_ENV)}]
+
+
+def configured_peers() -> list[dict]:
+    """The peers Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
+
+    A peer whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
+    built for it (see ``refused_peers()`` for the visible, actionable reason). The key is a declared
+    ``config_schema`` secret read only through ``agent.secret_scope.get_secret`` (catalog rule 11).
+    Returned as a list so the sync loop stays shape-stable; v1 links exactly two gateways (N-1).
+    """
+    out: list[dict] = []
     seen: set[str] = set()
+    for p in _peer_candidates():
+        if _peer_url_refusal(p["url"]) or p["url"] in seen:
+            continue
+        seen.add(p["url"])
+        out.append(p)
+    return out
+
+
+def refused_peers() -> list[dict]:
+    """Configured peer URLs Herd will not talk to, with the reason — for ``status()``/the pane.
+
+    Carries no secret: ``has_key`` is a boolean, never the key itself.
+    """
     out = []
-    for p in peers:
-        if p["url"].lower().startswith(("http://", "https://")) and p["url"] not in seen:
-            seen.add(p["url"])
-            out.append(p)
+    for p in _peer_candidates():
+        reason = _peer_url_refusal(p["url"])
+        if reason:
+            out.append({"name": p["name"], "url": p["url"], "reason": reason, "has_key": bool(p["key"])})
     return out
 
 
@@ -1079,6 +1154,9 @@ _OPEN_PEER = urllib.request.build_opener(_NoRedirect()).open
 
 
 def _http_sync(peer: dict, body: dict) -> dict:
+    refusal = _peer_url_refusal(str(peer.get("url") or ""))
+    if refusal:  # before the Request exists: the key is never attached, let alone sent
+        raise PeerRefusedError(refusal)
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         peer["url"] + PEER_SYNC_PATH, data=data, method="POST",
@@ -1150,7 +1228,9 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
         return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled,
                 "reactions_pushed": rpushed}
     except Exception as exc:  # noqa: BLE001 — a peer being down is a normal state, not a crash
-        message = "No key set for this peer." if isinstance(exc, PermissionError) else _describe_error(exc)
+        message = ("No key set for this peer." if isinstance(exc, PermissionError)
+                   else str(exc) if isinstance(exc, PeerRefusedError)
+                   else _describe_error(exc))
         with connect() as conn:
             conn.execute("UPDATE peer_state SET last_error = ? WHERE url = ?", (message, peer["url"]))
         return {"name": peer["name"], "url": peer["url"], "ok": False, "error": message,
@@ -1282,5 +1362,6 @@ def status() -> dict:
             "last_attempt": st.get("last_attempt") or "", "last_error": st.get("last_error") or "",
             "connected": bool(st.get("last_ok")) and not st.get("last_error"),
         })
-    return {"self": me, "peers": out, "incoming": incoming, "protocol": PROTOCOL_VERSION,
+    refused = refused_peers()
+    return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
             "agent_status": agent_status(), "mention_wake": wake_status()}

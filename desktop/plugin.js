@@ -97,9 +97,27 @@ function incomingUnlinked(status) {
   return list.find(entry => entry && !entry.linked_back) || null
 }
 
+function refusedPeers(status) {
+  const list = (status && status.refused) || []
+  return list.filter(entry => entry && entry.reason)
+}
+
 function PeerLine({ status }) {
   const peers = (status && status.peers) || []
   if (peers.length === 0) {
+    const refused = refusedPeers(status)
+    if (refused.length) {
+      const first = refused[0]
+      const who = first.name || first.url
+      return jsxs('div', {
+        className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+        title: first.reason,
+        children: [
+          jsx(StatusDot, { tone: 'bad' }),
+          jsx('span', { className: 'truncate', children: 'Refused ' + who + ' — ' + first.reason })
+        ]
+      })
+    }
     const incoming = incomingUnlinked(status)
     if (incoming) {
       const who = incoming.name || 'A teammate'
@@ -896,7 +914,7 @@ function HerdView({ compact }) {
   const { data, isLoading, isError } = useQuery({ queryKey: KEYS.channels, queryFn: () => api('/channels') })
   const channels = Array.isArray(data) ? data : []
   const selfId = status && status.self ? status.self.gateway_id : null
-  const hasPeer = Boolean(status && status.peers && status.peers.length)
+  const hasPeer = Boolean(status && ((status.peers && status.peers.length) || refusedPeers(status).length))
   const incoming = incomingUnlinked(status)
 
   if (isLoading) {

@@ -22,7 +22,7 @@ class Gateway:
         self.db = root / f"{name}.db"
         self.settings = {"display_name": name, "__secrets__": {}}
         if peer:
-            self.settings.update({"peer_name": peer, "peer_url": f"http://{peer}.test:8642"})
+            self.settings.update({"peer_name": peer, "peer_url": "http://127.0.0.1:8642"})  # loopback: allowed by the default cleartext policy
             self.settings["__secrets__"]["HERD_PEER_KEY"] = "k-" + peer
 
     def __enter__(self):
@@ -113,7 +113,7 @@ class TwoGatewayTest(unittest.TestCase):
         with self.B:
             m = store.list_messages("general")[0]
         self.assertEqual(m["gateway_name"], "tyler")
-        self.assertEqual(self.calls[0], ("http://riley.test:8642", "k-riley"))
+        self.assertEqual(self.calls[0], ("http://127.0.0.1:8642", "k-riley"))
 
     def test_b_to_a_with_one_sided_link(self):
         with self.B:
@@ -280,7 +280,7 @@ class TwoGatewayTest(unittest.TestCase):
             a_id = store.identity()["gateway_id"]
         with self.B:
             self.assertFalse(store.status()["incoming"][0]["linked_back"])
-            self.B.settings.update({"peer_name": "tyler", "peer_url": "http://tyler.test:8642"})
+            self.B.settings.update({"peer_name": "tyler", "peer_url": "http://127.0.0.1:8642"})  # loopback: allowed by the default cleartext policy
             self.B.settings["__secrets__"]["HERD_PEER_KEY"] = "k-tyler"
         # B syncs to A (transport swaps to A's handler).
         def to_a(peer, body):
