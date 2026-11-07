@@ -29,7 +29,7 @@ recording of someone else's two-Mac run, backed up by gateway A's saved state.
 | **TC-2.3** agent on A posts with `herd_post`, human on B sees it | **PASS ×3** | B's rows have `author_type='agent'`, `author_name="q11-a's Hermes"` (same as the tool returned), A's `gateway_id`, and appear exactly once. |
 | **Three consecutive, not once** (Q-11 row 5) | **PASS** | `Q-11.three-consecutive  12/12 #1/#2/#3 exchange rows landed`; `Q-11.no-duplicates  13 ids posted; every one held exactly once on A and on B`. |
 | **S-16 payload** (`task_id`) | **PASS** | 3/3 `task_id`s arrive on B unchanged (`t_16d10f75`, `t_2f22ab63`, `t_810b8329`). A post with no `task_id` stays empty on both sides. A bad id is refused and nothing is written. A **pre-S-16 peer** (`27ee87c`) takes A's real payload without error or damage, and re-feeding it is idempotent. |
-| Q-9 gap **1** — no B-side primary evidence | **CLOSED** | Every A→B row is asserted on what **B's own backend** returns (the data behind B's channel view), not on A's cursors. |
+| Q-9 gap **2** — per-direction primary evidence (no B-side capture; Q-9 §7 item 2) | **CLOSED** | Every A→B row is asserted on what **B's own backend** returns (the data behind B's channel view), not on A's cursors. |
 | Q-9 gap **3** — no three-consecutive capture | **CLOSED** | §3: 12 exchanges, each with its id, latency and the side it was read on. Run 3× back-to-back, all exit 0 (§2.6). |
 | Q-9 gap **5** — TC-2.3 not evidenced | **CLOSED (with one caveat)** | 3 agent-authored posts land on B. Caveat: the post is written by the plugin's real `herd_post` handler called in-process, not by a live agent turn (§1.3, §7). |
 | What this run still does **NOT** cover | **see §7** | One machine, two processes, loopback only (not two Macs on a LAN). No desktop UI rendering. No live agent turn. A stub stands in for the Hermes api_server adapter. This is not the frozen-SHA Q-4 rehearsal. |
@@ -475,8 +475,43 @@ b69a9d0 refs/remotes/origin/main@{2026-11-07 13:51:07 -0700}: update by push
 | `env -u PYTHONPATH $P scripts/qa/catalog_audit.py .` | `catalog_audit: 0 FAIL, 0 WARN` |
 
 No runtime file changed in this fix-up, so the run rows in §2–§3 remain the canonical evidence; the
-battery above only re-confirms that the tree carrying them is green. Interpreter for §9's harness/pytest
-runs: `/Users/tyleramberry/.hermes/hermes-agent/venv/bin/python` (3.11.15) with `env -u PYTHONPATH`.
+battery above only re-confirms that the tree carrying them is green. Interpreter for the harness and
+pytest runs **both before and after the fix-up** is `$P` from §1.1 —
+`/Users/tyleramberry/.hermes/profiles/smith/cache/scratch/venv-q11/bin/python` (3.11.15, `pytest 9.2.0`,
+aiohttp/uvicorn/fastapi/pyyaml/httpx importable), built from the Hermes agent interpreter
+`/Users/tyleramberry/.hermes/hermes-agent/venv/bin/python` — with `env -u PYTHONPATH`. That base
+interpreter alone is **not** sufficient for `pytest tests/`: it has no `pytest` installed (checked
+2026-11-07 14:42 MST), so it can run the harness but not the test suite. The earlier sentence here
+named it for both; §1.1's `$P` is the interpreter that actually ran them.
 The branch is deliberately **not** rebased onto the newer `origin/main`: keeping base `5aa3049` is what
-lets the SHAs cited above resolve in the branch history. `bc4b0e0` (#50) touches `README.md` and
-`docs/submission/` only — disjoint from this branch's files.
+lets the SHAs cited above resolve in the branch history. `bc4b0e0` (#50) and `4f6a3d9` (#52) touch
+`README.md`, `docs/TASKBOARD.md` and `docs/submission/` only — disjoint from this branch's two files.
+
+---
+
+## 10. QA round-2 fix-up (docs-only, on top of `a4b33d3`)
+
+QA round 2 returned one finding: §0's first gap row cited **Q-9 gap 1** for the B-side primary
+evidence, but `docs/qa/Q9-SPINE-RUNLOG.md` §7 numbers that gap **2** — item 1 there is *B-side plugin
+SHA / Hermes version / install method*, which no single-machine harness can close and which this log
+therefore does **not** claim. The row is relabelled **`Q-9 gap 2`**, using Q-9's own wording
+("per-direction primary evidence"). No other line in §0/§2/§3 cites gap numbers: §3's rows are gap 3
+and gap 5, both correct, and Q-9's remaining gaps (1, 4) stay open here.
+
+One sentence of §9 was found, while editing, to contradict §1.1: §9 named the Hermes agent interpreter
+as the one used for the **pytest** run, but that interpreter has no `pytest` installed (verified this
+session); §1.1's `$P` — the 3.11.15 gate venv with `pytest 9.2.0` — is what both the harness and
+pytest actually ran under. Corrected in place above.
+
+**Re-run at this fix-up head, 2026-11-07 14:43 MST** (doc-only change, so the §2–§3 rows remain the
+canonical evidence; this battery only re-confirms the tree carrying them is green):
+
+| Gate | Output |
+|---|---|
+| `scripts/qa/two_gateway_run.py` ×3 back-to-back | exit 0 / 0 / 0; `25/25 checks passed (5.8s / 5.7s / 5.9s)` |
+| `env -u PYTHONPATH $P -m pytest tests/ -q` | `187 passed, 1 warning, 35 subtests passed in 8.41s` |
+| `cp desktop/plugin.js <tmp>/plugin_check.mjs && node --check <tmp>/plugin_check.mjs` | exit 0 |
+| `node tests/s15_pane_render_probe.mjs` / `tests/s16_task_badge_render_probe.mjs` | `PROBE OK`, exit 0 / `PROBE OK`, exit 0 |
+| `env -u PYTHONPATH hermes plugins validate .` | `Validation passed.` (exit 0) |
+| `env -u PYTHONPATH hermes plugins doctor . --ci` | `OK: runtime discovery, manifest parsing, import, and registration passed` / `registrations: 4 tool(s), 0 hook(s)` |
+| `env -u PYTHONPATH $P scripts/qa/catalog_audit.py .` | `catalog_audit: 0 FAIL, 0 WARN  (tools registered: ['herd_list_channels', 'herd_post', 'herd_read_channel', 'herd_set_status'])` |
