@@ -1,8 +1,9 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v4, Nov 7 — pre-flight audit folded in)
+# H-2 — Catalog PR Package: Herd (DRAFT v5, Nov 7 — B1 fix verified at PR #45 head)
 
 > **Status: PREPARED ONLY — NOT PIN-READY.** PR opens after Foreman review + Tyler sign-off on Nov 8.
-> **Pin blocked on B1** (QA pre-flight audit, `docs/qa/catalog-preflight-audit-nov7.md`): the pin must be a
-> commit that *contains the B1 fix*, never the current HEAD. See §0 Pin-readiness block.
+> **Pin blocked on the B1 fix MERGING** (QA pre-flight audit, `docs/qa/catalog-preflight-audit-nov7.md`):
+> the fix is written and verified in **PR #45** (`093b63a06e790da0b493cda8e0fe234fc3f544f3`, OPEN/MERGEABLE),
+> but the pin must be the **post-merge HEAD of `main`** — never the pre-fix HEAD. See §0.
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
 
 ## 0. Pin-readiness block (added Nov 7 from QA's pre-flight audit)
@@ -11,8 +12,8 @@
 
 | # | Gate | State | Owner |
 |---|---|---|---|
-| 1 | **B1 fix merged** (`herd_store.py:922-927` — plain-`urllib` fallback forwards the peer key across a cross-host redirect; rule 11 + rule 13 accuracy) | **NOT FIXED** on `origin/main` @ `61c9068` (verified Nov 7). No B1 PR is open. | Smith |
-| 2 | **Real 40-char SHA** — `git rev-parse HEAD` on the B1-fixed commit, validate at that commit | blocked by 1 | Herald |
+| 1 | **B1 fix merged** (`herd_store.py` — the `open_credentialed_url` import + `urlopen` fallback are **deleted**; `_NoRedirect` handler + module-level `_OPEN_PEER` opener added; no manifest/tool/env/secret change) | **FIXED IN PR #45** @ `093b63a` — verified by me at that head (OPEN, MERGEABLE, waiting on merge). Pre-fix `main` @ `61c9068` is **not** pin-valid. | Smith → merge |
+| 2 | **Real 40-char SHA** — `git rev-parse HEAD` on `origin/main` **after** #45 merges (if it lands as a merge commit the SHA differs from `093b63a` — always take main's HEAD, then confirm `_NoRedirect` is present at that SHA), validate there | blocked by 1 | Herald |
 | 3 | **Media** — `docs/media/*` referenced but **empty** (`git ls-files docs/media` → nothing) | open — see decision below | Herald |
 
 **Decision on media (rule-safe default):** the catalog treats `image`/`screenshots` as *cosmetic*, and a
@@ -22,12 +23,8 @@ session yields usable captures, commit them to `docs/media/` **before** the free
 URLs to the same SHA. Never reference a file that is not in the pinned tree.
 
 **Disclosure corrections this PR carries** (rule 13 accuracy — both found by the audit):
-- `README.md:15` lists **reactions** under "What it doesn't do (yet)". Reactions ship (README:57,
-  `plugin_api.py:95-97` `toggle_reaction`). The word "reactions" **must be deleted from that line**.
-- `README.md:63` claims the peer key "drops the key if your teammate's gateway redirects to a different
-  host". That is **only true on the Hermes-helper path**; the plain-`urllib` fallback forwards it. The
-  sentence must match the shipped behaviour once B1 lands. **Two candidate wordings, pick by the fix
-  Smith actually ships:**
+- `README.md:15` listed **reactions** under "What it doesn't do (yet)". **RESOLVED in PR #45**: verified at the PR head — the line now reads "What it doesn't do (yet): more than two gateways, search, notifications." Keep it that way at the pin.
+- `README.md:63` claimed the key "drops" on a cross-host redirect — false on the old fallback. **RESOLVED in PR #45**: the fix refuses redirects outright and the README now says so (exact wording in §2). The earlier candidate wordings (refuse-redirects / helper-only) are retired — **the helper-only wording is now WRONG and must never be used**:
   - *(refuse-redirects fix — audit's recommended one)*: "Outbound sync sets the bearer header only for
     the teammate gateway URL you configured; a redirect from that URL is **refused, never followed**, so
     the key is never re-sent to another host (a redirecting peer shows an HTTP 30x error)."
@@ -106,7 +103,8 @@ one persistent channel.
   only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
 - **Reads outside plugin data:** none. <!-- at freeze: if S-16 ships, this line is REPLACED by the read-only kanban.db read line (Q-8) — never keep both -->
 - **Shell commands:** none **in the runtime files** (`tools.py`, `__init__.py`, `schemas.py`, `dashboard/`). <!-- audit WARN 3: scripts/qa/catalog_audit.py:176 shells out to `git` via subprocess; disclose it as a dev-only script or leave scripts/qa/ out of the pin -->
-- **Peer key on redirect (B1):** outbound sync must never re-send the teammate key to another host. **Wording follows Smith's landed fix** — see §0; the current README:63 sentence is FALSE on the plain-`urllib` fallback and cannot ship as-is.
+- **Peer key on redirect (B1) — SETTLED (PR #45, verified at its head):** *"Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as \"The peer answered HTTP 30x\" instead of being followed)."* Mirror this sentence into README + PR description **verbatim** at the pin. Do **not** name `hermes_cli.urllib_security.open_credentialed_url` anywhere — that import is deleted from the tree; a disclosure naming it would itself be inaccurate. Same-origin POST still returns 200; a redirecting peer now surfaces as an error rather than being silently followed.",
+- **Stored-secret path unchanged:** `peer_key` remains a `config_schema` secret read via `agent.secret_scope.get_secret`; PR #45 adds no env var and removes the only core-helper import on this path.
 - **Sync protocol version:** `PROTOCOL_VERSION` is **2** at this tree (S-13 promote, #37): a promoted DM is copied to a new channel and delivered over the existing `POST <url>/herd/v1/sync` write path; copied rows carry `origin_channel_id`/`promoted_from`, and a version **1** peer simply ignores the extra field (no 500, no corruption). Readable from `/herd/v1/ping` + `/status`. <!-- disclosure, not a marketing beat; keep even if S-13 is later reverted — then delete -->
 - **Local data:** channel history in a SQLite file under the plugin's data dir.
 - **Agent status (S-15 #41):** the status phrase is **local-gateway-agents only** — it lives in the gateway process's memory, is never written to `herd.db`, is **never sent to the teammate's gateway**, and clears after five minutes or on gateway restart.
