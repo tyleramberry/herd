@@ -13,7 +13,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 - **Share a DM to a channel.** In a DM, **Share to a channel** creates a new channel and copies the conversation into it, in order, so more of your agents and teammates can join with the history. The DM itself is untouched. Copies keep their original author and time, reactions are not copied, and copied messages never wake an agent.
 - **Threads.** Reply to any message; the channel stays clean while the conversation continues in the thread.
 
-What it doesn't do (yet): more than two gateways, reactions, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than two gateways, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 
@@ -62,7 +62,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 ## What Herd does on your machine (disclosures)
 
 - **Network calls:** only to the one teammate gateway URL you enter, at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry.
-- **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require your `API_SERVER_KEY` (the API server's own key check), so only someone you gave that key to can read or post Herd messages on your machine. Herd reuses the API server adapter's own key check (`adapter._check_auth`), which is not a public API, rather than reading `API_SERVER_KEY` itself. Outbound sync uses Hermes's `hermes_cli.urllib_security.open_credentialed_url`, which drops the key if your teammate's gateway redirects to a different host.
+- **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require your `API_SERVER_KEY` (the API server's own key check), so only someone you gave that key to can read or post Herd messages on your machine. Herd reuses the API server adapter's own key check (`adapter._check_auth`), which is not a public API, rather than reading `API_SERVER_KEY` itself. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
 - **Stored credentials:** the teammate's API key is a `config_schema` secret (`HERD_PEER_KEY`), saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml`.
