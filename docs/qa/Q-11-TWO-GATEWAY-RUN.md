@@ -2,9 +2,18 @@
 
 **Card:** Q-11 (`t_16d10f75`) · closes the evidence gaps Q-9 (`docs/qa/Q9-SPINE-RUNLOG.md` §7) left open.
 **Recorded by:** smith — **2026-11-07, canonical run 14:09:35–14:09:41 MST** (21:09:35 UTC).
-**Machine:** `Tylers-MacBook-Air-104.local` (macOS 26.6.2, arm64), Python 3.11.15 (gate venv `venv-q11`).
-**Branch / head:** `q11-two-gateway-harness` @ `b69a9d03e99441c165d797ee60fa067fca00e1f9` (== `origin/main`);
-the harness and this doc are the only additions (uncommitted).
+**Machine:** `Tylers-MacBook-Air-104.local` (macOS 26.6.2, arm64), Python 3.11.15.
+**Branch / head at run time:** worktree `.worktrees/t_16d10f75`, branch `q11-two-gateway-harness`, whose
+delivered commit sits on base `5aa3049b37860fca34bd35c8abb6aa2b59179e62`.
+`origin/main` at run time was `5aa3049` — reflog for `origin/main`: `b69a9d0` 13:51:07 → `cd6d46c` 13:55:56 →
+**`5aa3049` 14:06:06** → `bc4b0e0` 14:24:42, and the 14:09:35 run falls inside the `5aa3049` window.
+Which of `b69a9d0` / `cd6d46c` / `5aa3049` was checked out cannot change the result: `git diff --name-only
+b69a9d0 5aa3049` is **docs-only**, so every **runtime** file is byte-identical — Q-4's certified `b69a9d0`
+and this run exercised the same code.
+**This file's history in PR #51:** `10181aea421d2e43fc13a44a5b56552a65832924` introduced the harness and
+this doc on base `5aa3049`; fix-up commits (e.g. the provenance fix-up that added §9) sit on top, so the
+branch tip advances while the **run subject** above does not. (QA re-ran the harness at `10181ae`, the head
+it reviewed: 25/25, exit 0, py3.14 venv.)
 **What kind of document this is:** this is a **reproducible run the recorder performed**. Anyone can
 re-run it with one command (§1) and get the same rows. That is the opposite of Q-9 §5, which was a
 recording of someone else's two-Mac run, backed up by gateway A's saved state.
@@ -24,7 +33,7 @@ recording of someone else's two-Mac run, backed up by gateway A's saved state.
 | Q-9 gap **3** — no three-consecutive capture | **CLOSED** | §3: 12 exchanges, each with its id, latency and the side it was read on. Run 3× back-to-back, all exit 0 (§2.6). |
 | Q-9 gap **5** — TC-2.3 not evidenced | **CLOSED (with one caveat)** | 3 agent-authored posts land on B. Caveat: the post is written by the plugin's real `herd_post` handler called in-process, not by a live agent turn (§1.3, §7). |
 | What this run still does **NOT** cover | **see §7** | One machine, two processes, loopback only (not two Macs on a LAN). No desktop UI rendering. No live agent turn. A stub stands in for the Hermes api_server adapter. This is not the frozen-SHA Q-4 rehearsal. |
-| Relation to **Q-4** (`docs/qa/Q4-REHEARSAL-RUN-2026-11-07.md`, landed as #49 while this branch was open) | **complements, does not replace** | Q-4 already rehearsed the SPINE on this same SHA (`b69a9d0`) with two **live** `hermes` gateways — real api_server, real secret scope, restart persistence (TC-2.6), `last_error` empty. That is stronger than this harness on those axes and remains the run of record for them. What Q-4's table does **not** have: **TC-2.3 at all**, the **S-16 `task_id` payload** row, a **pre-change peer** check, or any script on `main` that reproduces the run. This run supplies those four, deterministically, in ~6 s. |
+| Relation to **Q-4** (`docs/qa/Q4-REHEARSAL-RUN-2026-11-07.md`, landed as #49 while this branch was open) | **complements, does not replace** | Q-4 already rehearsed the SPINE on the same runtime code (its certified SHA `b69a9d0`; docs-only delta from this run's `5aa3049`) with two **live** `hermes` gateways — real api_server, real secret scope, restart persistence (TC-2.6), `last_error` empty. That is stronger than this harness on those axes and remains the run of record for them. What Q-4's table does **not** have: **TC-2.3 at all**, the **S-16 `task_id` payload** row, a **pre-change peer** check, or any script on `main` that reproduces the run. This run supplies those four, deterministically, in ~6 s. |
 
 **One-line QA statement:** the SPINE (TC-2.1/2.2/2.3) passes three times in a row in each direction
 between two real gateway processes, checked on the receiving side. The S-16 `task_id` field survives
@@ -111,9 +120,10 @@ the driver reads the id from the tool result (`message.id`).
 
 ### 1.4 How the pre-change ref is found (merge-base is NOT pre-change here)
 
-This branch's merge-base with `origin/main` is `origin/main` itself (`b69a9d0`), which already has
-S-16. So the reference harness's `merge-base` approach would test new code against new code and
-prove nothing. The harness finds the ref like this instead:
+This branch's merge-base with `origin/main` is `5aa3049` (`cd6d46c` / `b69a9d0` earlier the same day) —
+i.e. `origin/main` itself, since the branch is based directly on it. So merge-base is **not** pre-change
+here: `5aa3049` already has S-16. The reference harness's `merge-base` approach would then test new code
+against new code and prove nothing. The harness finds the ref like this instead:
 
 1. `--old-peer-ref REF` if given. Otherwise
 2. `git log --format=%H -S task_id -- dashboard/herd_store.py`, take the **oldest** hit (the commit
@@ -388,7 +398,8 @@ and the file was restored with **`cp /tmp/q11_store.bak dashboard/herd_store.py`
    (M3) took **134.0 s** to report. A passing run takes about 6 s.
 9. **Exit code 2 (a gateway fails to start) was not triggered** in this session. The code path
    prints both log tails and returns 2, but no run exercised it.
-10. **Not the frozen build.** This is `b69a9d0` (`origin/main` at record time). F-3's freeze was
+10. **Not the frozen build.** This is the run-time `origin/main` code tree (`5aa3049`; byte-identical for
+    runtime files to `b69a9d0`, Q-4's certified SHA — the delta is docs-only). F-3's freeze was
     cancelled (`618fe22`), so any later SHA needs a re-run. The point of this harness is that a
     re-run is one command.
 11. **Not a substitute for Q-4's live-gateway rehearsal.** `docs/qa/Q4-REHEARSAL-RUN-2026-11-07.md`
@@ -403,7 +414,10 @@ and the file was restored with **`cp /tmp/q11_store.bak dashboard/herd_store.py`
 
 ## 8. Sign-off
 
-**smith — QA-selected evidence, 2026-11-07 14:09 MST** (canonical run 14:09:35–14:09:41 MST, exit 0, `25/25 checks passed`):
+**smith — QA-selected evidence, 2026-11-07 14:09 MST** (canonical run 14:09:35–14:09:41 MST, exit 0, `25/25 checks passed`).
+**Provenance:** recorded on the run-time `origin/main` (`5aa3049`; runtime files byte-identical to
+`b69a9d0`). The harness + this doc were introduced as commit `10181ae` on `5aa3049` (PR #51). QA re-ran
+the harness at that head (`10181ae`, py3.14): exit 0, 25/25; M1 → 20/25 and M2 → 16/25 reproduced, then restored.
 
 - **ENV.healthy, ENV.settings** — PASS
 - **TC-2.1 A→B #1/#2/#3 + 3-consecutive** — PASS (asserted on B)
@@ -419,3 +433,50 @@ and the file was restored with **`cp /tmp/q11_store.bak dashboard/herd_store.py`
 - **Mutation check M1/M2/M3** — each turned its target rows FAIL (exit 1); restored byte-for-byte; re-run PASS.
 
 Not signed here: the two-Mac live exchange and the frozen-SHA rehearsal (Q-4), and desktop rendering.
+
+---
+
+## 9. Provenance of the SHA claims above, and the fix-up re-run
+
+Added 2026-11-07 14:30 MST with the provenance fix-up to the header. Every SHA claim in §0/§1.4/§7.10 is
+machine-checkable; the commands and their verbatim output at that time:
+
+```
+$ git rev-parse HEAD
+10181aea421d2e43fc13a44a5b56552a65832924
+$ git log -1 --format='%H %ci %s' 10181ae
+10181aea421d2e43fc13a44a5b56552a65832924 2026-11-07 14:16:38 -0700 Q-11: reproducible two-gateway SPINE harness (TC-2.1/2.2/2.3 + S-16 payload)
+$ git log -1 --format='%H' 10181ae^
+5aa3049b37860fca34bd35c8abb6aa2b59179e62
+$ git diff --name-only b69a9d0 5aa3049            # docs-only: runtime files identical
+docs/qa/Q4-REHEARSAL-RUN-2026-11-07.md
+docs/submission/H-1-demo-script.md
+docs/submission/H-2-catalog-pr-package.md
+docs/submission/plugin-catalog-herd.yaml
+$ git merge-base HEAD origin/main
+5aa3049b37860fca34bd35c8abb6aa2b59179e62
+$ git reflog show origin/main --date=iso | head -4
+bc4b0e0 refs/remotes/origin/main@{2026-11-07 14:24:42 -0700}: fetch origin: fast-forward
+5aa3049 refs/remotes/origin/main@{2026-11-07 14:06:06 -0700}: fetch -q: fast-forward
+cd6d46c refs/remotes/origin/main@{2026-11-07 13:55:56 -0700}: fetch -q: fast-forward
+b69a9d0 refs/remotes/origin/main@{2026-11-07 13:51:07 -0700}: update by push
+```
+
+**Fix-up gate battery (doc-only change; branch working tree, 2026-11-07 14:30 MST):**
+
+| Gate | Output |
+|---|---|
+| `scripts/qa/two_gateway_run.py` ×3 back-to-back | exit 0 / 0 / 0; `25/25 checks passed (6.0s / 6.1s / 5.8s)` |
+| `env -u PYTHONPATH $P -m pytest tests/ -q` | `187 passed, 1 warning, 35 subtests passed` |
+| `node --check` (ESM copy of `desktop/plugin.js`) | exit 0 |
+| `node tests/s15_pane_render_probe.mjs` / `s16_task_badge_render_probe.mjs` | `PROBE OK`, exit 0 (21 `ok` / 13 `ok`) |
+| `env -u PYTHONPATH hermes plugins validate .` | `Validation passed.` |
+| `env -u PYTHONPATH hermes plugins doctor . --ci` | `registrations: 4 tool(s), 0 hook(s)` |
+| `env -u PYTHONPATH $P scripts/qa/catalog_audit.py .` | `catalog_audit: 0 FAIL, 0 WARN` |
+
+No runtime file changed in this fix-up, so the run rows in §2–§3 remain the canonical evidence; the
+battery above only re-confirms that the tree carrying them is green. Interpreter for §9's harness/pytest
+runs: `/Users/tyleramberry/.hermes/hermes-agent/venv/bin/python` (3.11.15) with `env -u PYTHONPATH`.
+The branch is deliberately **not** rebased onto the newer `origin/main`: keeping base `5aa3049` is what
+lets the SHAs cited above resolve in the branch history. `bc4b0e0` (#50) touches `README.md` and
+`docs/submission/` only — disjoint from this branch's files.
