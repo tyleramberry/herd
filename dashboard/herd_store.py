@@ -727,8 +727,11 @@ def _valid_reaction(r: Any) -> Optional[dict]:
             "active": 1 if r.get("active") else 0, "created_at": str(r.get("created_at") or _now())[:40]}
 
 
-def ingest(batch: dict) -> int:
-    """Store channels + messages received from a peer. Idempotent. Returns rows newly inserted."""
+def ingest(batch: dict, suppress_wakes: bool = False) -> int:
+    """Store channels + messages received from a peer. Idempotent. Returns rows newly inserted.
+
+    ``suppress_wakes``: store everything but never wake the agent (a peer's first exchange is history).
+    """
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
     channels = batch.get("channels") if isinstance(batch.get("channels"), list) else []
     messages = batch.get("messages") if isinstance(batch.get("messages"), list) else []
@@ -798,7 +801,8 @@ def ingest(batch: dict) -> int:
                 "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, "
                 "created_at) VALUES (:id, :message_id, :channel_id, :emoji, :gateway_id, :active, :created_at)", r)
             rtouched.add(r["channel_id"])
-    _maybe_wake(wakes)
+    if not suppress_wakes:
+        _maybe_wake(wakes)
     for channel_id in touched:
         _notify("message.created", {"channel_id": channel_id})
     for channel_id in rtouched:
@@ -841,6 +845,15 @@ def _record_incoming(sender: dict) -> None:
             "last_seen = ?, syncs = syncs + 1 WHERE gateway_id = ?", (real, real, _now(), gid))
 
 
+def _peer_wake_primed(conn: sqlite3.Connection, gateway_id: str) -> bool:
+    """Have we already completed a sync exchange with this gateway? (its first batch is history)."""
+    return conn.execute("SELECT 1 FROM meta WHERE key = ?", (f"wake_primed:{gateway_id}",)).fetchone() is not None
+
+
+def _prime_peer_wake(conn: sqlite3.Connection, gateway_id: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)", (f"wake_primed:{gateway_id}", _now()))
+
+
 def handle_peer_sync(body: Any) -> dict:
     """Server side of ``POST /herd/v1/sync`` (runs on the gateway that was linked TO).
 
@@ -849,8 +862,16 @@ def handle_peer_sync(body: Any) -> dict:
     """
     if not isinstance(body, dict):
         raise HerdError(422, "Body must be a JSON object.")
-    accepted = ingest(body)
     sender = body.get("from") if isinstance(body.get("from"), dict) else {}
+    sender_gid = str(sender.get("gateway_id") or "").strip()[:64]
+    first_contact = False
+    if sender_gid:
+        with connect() as conn:
+            first_contact = not _peer_wake_primed(conn, sender_gid)
+    accepted = ingest(body, suppress_wakes=first_contact)
+    if first_contact:
+        with connect() as conn:
+            _prime_peer_wake(conn, sender_gid)
     _record_incoming(sender)
     try:
         after_seq = max(0, int(body.get("after_seq") or 0))
@@ -869,6 +890,22 @@ def handle_peer_sync(body: Any) -> dict:
 # ---------------------------------------------------------------------------
 
 _wake_times: list[float] = []
+_wake_blocked: dict = {"reason": None, "at": None}  # most recent refused injection
+
+
+def wake_status() -> dict:
+    """Mention-wake health for ``status()``. Never raises."""
+    out = {"enabled": False, "target": False, "delivered_last_minute": 0, "blocked": None, "blocked_at": None}
+    try:
+        out["enabled"] = bool(wake_enabled())
+        out["target"] = bool(mention_target())
+        now = time.time()
+        out["delivered_last_minute"] = sum(1 for t in list(_wake_times) if now - t < 60)
+        out["blocked"] = _wake_blocked.get("reason")
+        out["blocked_at"] = _wake_blocked.get("at")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def mention_handles(display_name: str) -> set[str]:
@@ -964,8 +1001,13 @@ def _maybe_wake(messages: list[dict]) -> None:
             channel = get_channel(m["channel_id"])
             if not channel:  # no stored channel means no callable ref: suppress rather than send a dead one
                 continue
+            if WAKE_HANDLER(target, wake_text(m, channel, me_id)) is False:
+                # The host refused the injection: don't spend the cap, and make it visible.
+                _wake_blocked["reason"] = ("host refused the injection (is allow_gateway_injection set, "
+                                           "and is the chat still open?)")
+                _wake_blocked["at"] = _now()
+                continue
             _wake_times.append(now)
-            WAKE_HANDLER(target, wake_text(m, channel, me_id))
     except Exception:  # noqa: BLE001 — a failed wake must never break sync
         pass
 
@@ -1054,6 +1096,8 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
     try:
         if not peer.get("key"):
             raise PermissionError("no key")
+        with connect() as conn:
+            first_contact = not _peer_state(conn, peer)["remote_gateway_id"]
         for _ in range(max(1, rounds)):
             with connect() as conn:
                 st = _peer_state(conn, peer)
@@ -1063,7 +1107,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                                     "messages": out["messages"], "after_seq": st["pull_seq"],
                                     "reactions": out["reactions"], "after_rseq": st["pull_rseq"]})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
-            pulled += ingest(resp)
+            pulled += ingest(resp, suppress_wakes=first_contact)
             pushed += len(out["messages"])
             rpushed += len(out["reactions"])
             next_pull = resp.get("next_seq")
@@ -1092,9 +1136,19 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
 _sync_lock = threading.Lock()
 
 
-def sync_all() -> list[dict]:
-    """One sync pass over every configured peer. Serialized per process; safe across processes."""
-    if not _sync_lock.acquire(blocking=False):
+SYNC_KICK_WAIT_S = 3.0  # one gateway-loop tick (SYNC_INTERVAL_S lives in the plugin root; not importable here)
+
+
+def sync_all(wait: bool = False) -> list[dict]:
+    """One sync pass over every configured peer. Serialized per process; safe across processes.
+
+    Default: return ``[]`` at once when a pass is in flight. ``wait=True`` (the post kick) waits up to
+    ``SYNC_KICK_WAIT_S`` for it, then runs its own pass; on timeout it gives up and the loop tick carries it.
+    """
+    if wait:
+        if not _sync_lock.acquire(True, SYNC_KICK_WAIT_S):
+            return []
+    elif not _sync_lock.acquire(blocking=False):
         return []
     try:
         return [sync_peer(p) for p in configured_peers()]
@@ -1120,7 +1174,7 @@ def request_sync() -> None:
         try:
             time.sleep(0.05)
             _pending.clear()
-            sync_all()
+            sync_all(wait=True)
         except Exception:
             pass
 
@@ -1205,4 +1259,4 @@ def status() -> dict:
             "connected": bool(st.get("last_ok")) and not st.get("last_error"),
         })
     return {"self": me, "peers": out, "incoming": incoming, "protocol": PROTOCOL_VERSION,
-            "agent_status": agent_status()}
+            "agent_status": agent_status(), "mention_wake": wake_status()}
