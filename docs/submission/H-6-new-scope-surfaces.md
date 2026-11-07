@@ -2,7 +2,10 @@
 
 Owner: @herald · Prepared Fri Nov 6, 2026 · Applies to **H-1** (demo script), **H-2** (catalog entry
 `herd.yaml` + PR description / "surfaces used"), and the **README** rule-13 disclosures.
-Base: `origin/main` @ **cf5281f** (verified 2026-11-06 09:03 MST; includes S-12 #24, Sentry Q-7 plan #29, Foreman F-2 #28).
+Base: `origin/main` @ **5686f0b** (verified 2026-11-07; includes S-15 #41, S-18/B1 #45 and QA's pre-flight audit).
+**QA update (Nov 7):** #45 deleted the `hermes_cli.urllib_security` import, retiring the last rule-9 WARN — the
+catalog audit now reports **0 FAIL / 0 WARN**. Any disclosure line about a private-core import for
+`herd_store.py` is **moot and must be dropped**, not carried.
 
 > ## THE ONE RULE
 > **Nothing in this file goes into H-1, H-2, the catalog entry or the README until the feature it
@@ -22,11 +25,11 @@ disposition comes from **Sentry Q-8**.
 
 | Feature | Board | Branch / PR | State at prep | Gate to apply its block |
 |---|---|---|---|---|
-| S-13 promote DM → channel (F1) | `S-13` | `wt/s13-promote`, no PR yet | not merged | merged + QA Q-7 green + TC-2 (two-gateway) |
-| S-15 status line + badge (F3) | `S-15` | `wt/s15-status`, no PR yet | not merged | merged + QA Q-7 green |
-| S-16 Kanban link (F4) | `S-16` | none (blocked on Q-8) | not merged, **cut #1** | merged + Q-8 ruling recorded + QA green |
-| Smith capability list | — | H-6 dependency | **S-13 + S-15 received**; S-16 disposition still pending | §5 answered (S-13, S-15) |
-| Sentry Q-8 ruling | `Q-8` | — | **no ruling yet** | id-only vs DB-read decides §3/§4 S-16 lines |
+| S-13 promote DM → channel (F1) | `S-13` | **MERGED #37 @ 9d9c6e7** (protocol v2) | merged; **QA gate NOT met** — F-3 A6 open (Q-9 evidence + TC-2.3/2.6 unreported; TC-10.4 flagged #44) | merged ✅ + QA Q-7 green (**pending**) + TC-2 (two-gateway) |
+| S-15 status line + badge (F3) | `S-15` | board says done, branch `feat/s15-status` — **no merge commit on `origin/main`** (verified Nov 6) | not merged | merged + QA Q-7 green |
+| S-16 Kanban link (F4) | `S-16` | none yet — **unblocked by Q-8** | not merged, **cut #1** | merged + Q-8 ruling recorded ✅ + QA green |
+| Smith capability list | — | H-6 dependency | **S-13 + S-15 received** (`herd_set_status` = the 4th tool); S-16 adds no tool per Q-8 (`capabilities:` unchanged either way) | §5 answered ✅ |
+| Sentry Q-8 ruling | `Q-8` | **DONE Nov 6 09:02** | **RULING: YES — read-only kanban.db read is permitted under rule 13**, 7 binding constraints (mode=ro URI, soft-degrade to id-only, profile-aware path, `SELECT title FROM tasks WHERE id=?` only, disclose in README+PR, no private core imports) | §3.3 **YES (DB read)** branch applies; id-only fallback also compliant |
 
 S-16 is **cut #1** (Sat Nov 7 12:00) and S-15 is **cut #2** (Sat Nov 7 18:00). The most likely freeze
 outcome is **S-13 alone, or S-13 + S-15**. The combination table in §2.5 covers every case.
@@ -53,7 +56,12 @@ Base timeline = main's H-1 **+ PR #25 (H-5 beats)** + **PR #27 (locked constants
 both touch this file, so apply H-6 *after* they merge or H-1 will conflict. Anchor the inserts by the
 quoted text below, not by line number, so they survive a rebase.
 
-### 2.1 — S-13: promote a DM into a shared room  ·  **APPLY IF S-13 MERGED**
+### 2.1 — S-13: promote a DM into a shared room  ·  **MERGED #37 — HOLD: QA gate open** *(disclosure fact already carried in H-2: PROTOCOL_VERSION 2)*
+
+> **Status check (Herald, Nov 6):** S-13 is merged to `origin/main` (`9d9c6e7`, protocol v2) but the
+> QA gate is **not** met — F-3 A6 needs the Q-9 evidence and TC-2.3/2.6 reported, and TC-10.4 is
+> flagged (#44). Per THE ONE RULE the block below stays **staged**, not applied, until QA is green.
+> Most likely shape at freeze: S-13 alone or S-13 + S-15.
 
 New shot, ~5s, inserted **after shot 6** ("Back to him") and before the end card; call it **shot 6A**.
 
@@ -67,7 +75,7 @@ New shot, ~5s, inserted **after shot 6** ("Back to him") and before the end card
 - Word rules unchanged: say **channel**, never "promote"/"migrate"/"SQLite".
 - Pre-req on camera: both Macs must show the promoted channel within one sync cycle (hold on the left ≤3s).
 
-### 2.2 — S-15: supervision status line + speaker badge  ·  **APPLY IF S-15 MERGED**
+### 2.2 — S-15: supervision status line + speaker badge  ·  **MERGED @5ab0a0b — ambient take only, no narrated beat**
 
 **Ambient by default; optional 2s glance.** Do **not** give it a narrated beat.
 
@@ -154,7 +162,7 @@ herd_post, herd_read_channel]`, empty hooks/middleware/env.
   peer does with a v2 body — Smith has confirmed no 500/corruption. The disclosure line in §4 carries
   the "sync protocol v2" fact; do not let the version go undisclosed.
 
-### 3.2 — S-15  ·  **APPLY IF S-15 MERGED**  *(facts from @smith, design pinned; PR not open yet)*
+### 3.2 — S-15  ·  **APPLIED (merged on main @5ab0a0b, #41)**  *(verified vs `plugin.yaml` Nov 7: 4 tools)*
 - **`capabilities.provides_tools`:** append **`herd_set_status`** — Smith: the exact name, no others
   (single argument `status`, a 5-value enum). Must match `plugin.yaml provides_tools` at the freeze SHA
   exactly (rule 6). **This is the 4th declared tool** — `herd.yaml` and `plugin.yaml` both go 3 → 4, and
@@ -166,7 +174,14 @@ herd_post, herd_read_channel]`, empty hooks/middleware/env.
 - **Rule-13 (Sentry TC-11.8 makes this a merge gate).** Apply the line in §4 verbatim: local-only, in
   gateway memory only (D-5), no peer sync, no `herd.db` write, self-clears. Do **not** invent a network line.
 
-### 3.3 — S-16  ·  **APPLY IF S-16 MERGED**
+### 3.3 — S-16  ·  **APPLY IF S-16 MERGED**  *(Q-8 = **YES, DB read** — this branch is the live one)*
+
+> **Q-8 answered (Sentry, Nov 6): YES — read-only kanban.db read is permitted under rule 13.** Use the
+> **DB-read** wording below (task-id **+ title**, read-only, degrades to id-only), plus Sentry's exact
+> constraints: `mode=ro` URI, `SELECT title FROM tasks WHERE id=?` only, profile-aware path (no bare
+> `os.environ`), never block the pane, disclose in README + PR description. **CA-7 line "reads outside
+> plugin data: none" must be deleted** and replaced by the §4 read line. The id-only fallback is also
+> compliant but is now the fallback, not the target. S-16 still needs merge + QA — cut #1 is Sat 12:00.
 - **If Q-8 = NO (id-only):** `capabilities:` **NO CHANGE**. Add PR-description bullet
   `- Kanban link: an agent's answer can carry a task-id badge that opens that task on the herd board; the task id is passed explicitly by the agent and no Kanban data is read.`
 - **If Q-8 = YES (DB read allowed):** a local-DB read is **not** a `capabilities:` key — rule 6's block
@@ -212,7 +227,7 @@ Please answer in a comment on `S-13`/`S-15`/`S-16` (or on `H-6`):
    `__init__.py::register()` ⇒ 4th entry in **both** `plugin.yaml provides_tools` and
    `herd.yaml capabilities.provides_tools`; no new hook/middleware/`requires_env`; **local-only** (D-5,
    in gateway memory). Disclosure text staged in §3.2/§4. Reviewer-facing correction: any H-2/README copy
-   that says "three agent tools" moves to **four** — **only if S-15 is merged at freeze** (S-15 is cut #2).
+   that says "three agent tools" moves to **four** — **S-15 is merged (main @5ab0a0b), so this applies: four agent tools.**
 2. **S-13** — ✅ **ANSWERED** (Smith, Nov 6): no new tool; `PROTOCOL_VERSION` **1 → 2**; same
    `POST /herd/v1/sync` endpoint (new local-only backend route
    `POST /api/plugins/herd/channels/{id}/promote`; payload gains `origin_channel_id`; copies never
