@@ -524,6 +524,25 @@ class ChannelMembershipTest(_MeshHarness):
                 self.assertNotIn("riley to the group", [row["content"] for row in body["messages"]])
                 self.assertNotIn(kai_gid, [row["gateway_id"] for row in body["messages"]])
 
+    def test_sharing_a_dm_copies_it_only_to_the_two_people_in_it(self):
+        with self.m.gw("tyler"):
+            dm = store.open_dm(self.m.gid("riley"))
+            store.post_message(dm["id"], "private to us")
+        self.m.sync("tyler")
+        self.m.sync("riley")
+        with self.m.gw("tyler"):
+            shared = store.share_dm(dm["id"], "launch")
+            self.assertEqual(sorted(x["name"] for x in shared["members"]), ["riley", "tyler"])
+        for _ in range(2):
+            self.m.sync("tyler")
+            self.m.sync("riley")
+            self.m.sync("ash")
+            self.m.sync("kai")
+        self.assertEqual(self.m.texts("riley", "launch"), ["private to us"])
+        self.assertNotIn("launch", self.channels("ash"))
+        self.assertNotIn("launch", self.channels("kai"))
+        self.assertNotIn(dm["id"], self.channels("ash"))
+
     def test_a_non_member_cannot_inject_rows_into_a_member_listed_channel(self):
         self.make_ops()
         with self.m.gw("tyler"):

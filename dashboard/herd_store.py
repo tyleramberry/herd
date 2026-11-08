@@ -499,7 +499,7 @@ def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
 def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
     """Promote a DM into a new shared channel (S-13).
 
-    Creates an ordinary channel called ``name`` and copies the DM's top-level and reply messages
+    Creates a channel called ``name``, whose member list is the DM's two people, and copies the DM's top-level and reply messages
     into it, oldest first, so the people (and agents) who join read the same history. The DM, its
     messages and its sync cursors are untouched. Copies get fresh ids, keep the source author,
     time and ``promoted_from`` (the DM id), and are stamped with this gateway as the sender so the
@@ -514,8 +514,11 @@ def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
             "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
     if not src:
         raise HerdError(422, "This conversation has no messages to share yet.")
-    channel = create_channel(name, topic)  # same name rules; 409 if it exists
     me = identity()["gateway_id"]
+    # The copy goes only to the two people who were in the DM (spec §1.6): a DM's history never reaches a
+    # teammate who was not in it. Anyone else needs a channel created with its own member list.
+    others = [m["id"] for m in dm["members"] if m.get("id") and m["id"] != me]
+    channel = create_channel(name, topic, members=others)  # same name rules; 409 if it exists
     ids = {r["id"]: f"p{i:06d}{uuid.uuid4().hex[:24]}" for i, r in enumerate(src)}
     with connect() as conn:
         for r in src:
