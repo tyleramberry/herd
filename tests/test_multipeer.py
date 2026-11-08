@@ -271,8 +271,8 @@ class PeerStateMigrationTest(_Base):
 
 
 
-class MeshSyncTest(_Base):
-    """Spec §1.3-1.5: fan-out to every teammate, no echo to the author, convergence, per-teammate isolation."""
+class _MeshHarness(_Base):
+    """Shared setup for the mesh tests (no tests of its own)."""
 
     @staticmethod
     def star(hub, leaves):
@@ -286,6 +286,10 @@ class MeshSyncTest(_Base):
         self.mesh = Mesh(Path(self.tmp.name), names, links)
         self.addCleanup(self.mesh.close)
         return self.mesh
+
+
+class MeshSyncTest(_MeshHarness):
+    """Spec §1.3-1.5: fan-out to every teammate, no echo to the author, convergence, per-teammate isolation."""
 
     # --- fan-out ------------------------------------------------------------------------------
 
@@ -464,6 +468,130 @@ class MeshSyncTest(_Base):
         blob = json.dumps(st)
         for name in ("riley", "ash", "kai", "noor"):
             self.assertNotIn("k-" + name, blob)
+
+
+
+class ChannelMembershipTest(_MeshHarness):
+    """Spec §1.6: a channel holds up to five people; a gateway that is not a member never receives it."""
+
+    def setUp(self):
+        super().setUp()
+        # tyler is the hub; riley, ash and kai are teammates. Only riley and ash will be members of "ops".
+        self.m = self.build(["tyler", "riley", "ash", "kai"], self.star("tyler", ["riley", "ash", "kai"]))
+        for leaf in ("riley", "ash", "kai"):  # first contact: the hub learns each teammate's id
+            self.m.sync(leaf)
+            self.m.sync("tyler")
+
+    def channels(self, name):
+        with self.m.gw(name):
+            return {c["id"] for c in store.list_channels()}
+
+    def make_ops(self):
+        with self.m.gw("tyler"):
+            channel = store.create_channel("ops", members=[self.m.gid("riley"), self.m.gid("ash")])
+        self.assertEqual(sorted(x["name"] for x in channel["members"]), ["ash", "riley", "tyler"])
+        return channel
+
+    def test_members_get_the_channel_and_its_messages_others_do_not(self):
+        self.make_ops()
+        with self.m.gw("tyler"):
+            store.post_message("ops", "for members only")
+        for _ in range(2):
+            self.m.sync("tyler")
+            self.m.sync("riley")
+            self.m.sync("ash")
+        self.assertIn("ops", self.channels("riley"))
+        self.assertIn("ops", self.channels("ash"))
+        self.assertEqual(self.m.texts("riley", "ops"), ["for members only"])
+        self.assertEqual(self.m.texts("ash", "ops"), ["for members only"])
+        self.assertNotIn("ops", self.channels("kai"))
+        self.assertEqual(self.m.texts("kai", "general"), [])
+
+    def test_a_member_relays_to_the_other_member_but_never_to_a_non_member(self):
+        self.make_ops()
+        self.m.sync("tyler")                  # riley learns the channel from the hub's pass
+        with self.m.gw("riley"):
+            store.post_message("ops", "riley to the group")
+        for _ in range(2):
+            self.m.sync("riley")
+            self.m.sync("tyler")
+            self.m.sync("ash")
+        self.assertEqual(self.m.texts("ash", "ops"), ["riley to the group"])
+        kai_gid = self.m.gid("kai")
+        for (_s, url, _k, body) in self.m.calls:
+            if self.m.by_url[url] == "kai":
+                self.assertNotIn("ops", {c["id"] for c in body["channels"]})
+                self.assertNotIn("riley to the group", [row["content"] for row in body["messages"]])
+                self.assertNotIn(kai_gid, [row["gateway_id"] for row in body["messages"]])
+
+    def test_a_non_member_cannot_inject_rows_into_a_member_listed_channel(self):
+        self.make_ops()
+        with self.m.gw("tyler"):
+            channel = store.get_channel("ops")
+            riley_gid, kai_gid = self.m.gid("riley"), self.m.gid("kai")
+            spoof = {"id": "kai-spoof-1", "channel_id": "ops", "author_type": "human", "author_name": "kai",
+                     "gateway_id": kai_gid, "gateway_name": "kai", "content": "let me in",
+                     "created_at": "2026-11-08T00:00:00.000+00:00"}
+            # kai sends its own row, and riley's relayed row that names kai as the origin is also refused.
+            counts = {}
+            store.ingest({"from": {"gateway_id": kai_gid, "display_name": "kai"}, "channels": [],
+                          "messages": [spoof], "reactions": []}, stats=counts)
+            self.assertEqual(counts["dropped"], 1)
+            self.assertIsNone(store.get_message("kai-spoof-1"))
+            self.assertEqual({x["id"] for x in channel["members"]}, {store.identity()["gateway_id"], riley_gid,
+                                                                    self.m.gid("ash")})
+            # The same row, relayed by a member (riley), still names a non-member origin: refused.
+            counts = {}
+            store.ingest({"from": {"gateway_id": riley_gid, "display_name": "riley"}, "channels": [],
+                          "messages": [dict(spoof, id="kai-spoof-2")], "reactions": []}, stats=counts)
+            self.assertEqual(counts["dropped"], 1)
+            self.assertIsNone(store.get_message("kai-spoof-2"))
+
+    def test_a_channel_row_that_does_not_include_this_gateway_is_refused(self):
+        with self.m.gw("kai"):
+            store.ingest({"from": {"gateway_id": "riley-gid-x", "display_name": "riley"},
+                          "channels": [{"id": "ops", "is_dm": False, "members": [
+                              {"id": "riley-gid-x", "name": "riley"}, {"id": "ash-gid-x", "name": "ash"}]}],
+                          "messages": [], "reactions": []})
+            self.assertNotIn("ops", {c["id"] for c in store.list_channels()})
+
+    def test_more_than_five_people_is_refused_at_creation_and_on_arrival(self):
+        with self.m.gw("tyler"):
+            me = store.identity()["gateway_id"]
+            three = [self.m.gid(n) for n in ("riley", "ash", "kai")]
+            # Five people with a teammate of ours: self plus three known teammates is four, so a fifth
+            # known person is needed to test the limit; the unknown ids below are refused before that.
+            with self.assertRaises(store.HerdError) as caught:
+                store.create_channel("too-many", members=[*three, "g-five", "g-six"])
+            self.assertEqual(caught.exception.status, 422)
+            self.assertIsNone(store.get_channel("too-many"))
+            ok = store.create_channel("four-people", members=three)  # self + 3 = four
+            self.assertEqual(len(ok["members"]), 4)
+            self.assertIn(me, [x["id"] for x in ok["members"]])
+        self.assertIsNone(store._clean_members([{"id": f"g{i}"} for i in range(6)]))
+        self.assertEqual(len(store._clean_members([{"id": f"g{i}"} for i in range(5)])), 5)
+        self.assertIsNone(store._clean_members([{"id": "bad id!"}]))
+
+    def test_the_channels_route_passes_members_to_the_store(self):
+        try:
+            import herd.dashboard.plugin_api as api
+        except Exception:  # noqa: BLE001 — fastapi is a test-only dependency
+            self.skipTest("fastapi not installed (pip install -r requirements-dev.txt)")
+        with self.m.gw("tyler"):
+            body = {"name": "via-route", "members": [self.m.gid("riley")]}
+            out = api.post_channel(body)
+            self.assertEqual(sorted(x["name"] for x in out["members"]), ["riley", "tyler"])
+            self.assertIsNone(store.get_channel("nope"))
+
+    def test_unknown_or_malformed_member_ids_are_refused(self):
+        with self.m.gw("tyler"):
+            with self.assertRaises(store.HerdError):
+                store.create_channel("ghosts", members=["nobody-we-know"])
+            with self.assertRaises(store.HerdError):
+                store.create_channel("odd", members="riley")
+            self.assertIsNone(store._clean_members(["has spaces"]))
+
+
 
 
 class ParallelIsolationTest(unittest.TestCase):

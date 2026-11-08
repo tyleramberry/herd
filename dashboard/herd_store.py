@@ -458,14 +458,33 @@ def resolve_channel(ref: Any) -> Optional[dict]:
     return None
 
 
-def create_channel(name: Any, topic: Any = "") -> dict:
+def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
+    """Create a public channel. ``members`` (optional) lists the gateway ids allowed to see it, this gateway
+    included; at most five people. Left out, the channel is open to every gateway in the mesh."""
     clean = normalize_channel_name(name)
     if not clean:
         raise HerdError(422, "Channel name is required.")
     if not _CHANNEL_NAME_RE.match(clean):
         raise HerdError(422, "Use lowercase letters, numbers, - or _ (max 48 characters).")
+    member_list: list[dict] = []
+    if members is not None:
+        if not isinstance(members, list):
+            raise HerdError(422, "members must be a list of people.")
+        me = identity()
+        member_list = _clean_members([me["gateway_id"], *members])
+        if member_list is None:
+            raise HerdError(422, f"A channel holds up to {MAX_HUMANS} people, including you, by their Herd id.")
+        with connect() as conn:
+            known = {r["id"]: r["display_name"] for r in conn.execute("SELECT id, display_name FROM participants")}
+        for m in member_list:
+            if m["id"] == me["gateway_id"]:
+                m["name"] = me["display_name"]
+            elif m["id"] in known:
+                m["name"] = known[m["id"]]
+            else:
+                raise HerdError(422, "That person isn't connected yet.")
     channel = {"id": clean, "name": clean, "topic": str(topic or "")[:200], "is_dm": 0,
-               "members": "[]", "created_at": _now()}
+               "members": json.dumps(member_list), "created_at": _now()}
     with connect() as conn:
         try:
             conn.execute(
@@ -474,7 +493,7 @@ def create_channel(name: Any, topic: Any = "") -> dict:
         except sqlite3.IntegrityError as exc:
             raise HerdError(409, f"#{clean} already exists.") from exc
     request_sync()
-    return {**channel, "is_dm": False, "members": [], "message_count": 0, "last_message_at": None}
+    return {**channel, "is_dm": False, "members": member_list, "message_count": 0, "last_message_at": None}
 
 
 def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
@@ -540,6 +559,42 @@ def _dm_export_allowed(channel_id: Any, viewer_gateway: str) -> bool:
     return viewer in dm_member_ids(cid)
 
 
+def _member_ids(members: Any) -> set[str]:
+    """The gateway ids in a stored member list (``[{id, name}]``); anything else reads as no members."""
+    if not isinstance(members, list):
+        return set()
+    return {str(m.get("id") or "") for m in members if isinstance(m, dict) and m.get("id")}
+
+
+def _channel_visible(channel: dict, viewer_gateway: str) -> bool:
+    """May this stored channel be sent to ``viewer_gateway``? DMs: members only. Member-listed channels: members
+    only. Open channels: everyone. An unidentified viewer is in no member list (fail closed)."""
+    cid = str(channel.get("id") or "")
+    if cid.startswith("dm:"):
+        return _dm_export_allowed(cid, viewer_gateway)
+    members = _member_ids(channel.get("members"))
+    if not members:
+        return True
+    viewer = str(viewer_gateway or "").strip()[:64]
+    return bool(viewer) and viewer in members
+
+
+def _accepts_from(members_json: Any, gateway_id: str) -> bool:
+    """Whether a row in a channel with this stored member list may come from ``gateway_id``.
+
+    Open channels accept anyone. A member-listed channel accepts only rows whose sender and origin are members,
+    so a relayed row from a non-member, or a row a non-member wrote, is refused on arrival (spec §1.6).
+    """
+    try:
+        members = json.loads(members_json or "[]")
+    except (TypeError, ValueError):
+        return False
+    ids = _member_ids(members)
+    if not ids:
+        return True
+    return bool(gateway_id) and gateway_id in ids
+
+
 def open_dm(participant_id: str) -> dict:
     """Get or create the DM between this gateway's human and a peer gateway's human."""
     me = identity()
@@ -563,6 +618,28 @@ def open_dm(participant_id: str) -> dict:
     return _channel_row(row)
 
 
+def _clean_members(value: Any) -> Optional[list[dict]]:
+    """A member list from a peer or a caller, as ``[{id, name}]``: plain ids, no repeats, at most five people.
+
+    ``None`` means malformed or over the limit, and the caller refuses the row. ``[]`` means open to the mesh.
+    """
+    if value is None or value == []:
+        return []
+    if not isinstance(value, list):
+        return None
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in value:
+        mid = str(item.get("id") if isinstance(item, dict) else item or "")
+        if not _MEMBER_ID_RE.match(mid):
+            return None
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append({"id": mid, "name": _clean_name(item.get("name") if isinstance(item, dict) else "", mid)})
+    return out if len(out) <= MAX_HUMANS else None
+
+
 def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
     """Accept a channel from a peer. Validated: never trust peer input to shape our rows."""
     cid = str(ch.get("id") or "")
@@ -583,10 +660,16 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
     else:
         if cid != normalize_channel_name(cid) or not _CHANNEL_NAME_RE.match(cid):
             return
+        members = _clean_members(ch.get("members"))
+        if members is None:
+            return  # malformed, or more than five people: refused, never repaired
+        if members and _local_gateway_id(conn) not in _member_ids(members):
+            return  # a member-listed channel that does not include this gateway is not ours to hold
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
-            "VALUES (?, ?, ?, 0, '[]', ?)",
-            (cid, cid, str(ch.get("topic") or "")[:200], str(ch.get("created_at") or _now())[:40]))
+            "VALUES (?, ?, ?, 0, ?, ?)",
+            (cid, cid, str(ch.get("topic") or "")[:200], json.dumps(members),
+             str(ch.get("created_at") or _now())[:40]))
 
 
 # ---------------------------------------------------------------------------
@@ -934,7 +1017,11 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 continue
             m["gateway_id"] = gid
             m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid, gid)
-            if not conn.execute("SELECT 1 FROM channels WHERE id = ?", (m["channel_id"],)).fetchone():
+            channel_row = conn.execute("SELECT members FROM channels WHERE id = ?", (m["channel_id"],)).fetchone()
+            if channel_row is None:
+                continue
+            if not (_accepts_from(channel_row["members"], sender_gid) and _accepts_from(channel_row["members"], gid)):
+                dropped += 1  # sent by, or relayed from, someone who is not a member of this channel
                 continue
             tid = m.get("thread_parent_id")
             if tid:
@@ -973,8 +1060,13 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 dropped += 1
                 continue
             r["gateway_id"] = rgid
-            msg = conn.execute("SELECT channel_id FROM messages WHERE id = ?", (r["message_id"],)).fetchone()
+            msg = conn.execute(
+                "SELECT m.channel_id, c.members FROM messages m LEFT JOIN channels c ON c.id = m.channel_id "
+                "WHERE m.id = ?", (r["message_id"],)).fetchone()
             if not msg:
+                continue
+            if not (_accepts_from(msg["members"], sender_gid) and _accepts_from(msg["members"], rgid)):
+                dropped += 1
                 continue
             r["channel_id"] = msg["channel_id"]
             r["id"] = f"{r['message_id']}|{r['emoji']}|{r['gateway_id']}"[:200]
@@ -1009,27 +1101,33 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
 
     ``viewer_gateway`` is the requesting gateway's id, as the call site authenticated it (never read
     from a row). A DM — its channel, its messages, and reactions on it — is only returned to a member
-    of that DM; public channels go to every caller. An empty ``viewer_gateway`` gets no DMs at all.
+    of that DM. A channel with a member list is only returned to its members (spec §1.6). Open channels
+    (no member list) go to every caller. An empty ``viewer_gateway`` gets no DMs and no restricted channels.
     """
     with connect() as conn:
         examined = conn.execute(
             f"SELECT {_MESSAGE_COLS} FROM messages WHERE seq > ? ORDER BY seq LIMIT ?",
             (int(after_seq), int(limit))).fetchall()
         channels = [_channel_row(r) for r in conn.execute("SELECT * FROM channels").fetchall()]
-        channels = [c for c in channels if _dm_export_allowed(c["id"], viewer_gateway)]
+        known = {c["id"] for c in channels}
+        visible = {c["id"] for c in channels if _channel_visible(c, viewer_gateway)}
+        channels = [c for c in channels if c["id"] in visible]
         rexamined = conn.execute(
             "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
             "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
     # The cursor moves past excluded rows too (the peer already has its own messages), and past rows
     # in a DM the viewer is not a member of (it may never have them): the filter runs after the
     # LIMIT-bounded SELECT, so a filtered row is examined once and never re-pulled.
+    def visible_here(channel_id: str) -> bool:
+        if channel_id in known:
+            return channel_id in visible
+        return _dm_export_allowed(channel_id, viewer_gateway)  # a row whose channel we never stored
+
     rows = [dict(r) for r in examined
-            if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
-            and _dm_export_allowed(r["channel_id"], viewer_gateway)]
+            if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
     next_seq = examined[-1]["seq"] if examined else int(after_seq)
     rrows = [dict(r) for r in rexamined
-             if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
-             and _dm_export_allowed(r["channel_id"], viewer_gateway)]
+             if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
     next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
     return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit,
             "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit}
