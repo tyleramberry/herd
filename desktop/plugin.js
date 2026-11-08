@@ -149,7 +149,14 @@ function PeerLine({ status }) {
       ]
     })
   }
-  const peer = peers[0]
+  // One line per teammate (spec §1.5): each one's own health, so a dead teammate never hides a live one.
+  const lines = peers.map(peerLine).concat(refusedPeers(status).map(refusedLine))
+  return lines.length === 1
+    ? lines[0]
+    : jsxs('div', { className: 'flex min-w-0 flex-col gap-0.5', children: lines })
+}
+
+function peerLine(peer) {
   const name = peer.remote_name || peer.name
   const tone = peer.connected ? 'good' : peer.last_attempt ? 'bad' : 'muted'
   const label = peer.connected
@@ -163,6 +170,15 @@ function PeerLine({ status }) {
     className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
     title: peer.last_error || peer.url,
     children: [jsx(StatusDot, { tone }), jsx('span', { className: 'truncate', children: label })]
+  })
+}
+
+function refusedLine(entry) {
+  const who = entry.name || entry.url
+  return jsxs('div', {
+    className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+    title: entry.reason,
+    children: [jsx(StatusDot, { tone: 'bad' }), jsx('span', { className: 'truncate', children: 'Refused ' + who + ' — ' + entry.reason })]
   })
 }
 

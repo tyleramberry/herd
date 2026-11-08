@@ -147,5 +147,15 @@ check('peer with no stored secret asks for the Herd secret (not the gateway API 
              herd_secret_set: true }),
   ["Add riley's Herd secret to connect"])
 
+// 6. One line per teammate (spec §1.5): a dead teammate never hides a live one, and a refusal still shows.
+check('two teammates: one line each, in order',
+  peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true },
+                     { name: 'ash', connected: false, has_key: true, last_attempt: '2026-11-08T00:00:00Z' }] }),
+  ['Connected to riley', "Can't reach ash. Messages will send when they're back."])
+check('a refused teammate is listed beside a connected one',
+  peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
+             refused: [{ name: 'kai', url: 'http://kai.local:8642', reason: 'Refused for test.' }] }),
+  ['Connected to riley', 'Refused kai — Refused for test.'])
+
 console.log(failures.length ? `\nPROBE FAIL (${failures.length}): ${failures.join(', ')}` : '\nPROBE OK')
 process.exit(failures.length ? 1 : 0)
