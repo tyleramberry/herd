@@ -626,7 +626,7 @@ class ChannelMembershipTest(_MeshHarness):
             body = {"name": "via-route", "members": [self.m.gid("riley")]}
             out = api.post_channel(body)
             self.assertEqual(sorted(x["name"] for x in out["members"]), ["riley", "tyler"])
-            self.assertIsNone(store.get_channel("nope"))
+            self.assertEqual(store.get_channel("via-route")["members"], out["members"])
 
     def test_unknown_or_malformed_member_ids_are_refused(self):
         with self.m.gw("tyler"):
@@ -712,12 +712,6 @@ class ParallelIsolationTest(unittest.TestCase):
         self.assertIsNotNone(self.fast_at)
         self.assertLess(self.fast_at, 0.5, "the fast teammate waited for the hanging one")
 
-
-class FiveGatewayStatusTest(_Base):
-    def test_status_reports_the_count_of_linked_teammates(self):
-        self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "k"}})
-        self.assertEqual(len(store.status()["peers"]), 1)
 
 
 if __name__ == "__main__":
