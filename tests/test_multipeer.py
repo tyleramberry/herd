@@ -639,8 +639,8 @@ class ChannelMembershipTest(_MeshHarness):
 
 
 
-class ParallelIsolationTest(unittest.TestCase):
-    """Production path (no transport seam): a hanging teammate costs its own timeout, not everyone else's."""
+class _ParallelFixture(unittest.TestCase):
+    """Two real HTTP teammates (one hangs) on the production path (no transport seam). No tests of its own."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -704,6 +704,9 @@ class ParallelIsolationTest(unittest.TestCase):
          store.SYNC_TIMEOUT_S) = self._saved
         self.tmp.cleanup()
 
+class ParallelIsolationTest(_ParallelFixture):
+    """A hanging teammate costs its own timeout, not everyone else's."""
+
     def test_fast_teammate_is_not_held_up_by_a_hanging_one(self):
         results = store.sync_all()
         by_name = {r["name"]: r for r in results}
@@ -712,6 +715,32 @@ class ParallelIsolationTest(unittest.TestCase):
         self.assertIsNotNone(self.fast_at)
         self.assertLess(self.fast_at, 0.5, "the fast teammate waited for the hanging one")
 
+
+
+class TeammateThreadScopeTest(_ParallelFixture):
+    """Each teammate's thread must see the caller's context (the profile's secret scope rides on it)."""
+
+    def test_each_teammate_thread_sees_the_callers_context(self):
+        import contextvars
+        scope = contextvars.ContextVar("herd_test_scope", default="missing")
+        seen = {}
+
+        def fake_sync_peer(peer, rounds=5):
+            seen[peer["name"]] = (scope.get(), threading.current_thread().name)
+            return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": 0, "pulled": 0}
+
+        real = store.sync_peer
+        store.sync_peer = fake_sync_peer
+        scope.set("profile-A")
+        try:
+            results = store.sync_all()
+        finally:
+            store.sync_peer = real
+            scope.set("missing")
+        self.assertEqual([r["name"] for r in results], ["slow", "fast"])
+        self.assertEqual({name: value for name, (value, _thread) in seen.items()},
+                         {"slow": "profile-A", "fast": "profile-A"})
+        self.assertTrue(all(thread.startswith("herd-peer") for _value, thread in seen.values()), seen)
 
 
 if __name__ == "__main__":
