@@ -24,6 +24,7 @@ Base: `origin/main` @ **`cd6d46c`** (verified 2026-11-07).
 | **S-16** Kanban link (F4) | `S-16` | **merged #46 @ `a20f742`**; Sentry QA **APPROVE** on `35debd8` | merged + QA-green ✅ (Q-8 = YES; board-level nav per PM ruling #47) | **APPLIED** — H-1 shot 6 (ambient); H-2 PR bullet + read line; README. |
 | Smith capability list | — | answered Nov 6 (S-13/S-15) + Nov 7 (S-16) | §5 closed ✅ | — |
 | Sentry Q-8 ruling | `Q-8` | **YES — read-only `kanban.db` under rule 13**, 7 constraints | recorded ✅ | §3.3 **DB-read** branch applied. |
+| **SEC-1** cleartext + credential + identity scoping (S-19…S-23) | `H-7` | Q-12 verdict at `047a5b09`: **#1/#2 FIXED, #3/#4/#5 PARTIAL** (conditional GO); S-24 lands the deltas, Q-13 re-verifies | **not merged** — merge gate = PR #56 (SEC-1 + S-24) into `origin/main` | **Disclosure: APPLIED in H-2/H-6** (§4). No demo beat, no capability change. |
 
 **Where each block landed:** H-1 v10 (`docs/submission/H-1-demo-script.md`), H-2 v7
 (`docs/submission/H-2-catalog-pr-package.md` + `docs/submission/plugin-catalog-herd.yaml`), README
@@ -174,6 +175,11 @@ long-running background processes, stored credentials. README and PR description
 
 **S-16 — APPLIED (Q-8 = YES)** *(reads-outside-own-data — mandatory under rule 13)*:
 > - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it.
+
+**SEC-1 (S-19…S-23) — APPLIED (disclosure only; no capability change)** *(folded in Nov 7 on card **H-7**; the code lives on `sec/nov7-hardening` / PR #56 — **ship these lines only once the pin contains the fixes**)*:
+> - **Cleartext peers (S-19):** `https://` peers are always allowed; a `http://` peer is allowed only on loopback (`127.0.0.1`, `::1`, `localhost`). Any other `http://` peer is refused by default — `status()` reports it with a reason and the pane shows it — unless the operator knowingly switches on **Send the peer key in cleartext (unsafe)** (`allow_cleartext_peer`).
+> - **Peer credential is Herd-scoped (S-20):** the value a teammate presents on `/herd/v1/*` is **this gateway's Herd secret** (`HERD_SECRET`), compared in constant time; your gateway's `API_SERVER_KEY` is **not** accepted there, and a request with no Herd secret set is refused (fail closed). Two `config_schema` secrets are stored (the teammate's Herd secret to send, your own to require), both read only via `agent.secret_scope.get_secret`.
+> - **Synced-row identity & DM scoping (S-21/S-22):** a synced row's identity is bound to the **declared** sender, not to the row — rows claiming an id other than the declared sender's (including one claiming your gateway's id) are dropped and counted (`accepted: N, dropped: M`); a DM is exported only to a caller whose declared id is one of its two members, and a caller carrying no gateway id gets no DMs. **Accepted residual:** the shared secret authenticates the **link**, not the caller's identity, so a peer holding it can declare any gateway id, including yours (closing it needs per-peer credentials — not shipped).
 
 *(The S-16 "Q-8 = NO" id-only variant is retired — Q-8 was ruled YES.)*
 

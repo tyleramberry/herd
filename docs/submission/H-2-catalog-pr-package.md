@@ -1,16 +1,21 @@
-# H-2 — Catalog PR Package: Herd (DRAFT v7, Nov 7 — PIN-READY under F-3 REVISED: open on Tyler's go, bump later)
+# H-2 — Catalog PR Package: Herd (DRAFT v8, Nov 7 — SEC-1 folded in; pin pending the frozen `origin/main`)
 
-> **Status: PIN-READY (F-3 REVISED).** No freeze — the PR opens on **Tyler's one-screen go**; re-pin `sha:`
-> to the newest head **immediately before opening** and before each later bump (last bump **Nov 10 18:00 MST**).
+> **Status: copy final; pin NOT finalised.** No freeze — the PR opens on **Tyler's one-screen go**; re-pin `sha:`
+> to the frozen `origin/main` **immediately before opening** and before each later bump (last bump **Nov 10 18:00 MST**).
 > **GATE CHANGE (F-3 REVISED, `docs/pm/F-3-gate-REVISED.md`):** the Nov 8 freeze is **cancelled**. The PR
 > **opens as soon as this package is pin-ready** — no freeze wait — and later improvements go in as
 > **SHA-bump PRs** (catalog rule 4). **Last pin bump: Nov 10, 18:00 MST.** Tyler approves *opening* the PR
 > (one screen: what is submitted, the pin, the disclosures); he is informed, not asked, at form submission.
 >
-> **Pin: `cd6d46cc5f324ade11a814fa50889ce33324c607`** (`origin/main` HEAD at this pass, includes #45 B1, #41 S-15, #46 S-16).
-> Verified at that SHA: `hermes plugins validate . --install-deps` → **Validation passed**; draft entry →
-> **`catalog_audit: 0 FAIL, 0 WARN`**, 4 tools. Re-pin to the newest head before actually opening (main
-> moves daily until Nov 10) — Q-11 owns the pin re-verify.
+> **Pin: NOT FINALISED — re-pin to the frozen `origin/main` when the PR opens.** The package is written so the
+> swap is one line (`sha:` in §1 and in `plugin-catalog-herd.yaml`; runbook §A).
+> **Do not pin a SHA that predates S-24.** The candidate head `047a5b09…` (PR #56, Q-12-verified) is
+> **superseded**: S-24 lands four more commits on `sec/nov7-hardening` and Q-13 re-verifies the new head.
+> Pin the frozen `origin/main` after Foreman merges PR #56 (SEC-1 + S-24) — that merge is also what closes
+> Q-12's conditional-GO items (README:69 reword; the accepted #3/#4 residual; the cheap fixes).
+> Gate output below was produced at the SEC-1 tree `047a5b09` — the SHA the disclosure text was checked
+> against, **not** a pin: `hermes plugins validate . --install-deps` → **Validation passed**; draft entry →
+> **`catalog_audit: 0 FAIL, 0 WARN`**, 4 tools. Re-run both at the real pin before opening.
 > Target: add ONE file `plugin-catalog/herd.yaml` to `NousResearch/hermes-agent`.
 
 ## 0. Pin-readiness block (added Nov 7 from QA's pre-flight audit)
@@ -20,7 +25,7 @@
 | # | Gate | State | Owner |
 |---|---|---|---|
 | 1 | **B1 fix merged** (`herd_store.py` — the `open_credentialed_url` import + `urlopen` fallback are **deleted**; `_NoRedirect` handler + module-level `_OPEN_PEER` opener added; no manifest/tool/env/secret change) | **MERGED** — #45 landed on `main` @ `5686f0b` (QA-confirmed; `_NoRedirect`/`_OPEN_PEER` present, no `urllib_security` import anywhere). Pre-fix `61c9068` stays non-pin-valid. | ✅ closed |
-| 2 | **Real 40-char SHA** — `cd6d46cc5f324ade11a814fa50889ce33324c607`, verified to contain #45 B1, #41 S-15 and #46 S-16 | ✅ closed (re-pin at open) | Herald |
+| 2 | **Real 40-char SHA** — **not set: re-pin to the frozen `origin/main` at open** (a pre-S-24 SHA must not be pinned; `cd6d46c` is the scanned commit) | ⏳ open — Herald |
 | 3 | **Media** — `docs/media/*` is **empty** (`git ls-files docs/media` → nothing); the freeze no longer exists, so "before the freeze commit" now means "before the commit being pinned" | **DECIDED: ship WITHOUT `image:`/`screenshots:`.** Stills may be captured in the Nov 8 session and added via a SHA-bump PR; never link a file absent at the pin | Herald |
 
 **Decision on media (rule-safe default):** the catalog treats `image`/`screenshots` as *cosmetic*, and a
@@ -52,7 +57,7 @@ description: >-
   Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
   your Hermes agents work together across two machines.  # N-3 copy
 repo: https://github.com/tyleramberry/herd
-sha: cd6d46cc5f324ade11a814fa50889ce33324c607  # PIN CANDIDATE (origin/main HEAD, Nov 7; includes #45 B1, #41 S-15, #46 S-16). Re-pin to the newest head immediately before opening; Q-11 re-verifies the pin gate.
+sha: REPIN_AT_OPEN_ORIGIN_MAIN  # NOT FINAL — swap to the frozen origin/main when the PR opens (runbook §A). Supersedes cd6d46c (scanned) and the pre-S-24 head 047a5b09; Q-13 re-verifies the S-24 head.
 tier: community
 category: desktop  # shelf options: desktop|memory|platform|web|tools|voice|automation|models|general. Herd is a desktop pane, so "desktop" (was "platform", which is the messaging-platform shelf)
 maintainer: tyleramberry
@@ -71,7 +76,7 @@ capabilities:
   provides_tools: [herd_list_channels, herd_post, herd_read_channel, herd_set_status]  # 4 tools — VERIFIED vs plugin.yaml on origin/main (Nov 7, after S-15 #41). catalog_audit.py must show 4, not 3 (Sentry TC-0.8)
   provides_hooks: []        # VERIFIED none in plugin.yaml on main
   provides_middleware: []   # VERIFIED none in plugin.yaml on main
-  requires_env: []          # VERIFIED none: the peer key is a config_schema secret (HERD_PEER_KEY), not requires_env
+  requires_env: []          # VERIFIED none: the peer credential is a config_schema secret pair — HERD_PEER_KEY (sent to the peer) / HERD_SECRET (required from peers) — not requires_env
 ```
 
 ## 2. PR description (draft)
@@ -80,7 +85,7 @@ capabilities:
 Herd is multiplayer Hermes: channels and direct messages inside the Hermes
 desktop app where humans and their Hermes agents collaborate across machines.
 You connect a teammate's Hermes under **Settings > Plugins > Herd** (their
-gateway URL and API key). Herd then gives you shared channels in the desktop app: agents on both machines can exchange messages and hand work to
+gateway URL and Herd secret). Herd then gives you shared channels in the desktop app: agents on both machines can exchange messages and hand work to
 each other; both humans see the same thread. Built for the Nous Research
 Hermes Agent Plugin Hackathon (Nov 2026).
 
@@ -97,22 +102,57 @@ one persistent channel.
 - Agent status: `herd_set_status` lets an agent set one coarse phrase (reading the code / writing the code / reviewing / done / idle) shown beside its in-flight work; per-message human/agent badges are rendered in the pane. (S-15 #41 merged)
 - Chat command: `/herd-listen` (and `/herd-listen off`) registered via `ctx.register_command` — picks the chat that receives @mentions (S-7, PR #13)
 - Opt-in agent turns for @mention wake: teammate mention → `ctx.inject_message` (needs the user's `allow_gateway_injection` permission; off by default via `mention_wake: false`)
-- `config_schema` settings (display_name, peer_name, peer_url, peer_key secret, mention_wake), rendered by Desktop under Settings > Plugins > Herd
+- `config_schema` settings (display_name, peer_name, peer_url, herd_secret secret, peer_key secret, allow_cleartext_peer, mention_wake), rendered by Desktop under Settings > Plugins > Herd
 - No hooks, no middleware, no CLI commands (`/herd-listen` is a plugin chat command, not CLI)
 - Desktop plugin surface (desktop/plugin.js) via the plugin SDK only
 
 ### Rule 13 disclosures
 <!-- v3: lines below verified against the tree on main (Nov 5); keep only lines true at the pinned commit at freeze. -->
-- **Network calls:** only to the one teammate gateway URL entered in settings, at `POST <url>/herd/v1/sync`. No third-party services. <!-- grep verified Nov 5; re-run at freeze -->
+- **Network calls:** only to the one teammate gateway URL entered in settings, at `POST <url>/herd/v1/sync`. No third-party services. A plain `http://` URL to another machine is **refused before any request is built** (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that. <!-- S-19: _peer_url_refusal is checked in _http_sync before the Request exists; verified at the SEC-1 tree -->
 - **Long-running background processes:** a sync loop runs inside the gateway process while the API server is up — pushes outgoing messages and polls the teammate's gateway every 3 seconds (does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds. <!-- intervals VERIFIED vs README/tree Nov 5 -->
 - **Agent turns (opt-in only):** if the user enables @mention wake (`mention_wake: true` + `allow_gateway_injection: true`), a teammate's mention is injected into a user-chosen chat via Hermes's `inject_message`. Off by default.
-- **Stored credentials:** one peer API key, declared as a `config_schema`
-  secret (`peer_key`, env `HERD_PEER_KEY`) and stored by Hermes; Herd reads it
-  only via `agent.secret_scope.get_secret`. Set under Settings > Plugins > Herd.
+- **Stored credentials:** **two** `config_schema` secrets, both read only via
+  `agent.secret_scope.get_secret`: the teammate's **Herd secret** (`peer_key`,
+  env `HERD_PEER_KEY`, sent to their gateway) and this gateway's own **Herd
+  secret** (`herd_secret`, env `HERD_SECRET`, required *from* peers). Your
+  gateway's `API_SERVER_KEY` is a separate credential and is **not** used on
+  `/herd/v1/*`. Set under Settings > Plugins > Herd.
+- **Inbound endpoint / peer credential (S-20):** Herd adds `POST /herd/v1/sync`
+  and `GET /herd/v1/ping` to your Hermes API server. Both require **this
+  gateway's Herd secret** (`HERD_SECRET`), compared in constant time; with no
+  Herd secret set they refuse every request (fail closed). Your gateway's
+  `API_SERVER_KEY` is **not** accepted on `/herd/v1/*`, and the value you hand a
+  teammate is Herd-scoped — it opens Herd's routes only, never the rest of your
+  API server. A refused request gets a 401 that also says **whether** this
+  gateway has a Herd secret configured (never its value), so the other side can
+  tell "they haven't set one" from "they rejected our secret". Herd no longer
+  borrows the API-server adapter's gateway-wide auth check — that private call is
+  gone, so there is nothing to disclose for it.
+- **Cleartext peers (S-19):** `https://` peers are always allowed; a `http://`
+  peer is allowed only on loopback (`127.0.0.1`, `::1`, `localhost`). Any other
+  `http://` peer is refused by default — `status()` reports it with a reason and
+  the pane shows it — unless the operator knowingly switches on **Send the peer
+  key in cleartext (unsafe)** (`allow_cleartext_peer`, env `HERD_ALLOW_CLEARTEXT`).
+- **Synced-row identity & DM scoping (S-21/S-22):** a synced row's identity is
+  bound to the **declared** sender, not to the row: rows claiming an id other
+  than the declared sender's — including one claiming your gateway's id — are
+  dropped and counted (`accepted: N, dropped: M`). The store exports a DM only to
+  a caller whose declared id is one of that DM's two members; a caller carrying
+  no gateway id gets no DMs at all. **Accepted residual:** the peer secret
+  authenticates the **link**, not the caller's identity — one shared
+  `HERD_SECRET` per gateway means a peer that holds it can declare any gateway
+  id, including yours, and DMs are scoped by that declared id. Closing this needs
+  per-peer credentials (a design change, not shipped).
+- **Sync input hardening (S-23):** a DM is stored only if both member ids are
+  plain identifiers (lowercase letters, digits, `-`, `_`, at most 64 characters,
+  so no trailing newline or other whitespace) — anything else is refused, not
+  repaired; and every peer-supplied field in an @mention wake prompt outside the
+  quoted block is forced to one line with control characters and quote-breakouts
+  removed.
 - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it. <!-- README verbatim (canonical, CA-5). S-16 #46, Q-8 = YES; replaces the old "reads outside plugin data: none" line (never keep both). Verified at the pin: dashboard/kanban_tasks.py opens a mode=ro URI, busy_timeout 250, and issues exactly `SELECT title FROM tasks WHERE id = ?`; board-level click per PM ruling #47. -->
 - **Shell commands:** none **in the runtime files** (`tools.py`, `__init__.py`, `schemas.py`, `dashboard/`). <!-- audit WARN 3: scripts/qa/catalog_audit.py:176 shells out to `git` via subprocess; disclose it as a dev-only script or leave scripts/qa/ out of the pin -->
-- **Peer key on redirect (B1) — SETTLED (PR #45, verified at its head):** *"Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as \"The peer answered HTTP 30x\" instead of being followed)."* Mirror this sentence into README + PR description **verbatim** at the pin. Do **not** name `hermes_cli.urllib_security.open_credentialed_url` anywhere — that import is deleted from the tree; a disclosure naming it would itself be inaccurate. Same-origin POST still returns 200; a redirecting peer now surfaces as an error rather than being silently followed.",
-- **Stored-secret path unchanged:** `peer_key` remains a `config_schema` secret read via `agent.secret_scope.get_secret`; PR #45 adds no env var and removes the only core-helper import on this path.
+- **Peer key on redirect (B1) — SETTLED (PR #45, verified at its head):** *"Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as \"The peer answered HTTP 30x\" instead of being followed)."* Mirror this sentence into README + PR description **verbatim** at the pin. Do **not** name `hermes_cli.urllib_security.open_credentialed_url` anywhere — that import is deleted from the tree; a disclosure naming it would itself be inaccurate. Same-origin POST still returns 200; a redirecting peer now surfaces as an error rather than being silently followed.
+- **Stored-secret path:** both Herd secrets are `config_schema` secrets read via `agent.secret_scope.get_secret`; PR #45 adds no env var and removes the only core-helper import on the redirect path.
 - **Sync protocol version:** `PROTOCOL_VERSION` is **2** at this tree (S-13 promote, #37): a promoted DM is copied to a new channel and delivered over the existing `POST <url>/herd/v1/sync` write path; copied rows carry `promoted_from` (the source DM id), and a version **1** peer simply ignores the extra field (no 500, no corruption). The version is bumped in exactly **one** place and is readable from `/herd/v1/ping` + `/status`; **peers do not enforce `v`** — `handle_peer_sync` reads no version field, so a newer-protocol body is accepted rather than refused (verified live: a `{"v":3,…}` body to `/herd/v1/sync` returned HTTP **200**, not 422). Disclosed, not a silent pass. <!-- disclosure, not a marketing beat; keep even if S-13 is later reverted — then delete -->
 - **Local data:** messages, channels and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the linked task's title (next bullet). <!-- README:68 verbatim -->
 - **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command. <!-- README verbatim (canonical, CA-5). S-13 #37; authored by Smith, signed off by Sentry Q-7. Ships because S-13 is merged; the demo beat stays staged. -->
@@ -124,10 +164,10 @@ one persistent channel.
      showing the shared channel, (3) cross-machine task handoff. Same shots as
      the demo video session on Nov 8. -->
 
-### Validation (run by me at the pin `cd6d46c`, Nov 7)
+### Validation (gates at the SEC-1 tree `047a5b09`, Nov 7 — **re-run at the real pin**)
 ```
-$ git rev-parse HEAD
-cd6d46cc5f324ade11a814fa50889ce33324c607
+$ git rev-parse HEAD   # the SEC-1 tree the disclosure text was checked against — NOT the pin
+047a5b09ba5f1a7974677531bb3ee2ca7c21ad6a
 $ hermes plugins validate . --install-deps
 ✓ config schema — shape valid          ✓ declared tools — matches registrations
 ✓ requires_env — all entries UPPER_SNAKE ✓ declared hooks — matches registrations
@@ -157,11 +197,12 @@ Re-run both at the **exact** SHA being pinned, immediately before opening (and b
 
 ## Open questions (need Smith / Northstar)
 - **Q1 — peer auth vs rule 11: RESOLVED.** Herd declares its own
-  `config_schema` (peer_name, peer_url, peer_key secret → `HERD_PEER_KEY`),
-  read only via `get_secret`. Sentry's Q-3 ruling (PR #8): **strip**
-  `use_hermes_peers` from the catalog build, since reviewers read the code at
-  the pin whatever the default, and undeclared dynamic secret names fail
-  rules 6 and 11.
+  `config_schema` — two secrets, `herd_secret` → `HERD_SECRET` (required *from*
+  peers) and `peer_key` → `HERD_PEER_KEY` (sent *to* the peer), plus
+  `peer_name`/`peer_url` — all read only via `get_secret`. Sentry's Q-3 ruling
+  (PR #8): **strip** `use_hermes_peers` from the catalog build, since reviewers
+  read the code at the pin whatever the default, and undeclared dynamic secret
+  names fail rules 6 and 11.
 - ~~**Q2 — what Herd adds over core**~~ resolved: Northstar N-3 line, now in "What it does" above.
 - ~~**Q3 — plugin.yaml missing requires_hermes**~~ resolved: plugin.yaml on main
   now carries `requires_hermes: ">=0.22.0"` (PRs #10/#11) and the three tools.

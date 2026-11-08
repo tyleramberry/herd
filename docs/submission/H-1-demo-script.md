@@ -1,4 +1,4 @@
-# H-1 — Demo Video Script: Herd (v10, Nov 7 — new scope woven in under F-3 REVISED; H-6 apply pass)
+# H-1 — Demo Video Script: Herd (v11, Nov 7 — SEC-1 credential change folded in; shots unchanged)
 
 **Constraints:** <90s on X, tag @NousResearch, hook in first 5s, one jaw-drop, zero dead air.
 **Demo setup:** Tyler + wife's two Hermes instances on two Macs, side by side (split screen).
@@ -9,6 +9,13 @@ seconds — shots below are versioned so a re-take is a delta, not a rewrite.*
 **Base at prep:** `origin/main` @ `cd6d46c` (Nov 7). **The demo runs on the CURRENT build** — the old
 two-Mac window ran 28 commits behind main and is not evidence (shots 3–5 must be re-verified on the build
 you record). Every `herd.yaml` SHA reference is re-pinned at open and at each bump.
+
+> **v11 change (Nov 7 — SEC-1 fold-in, card H-7):** the five SEC-1 fixes changed **who holds what
+> credential** and **where the secret travels**, so the setup facts and the *meaning* of the pasted value
+> changed — the value Tyler pastes is now **Brooklyn's Herd secret** (S-20), **not** the gateway
+> `API_SERVER_KEY`. **No on-camera beat, shot or timing changes** (shot 2 is still "paste her address and a
+> masked secret"; the total stays **79s**). The same-LAN rig additionally needs the cleartext opt-in enabled
+> **off camera** (below), because a non-loopback `http://` peer is now refused by default.
 
 > **v10 change (Nov 7 — new scope woven in; F-3 REVISED):** **S-15** (status phrase, #41) and **S-16**
 > (task badge, #46) are merged + QA-green, so both are now **IN** this script — S-15 ambient in shot 5,
@@ -32,7 +39,7 @@ you record). Every `herd.yaml` SHA reference is re-pinned at open and at each bu
 | # | Time | Beat | Screen | VO / on-screen |
 |---|------|------|--------|----------------|
 | 1 | 0:00–0:05 | Two people, two Hermes | SPLIT: two Macs, Tyler and Brooklyn each at their own Hermes | **HOOK:** "Hermes is single-player. We made it multiplayer." |
-| 2 | 0:05–0:13 | One step | Left Mac, Hermes desktop: Settings → Plugins → Herd → Add teammate | "Add Brooklyn:" paste her address and key (key masked), Save. One side is enough. |
+| 2 | 0:05–0:13 | One step | Left Mac, Hermes desktop: Settings → Plugins → Herd → Add teammate | "Add Brooklyn:" paste her address and Herd secret (secret masked), Save. One side is enough. |
 | 3 | 0:13–0:20 | One step | Both screens, Herd pane | Brooklyn appears in `#general` on **both** screens. "That's it. Now they share a room." |
 | 4 | 0:20–0:26 | Same room | Both screens | Tyler types "hey 👋" in `#general` → lands on the right instantly; Brooklyn replies → lands on the left. No VO, let it land. |
 | 5 | 0:26–0:48 | **Handoff (jaw-drop) — @mention, PRIMARY** | Both screens, side by side | Tyler types `@` in `#general`; the **mention menu opens as he types `@brooklyn`** (hold ~2s, no VO). He picks her agent and sends the ask. Cut to Brooklyn's Mac: her agent **wakes with the assignment** (S-14) — who asked, which channel, how to answer. **Brooklyn approves its action on camera (one click)**; it works on her Mac and posts the result back to `#general`; the result lands on both screens. **S-15 ambient:** one phrase from the fixed vocabulary (reading the code / writing the code / reviewing / done / idle) sits beside her agent's in-flight work — if the take shows it cleanly, hold 2s when it flips to `done`. Call out nothing. VO: "He asks her agent. She says yes. Her agent, her machine." |
@@ -63,16 +70,25 @@ message in shots 4–6 if a take naturally has replies). Never click into a thre
 PEER_NAME     = Brooklyn                    # spelling locked; "Your name" setting on both Macs
 PEER_ADDR     = Brooklyns-MacBook-Pro-3.local   # LAN .local address ON CAMERA is approved (Tyler)
                                   # if mDNS flakes on record day, swap to the LAN IP — swappable here only
-PEER_KEY      = **** MASKED                 # never on camera: mask the Key field in the Add-teammate take
+PEER_SECRET   = **** MASKED                 # the peer's HERD secret (S-20) — renamed from PEER_KEY;
+                                  # never on camera: mask the Herd-secret field in the Add-teammate take
 TASK          = "summarize the notes file on Brooklyn's desktop"   # must need HER Mac
 ```
-Everything on screen is either this block or blurred. The Key field is the only masked value; the LAN
+Everything on screen is either this block or blurred. The Herd-secret field is the only masked value; the LAN
 address renders unmasked as approved. If any value changes, edit only this block and re-render the
 on-screen text.
 
-**Setup facts (Smith, Nov 5):** only Tyler fills in Add teammate (Brooklyn's URL plus her
-`API_SERVER_KEY`). Brooklyn's Mac needs `API_SERVER_ENABLED=true`, `API_SERVER_HOST=0.0.0.0` and
-`API_SERVER_KEY` set, `hermes gateway` running, and Herd enabled. Set **"Your name"** in Herd settings on
+**Setup facts (v11 — SEC-1 credential change folded in, Nov 7):** only Tyler fills in Add teammate
+(Brooklyn's URL plus **her Herd secret** — S-20: peers authenticate with a Herd-scoped secret, **not** the
+gateway `API_SERVER_KEY`). On Brooklyn's Mac, set **her own *This gateway's Herd secret*** (`HERD_SECRET`,
+a long random value) in Settings → Plugins → Herd and give Tyler **that value and nothing else**; the
+`API_SERVER_KEY` is not shared and is **not accepted** on `/herd/v1/*`. Make her API server reachable
+(`hermes gateway` running, Herd enabled, port `8642`); if she sets `API_SERVER_HOST=0.0.0.0`, note that it
+opens the **whole** Hermes API surface to the LAN — the Herd secret protects only `/herd/v1/*`, not the rest.
+**Cleartext (same-LAN rig):** `Brooklyns-MacBook-Pro-3.local` is a non-loopback host, so a plain `http://`
+peer URL to it is **refused by default** — enable **Send the peer key in cleartext (unsafe)**
+(`allow_cleartext_peer`) on Tyler's Mac **in advance, off camera**, or point the peer URL at an `https://`
+or tailnet address. Set **"Your name"** in Herd settings on
 both Macs, or the names default to the computer names. **Mention wake** additionally needs the Herd
 setting **"Let my agent answer @mentions"** ON and `allow_gateway_injection: true` for `herd` in
 `config.yaml` on Brooklyn's Mac, with a chat selected for it via `/herd-listen` — **set this up before the
@@ -88,7 +104,9 @@ screen until the 👍 lands.**
 Brooklyn's calendar Friday?". Never a task either agent could do alone.
 
 **Word rules (N-2):** say channel / connect / her agent / his agent. Never say peer-to-peer, gateway,
-fan-out, SQLite, **wake, inject, mention-wake, autocomplete, or poll**. Agent pills visible in every shot
+fan-out, SQLite, **wake, inject, mention-wake, autocomplete, or poll**. Say **Herd secret** (or just
+*secret*) for the pasted value — never *key*, *API key* or *API_SERVER_KEY* (S-20 changed what it is).
+Agent pills visible in every shot
 from 5 on. Never narrate the reaction or the `@` menu: they are glance beats, silence is the point.
 
 **Fallback:** if the mention take flakes live, cut in **take 5-baseline** for shot 5 (recorded Nov 8, or
@@ -112,7 +130,7 @@ each start 4s earlier, total ~75s). Shots 2–4 must be live. Never cut the hook
       Rehearse and record on the build you will actually show; re-verify shot 3 (peer visible), shot 4
       (fan-out), shot 5 (@mention) and the S-16 badge on it — a green old-build run is **not** evidence.
 - [ ] Full dry run timed — MUST land ≤85s with natural pacing
-- [ ] Settings > Plugins > Herd connect flow works on BOTH Macs from clean state (key field masked on screen)
+- [ ] Settings > Plugins > Herd connect flow works on BOTH Macs from clean state (Herd-secret field masked on screen)
 - [ ] **Shot 5 mention (primary; S-9 #19 + S-7 #13 + S-14 #33): typing `@brooklyn` opens the mention
       menu, Enter picks the agent, the mention wake fires with the assignment context (who / which
       channel / how to answer), the agent answers with `herd_post`, and the reply lands on both Macs —
@@ -123,7 +141,7 @@ each start 4s earlier, total ~75s). Shots 2–4 must be live. Never cut the hook
 - [ ] **Thread "N replies" pill renders if a take naturally has replies: ambient only, never clicked** (S-11, PR #23)
 - [ ] Network/latency checked on the home LAN — no visible stalls in the jaw-drop
 - [ ] Screen recording at final resolution; captions legible at 100% zoom
-- [ ] Key in demo command is masked/redacted on screen
+- [ ] Herd secret is masked/redacted on screen wherever it appears
 - [ ] Backup: pre-recorded fallback of shot 5 (take 5-baseline) in case the live mention take flakes
 - [ ] **S-16 badge (S-16 #46): click opens the `herd` board; badge shows id + title on both Macs within one sync cycle**
 - [ ] **S-15 ambient status: the phrase flips to `done` and is legible; if it is not clean on the take, skip it — it is ambient, never narrated**
