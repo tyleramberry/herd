@@ -91,8 +91,8 @@ for (const phrase of ['reading the code', 'writing the code', 'reviewing', 'done
   check(`title for "${phrase}"`, node.props.title, `tyler's Hermes: ${phrase}`)
 }
 
-// 3. The speaker badge comes from author_type for every message, never from the author name
-//    (TC-11.6).
+// 3. Only agent-authored messages carry a badge, decided by author_type and never by the author name
+//    (TC-11.6). Humans are the unbadged default (spec §3).
 const badgeLabel = message => {
   const row = MessageRow({ message, channelId: 'general' })
   const header = row.props.children[1]
@@ -101,11 +101,11 @@ const badgeLabel = message => {
 }
 const msg = extra => Object.assign(
   { id: 'm1', content: 'hi', created_at: '2026-11-06T00:00:00.000+00:00', reactions: [] }, extra)
-check('human post -> human badge', badgeLabel(msg({ author_type: 'human', author_name: 'Tyler' })), 'human')
+check('human post -> no badge', badgeLabel(msg({ author_type: 'human', author_name: 'Tyler' })), null)
 check('agent post -> agent badge', badgeLabel(msg({ author_type: 'agent', author_name: "Tyler's Hermes" })),
   'agent')
 check('peer agent post -> agent badge', badgeLabel(msg({ author_type: 'agent', author_name: 'Riley' })), 'agent')
-check('name is never the badge', badgeLabel(msg({ author_type: 'human', author_name: "Tyler's Hermes" })), 'human')
+check('name is never the badge', badgeLabel(msg({ author_type: 'human', author_name: "Tyler's Hermes" })), null)
 
 // 4. The peer line: a refused cleartext peer says why, and never reads as "no teammate connected"
 //    (S-19). The positive control below is the plain connected/unconfigured behaviour, unchanged.

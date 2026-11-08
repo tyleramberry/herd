@@ -501,7 +501,8 @@ const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
 function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
-  const badge = message.author_type === 'agent' ? 'agent' : 'human'
+  // Only agent-authored messages carry a badge: humans read as the default, unbadged case (spec §3).
+  const agent = message.author_type === 'agent'
   const reactions = Array.isArray(message.reactions) ? message.reactions : []
   const react = useMutation({
     mutationFn: emoji =>
@@ -539,7 +540,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
-          jsx(Badge, { variant: badge === 'agent' ? 'muted' : 'default', size: 'xs', children: badge }),
+          agent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null,
           jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) }),
           message.task_id ? jsx(TaskBadge, { taskId: message.task_id }) : null,
           onOpenThread
