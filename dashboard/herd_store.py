@@ -633,13 +633,14 @@ def _clean_members(value: Any) -> Optional[list[dict]]:
     out: list[dict] = []
     seen: set[str] = set()
     for item in value:
-        mid = str(item.get("id") if isinstance(item, dict) else item or "")
+        raw_id, raw_name = (item.get("id"), item.get("name")) if isinstance(item, dict) else (item, "")
+        mid = str(raw_id) if raw_id is not None else ""
         if not _MEMBER_ID_RE.match(mid):
             return None
         if mid in seen:
             continue
         seen.add(mid)
-        out.append({"id": mid, "name": _clean_name(item.get("name") if isinstance(item, dict) else "", mid)})
+        out.append({"id": mid, "name": _clean_name(raw_name, mid)})
     return out if len(out) <= MAX_HUMANS else None
 
 

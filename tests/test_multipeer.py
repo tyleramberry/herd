@@ -391,6 +391,32 @@ class MeshSyncTest(_MeshHarness):
         for name in names:
             self.assertEqual(m.rows(name), reference, name)
 
+    def test_reactions_and_thread_replies_converge_through_the_hub(self):
+        m = self.build(["tyler", "riley", "ash", "kai"], self.star("tyler", ["riley", "ash", "kai"]))
+        with m.gw("riley"):
+            root = store.post_message("general", "root from riley")["id"]
+        m.sync("riley")
+        m.sync("tyler")
+        with m.gw("ash"):
+            store.toggle_reaction("general", root, "\U0001f44d")           # a relayed reaction (origin ash)
+            store.post_message("general", "reply from ash", thread_parent_id=root)
+        with m.gw("kai"):
+            store.toggle_reaction("general", root, "\U0001f44d")
+        m.sync("ash")
+        m.sync("kai")
+        m.sync("tyler")
+        m.sync("riley")
+        m.sync("ash")
+        for name in ("tyler", "riley", "ash", "kai"):
+            with m.gw(name):
+                [parent] = [x for x in store.list_messages("general") if x["id"] == root]
+                self.assertEqual(parent["reply_count"], 1, name)
+                self.assertEqual(parent["reactions"], [{"emoji": "\U0001f44d", "count": 2,
+                                                        "mine": name in ("ash", "kai")}], name)
+                reply = store.list_thread(root)["replies"][0]
+                self.assertEqual(reply["content"], "reply from ash", name)
+                self.assertEqual(reply["gateway_id"], m.gid("ash"), name)  # origin kept on every gateway
+
     def test_the_same_message_delivered_by_two_paths_is_one_row(self):
         m = self.build(["tyler", "riley", "ash"], self.star("tyler", ["riley", "ash"]))
         with m.gw("riley"):
