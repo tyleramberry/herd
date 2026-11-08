@@ -60,8 +60,9 @@ REACTIONS = ["👍", "❤️", "👁️", "🎉"]
 _CHANNEL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 # Gateway ids are plain identifier strings (a uuid4 hex in this codebase). A DM whose member id is not
 # one is REFUSED, never repaired: the id is shared with the peer, so repairing one side would desync the
-# two gateways' channel ids.
-_MEMBER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+# two gateways' channel ids. Anchored with \Z (the end of the string), not $: $ also matches just before
+# a trailing newline, so "abc\n" would otherwise pass this gate.
+_MEMBER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\Z")
 _AUTHOR_TYPES = {"human", "agent"}
 
 # Tests point this at a temp file; production resolves Hermes's per-profile plugin data dir.
@@ -1196,6 +1197,7 @@ def _maybe_wake(messages: list[dict]) -> None:
 
 CLEARTEXT_REFUSED = ("peer_url is http:// on a non-loopback host — refused. Use https, a VPN/tailnet, "
                      "or turn on 'Send the peer key in cleartext (unsafe)'.")
+PEER_URL_INVALID = "peer_url is not a valid URL — refused. Check the address in Settings → Plugins → Herd."
 
 
 class PeerRefusedError(RuntimeError):
@@ -1229,12 +1231,17 @@ def _peer_url_refusal(url: str) -> str:
     https is always fine. http is fine on loopback (the two-gateway harness) and, off loopback, only
     when the owner has switched on 'Send the peer key in cleartext (unsafe)'.
     """
-    scheme = urllib.parse.urlsplit(url).scheme.lower()
+    try:
+        parts = urllib.parse.urlsplit(url)
+        scheme = parts.scheme.lower()
+        host = parts.hostname or ""
+    except ValueError:  # e.g. "http://[::1:8642" — an unmatched bracket is an invalid IPv6 URL
+        return PEER_URL_INVALID
     if scheme == "https":
         return ""
     if scheme != "http":
         return "peer_url must start with http:// or https:// — refused."
-    if _is_loopback_host(urllib.parse.urlsplit(url).hostname or ""):
+    if _is_loopback_host(host):
         return ""
     if _allow_cleartext():
         return ""
@@ -1298,7 +1305,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPEN_PEER = urllib.request.build_opener(_NoRedirect()).open
+# The peer key must never reach a proxy. build_opener() adds urllib's default ProxyHandler, which reads
+# http_proxy/HTTP_PROXY and would send the POST (Authorization header included) to that proxy instead of
+# the peer. Passing an explicit empty proxy map suppresses the default and supplies nothing to use.
+# _NoRedirect stays in the same opener: it is the control that refuses to re-send the key on a 3xx.
+_OPEN_PEER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open
 
 
 def _http_sync(peer: dict, body: dict) -> dict:

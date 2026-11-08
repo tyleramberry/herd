@@ -74,7 +74,14 @@ class _WakeEnv(unittest.TestCase):
 
 class UpsertChannelMemberIdTest(_WakeEnv):
     BAD_IDS = {"newline": "bad\nid", "quote": 'bad"id', "empty": "", "path": "../etc",
-               "upper": "BAD", "space": "bad id"}
+               "upper": "BAD", "space": "bad id",
+               "trailing_newline": "abc\n", "carriage_return": "abc\r"}
+
+    def test_member_id_regex_is_anchored_to_the_end_of_the_string(self):
+        self.assertIsNone(store._MEMBER_ID_RE.match("abc\n"))
+        self.assertIsNone(store._MEMBER_ID_RE.match("abc\r"))
+        self.assertIsNotNone(store._MEMBER_ID_RE.match("abc"))
+        self.assertIsNotNone(store._MEMBER_ID_RE.match("a-" + "z9_-" * 15 + "9"))  # a 64-char id still passes
 
     def test_malformed_member_ids_refused(self):
         for i, (label, bad) in enumerate(self.BAD_IDS.items()):
