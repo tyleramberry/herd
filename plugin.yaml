@@ -84,6 +84,11 @@ config_schema:
     env: HERD_PEER_KEY_4
     label: Teammate 4's Herd secret
     description: Teammate 4's Herd secret. Stored in Hermes's secret store, read only for teammate 4.
+  peers:
+    type: list
+    default: []
+    label: Teammates (advanced)
+    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Herd secret slot (HERD_PEER_KEY, HERD_PEER_KEY_2, HERD_PEER_KEY_3 or HERD_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
   allow_cleartext_peer:
     type: bool
     default: false

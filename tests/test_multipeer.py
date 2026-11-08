@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
 _, store, tools = _pkg.load()
+ROOT = _pkg.ROOT
 
 # Loopback http is allowed by the default cleartext policy, so every test teammate can use a local URL.
 URL = {"tyler": "http://127.0.0.1:8640", "riley": "http://127.0.0.1:8641", "ash": "http://127.0.0.1:8642",
@@ -115,6 +116,23 @@ class _Base(unittest.TestCase):
         store.DB_PATH_OVERRIDE = Path(self.tmp.name) / db
         store.SETTINGS_OVERRIDE = settings
         store.AUTO_SYNC = False
+
+
+class ManifestPeerSlotsTest(unittest.TestCase):
+    """The declared Settings fields and the code agree on the teammate slots (they must not drift)."""
+
+    def test_declared_secret_slots_match_the_code(self):
+        try:
+            import yaml
+        except Exception:  # noqa: BLE001 — PyYAML is test-only
+            self.skipTest("PyYAML not installed (pip install -r requirements-dev.txt)")
+        schema = yaml.safe_load((ROOT / "plugin.yaml").read_text(encoding="utf-8"))["config_schema"]
+        secret_envs = {spec["env"] for spec in schema.values() if spec.get("type") == "secret"}
+        self.assertEqual(secret_envs & set(store.PEER_KEY_ENVS), set(store.PEER_KEY_ENVS))
+        for name_field, url_field, _env in store._PEER_SLOTS:
+            self.assertIn(name_field, schema)
+            self.assertIn(url_field, schema)
+        self.assertEqual(schema["peers"]["type"], "list")
 
 
 class TeammateListTest(_Base):

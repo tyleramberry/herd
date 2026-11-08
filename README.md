@@ -50,7 +50,7 @@ Within a few seconds the pane header shows **Connected to brooklyn**, and each o
 Each teammate you link is one more gateway. You can link up to four teammates, so the mesh is five gateways at most.
 
 - Fill in **Teammate 2's name**, **gateway URL** and **Herd secret** (and 3 and 4 the same way) under **Settings → Plugins → Herd**. Each teammate has its own secret slot (`HERD_PEER_KEY`, then `HERD_PEER_KEY_2`, `_3`, `_4`), so one teammate's secret is never offered to another.
-- Or list them in `~/.hermes/config.yaml` under `plugins: entries: herd: settings:` as `peers: [{name: ash, url: "https://ash.tailnet-name.ts.net:8642", key_env: HERD_PEER_KEY_2}]`. Each entry names the secret slot its key lives in; a list entry without one is refused, never guessed.
+- Or give the whole list in the Settings field **Teammates (advanced)**, or in `~/.hermes/config.yaml` under `plugins: entries: herd: settings:` as `peers: [{name: ash, url: "https://ash.tailnet-name.ts.net:8642", key_env: HERD_PEER_KEY_2}]`. Each entry names the secret slot its key lives in; a list entry without one is refused, never guessed.
 - Names must be different, and so must URLs. A duplicate, or a fifth teammate, is refused and the pane says why.
 - Teammate 1 is the original single peer. A config that already linked one teammate keeps working unchanged, and its secret stays where it was.
 
