@@ -51,6 +51,20 @@ BATCH_LIMIT = 200
 SYNC_TIMEOUT_S = 10
 SECRET_ENV = "HERD_PEER_KEY"  # the PEER's Herd secret: what we present to their /herd/v1/*
 LOCAL_SECRET_ENV = "HERD_SECRET"  # THIS gateway's Herd secret: what a peer must present to ours
+# Mesh limits (spec §1): this gateway plus up to four teammates is five gateways; a channel holds up to
+# five people (gateways) plus any number of their agents.
+MAX_PEERS = 4
+MAX_HUMANS = 5
+# One declared secret slot per teammate (plugin.yaml config_schema). Slot 1 is the original single-peer
+# secret, so an upgraded install keeps the key it already stored. A teammate's key is only ever read from
+# its own slot, so one teammate's key is never offered to another.
+PEER_KEY_ENVS = (SECRET_ENV, "HERD_PEER_KEY_2", "HERD_PEER_KEY_3", "HERD_PEER_KEY_4")
+_PEER_SLOTS = (  # (name field, url field, key slot) — the numbered Settings fields for each teammate
+    ("peer_name", "peer_url", PEER_KEY_ENVS[0]),
+    ("peer_name_2", "peer_url_2", PEER_KEY_ENVS[1]),
+    ("peer_name_3", "peer_url_3", PEER_KEY_ENVS[2]),
+    ("peer_name_4", "peer_url_4", PEER_KEY_ENVS[3]),
+)
 # The 401 message our peer routes send when no local Herd secret is set. ``_describe_error`` looks
 # for this exact text in a peer's 401 body to tell "they have no secret" from "our secret is wrong".
 NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
@@ -99,6 +113,24 @@ class HerdError(Exception):
 # Storage
 # ---------------------------------------------------------------------------
 
+# One row per teammate, keyed by the teammate's name (spec §1.2). The URL is recorded so a changed address
+# resets that teammate's cursors instead of trusting cursors that belonged to another gateway.
+_PEER_STATE_COLS = ("push_seq", "pull_seq", "push_rseq", "pull_rseq", "remote_gateway_id", "remote_name",
+                    "last_attempt", "last_ok", "last_error")
+_PEER_STATE_DDL = """CREATE TABLE IF NOT EXISTS peer_state (
+    name TEXT PRIMARY KEY,
+    url TEXT NOT NULL DEFAULT '',
+    push_seq INTEGER NOT NULL DEFAULT 0,
+    pull_seq INTEGER NOT NULL DEFAULT 0,
+    push_rseq INTEGER NOT NULL DEFAULT 0,
+    pull_rseq INTEGER NOT NULL DEFAULT 0,
+    remote_gateway_id TEXT NOT NULL DEFAULT '',
+    remote_name TEXT NOT NULL DEFAULT '',
+    last_attempt TEXT NOT NULL DEFAULT '',
+    last_ok TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT ''
+);"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -133,19 +165,7 @@ CREATE TABLE IF NOT EXISTS participants (
     is_self INTEGER NOT NULL DEFAULT 0,
     last_seen TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS peer_state (
-    url TEXT PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    push_seq INTEGER NOT NULL DEFAULT 0,
-    pull_seq INTEGER NOT NULL DEFAULT 0,
-    push_rseq INTEGER NOT NULL DEFAULT 0,
-    pull_rseq INTEGER NOT NULL DEFAULT 0,
-    remote_gateway_id TEXT NOT NULL DEFAULT '',
-    remote_name TEXT NOT NULL DEFAULT '',
-    last_attempt TEXT NOT NULL DEFAULT '',
-    last_ok TEXT NOT NULL DEFAULT '',
-    last_error TEXT NOT NULL DEFAULT ''
-);
+""" + _PEER_STATE_DDL + """
 CREATE TABLE IF NOT EXISTS incoming_peers (
     gateway_id TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -242,6 +262,7 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         for col in ("push_rseq", "pull_rseq"):
             if col not in have:
                 conn.execute(f"ALTER TABLE peer_state ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+        _rekey_peer_state(conn)
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
             "VALUES (?, ?, '', 0, '[]', ?)",
@@ -254,11 +275,33 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         _initialized.add(key)
 
 
+def _rekey_peer_state(conn: sqlite3.Connection) -> None:
+    """Move a URL-keyed ``peer_state`` (the single-peer layout) to one row per teammate name.
+
+    The old rows keep their cursors. A row with no name yet is named after its URL, which is what the
+    old code used as its identity. Runs once: a table whose ``url`` column is not the primary key is
+    already the new layout.
+    """
+    pk = {r[1]: r[5] for r in conn.execute("PRAGMA table_info(peer_state)")}
+    if not pk or pk.get("url", 0) == 0:
+        return
+    conn.execute("ALTER TABLE peer_state RENAME TO peer_state_url_keyed")
+    conn.execute(_PEER_STATE_DDL)
+    conn.execute(
+        "INSERT OR IGNORE INTO peer_state(name, url, " + ", ".join(_PEER_STATE_COLS) + ") "
+        "SELECT CASE WHEN name = '' THEN url ELSE name END, url, " + ", ".join(_PEER_STATE_COLS) +
+        " FROM peer_state_url_keyed ORDER BY rowid")
+    conn.execute("DROP TABLE peer_state_url_keyed")
+
+
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
+    # IMMEDIATE: a write takes the write lock before its first statement, so a read-then-write never
+    # upgrades a stale snapshot (SQLITE_BUSY_SNAPSHOT, which ignores the busy timeout). Peer syncs now run
+    # in parallel threads (sync_all), so that race is reachable.
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False, isolation_level="IMMEDIATE")
     conn.row_factory = sqlite3.Row
     try:
         try:
@@ -1248,47 +1291,94 @@ def _peer_url_refusal(url: str) -> str:
     return CLEARTEXT_REFUSED
 
 
-def _peer_candidates() -> list[dict]:
-    """The configured peer(s) exactly as typed, before the cleartext policy is applied.
+def _peer_entries() -> list[dict]:
+    """Every configured teammate as ``{name, url, key_env}``, in order, before any policy check.
 
-    Non-http(s) URLs keep the historical behaviour: silently ignored (never a peer, never a status
-    entry). Returned as a list so the sync loop stays shape-stable; v1 links two gateways (N-1).
+    Two places name teammates, and both are read here:
+
+    * the numbered Settings fields ``peer_name``/``peer_url`` (teammate 1, the original single peer)
+      and ``peer_name_2``…``peer_name_4``/``peer_url_2``…``peer_url_4`` — what the Settings form edits;
+    * a ``peers`` list in config.yaml, ``[{name, url, key_env}]``, for anything the form does not show.
+
+    No rewrite of an existing single-peer config is needed: its URL and name are simply teammate 1.
     """
     cfg = settings()
-    url = str(cfg.get("peer_url") or "").strip().rstrip("/")
-    if not url or not url.lower().startswith(("http://", "https://")):
-        return []
-    return [{"name": _clean_name(cfg.get("peer_name"), "peer"), "url": url, "key": _secret(SECRET_ENV)}]
-
-
-def configured_peers() -> list[dict]:
-    """The peers Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
-
-    A peer whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
-    built for it (see ``refused_peers()`` for the visible, actionable reason). The key is a declared
-    ``config_schema`` secret read only through ``agent.secret_scope.get_secret`` (catalog rule 11).
-    Returned as a list so the sync loop stays shape-stable; v1 links exactly two gateways (N-1).
-    """
     out: list[dict] = []
-    seen: set[str] = set()
-    for p in _peer_candidates():
-        if _peer_url_refusal(p["url"]) or p["url"] in seen:
-            continue
-        seen.add(p["url"])
-        out.append(p)
+    for i, (name_field, url_field, key_env) in enumerate(_PEER_SLOTS):
+        url = str(cfg.get(url_field) or "").strip().rstrip("/")
+        if url:
+            out.append({"name": _clean_name(cfg.get(name_field), "peer" if i == 0 else f"peer-{i + 1}"),
+                        "url": url, "key_env": key_env})
+    listed = cfg.get("peers")
+    for item in listed if isinstance(listed, list) else []:
+        if isinstance(item, dict):
+            out.append({"name": _clean_name(item.get("name"), "peer"),
+                        "url": str(item.get("url") or "").strip().rstrip("/"),
+                        "key_env": str(item.get("key_env") or "").strip()})
     return out
 
 
+def _peer_table() -> list[dict]:
+    """``_peer_entries()`` with the structural rules applied; each entry gets ``reason`` ('' = usable).
+
+    A non-http(s) URL is dropped silently, as it always was (never a peer, never a status entry).
+    Refused with a reason, never repaired: a teammate whose key slot is unknown or already used, a URL or
+    name listed twice (peer state is keyed by name), and any teammate past the fourth.
+    """
+    table: list[dict] = []
+    names: set[str] = set()
+    urls: set[str] = set()
+    slots: set[str] = set()
+    for e in _peer_entries():
+        if not e["url"].lower().startswith(("http://", "https://")):
+            continue
+        accepted = sum(1 for t in table if not t["reason"])
+        reason = ""
+        if e["key_env"] not in PEER_KEY_ENVS:
+            reason = "Give this teammate one Herd secret slot: " + ", ".join(PEER_KEY_ENVS) + "."
+        elif e["key_env"] in slots:
+            reason = "Another teammate already uses this Herd secret slot."
+        elif e["url"] in urls:
+            reason = "This gateway URL is already listed for another teammate."
+        elif e["name"] in names:
+            reason = "Another teammate already has this name. Give each teammate a different name."
+        elif accepted >= MAX_PEERS:
+            reason = f"Herd links at most {MAX_PEERS} teammates (a mesh of {MAX_PEERS + 1} gateways)."
+        if not reason:
+            names.add(e["name"])
+            urls.add(e["url"])
+            slots.add(e["key_env"])
+        table.append({**e, "reason": reason})
+    return table
+
+
+def _peer_candidates() -> list[dict]:
+    """The usable teammates, each with its own key: ``{name, url, key}``. Before the cleartext policy."""
+    return [{"name": t["name"], "url": t["url"], "key": _secret(t["key_env"])}
+            for t in _peer_table() if not t["reason"]]
+
+
+def configured_peers() -> list[dict]:
+    """The teammates Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
+
+    A teammate whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
+    built for it (see ``refused_peers()`` for the visible, actionable reason). Keys are declared
+    ``config_schema`` secrets read only through ``agent.secret_scope.get_secret`` (catalog rule 11).
+    """
+    return [p for p in _peer_candidates() if not _peer_url_refusal(p["url"])]
+
+
 def refused_peers() -> list[dict]:
-    """Configured peer URLs Herd will not talk to, with the reason — for ``status()``/the pane.
+    """Configured teammates Herd will not talk to, with the reason — for ``status()``/the pane.
 
     Carries no secret: ``has_key`` is a boolean, never the key itself.
     """
     out = []
-    for p in _peer_candidates():
-        reason = _peer_url_refusal(p["url"])
+    for t in _peer_table():
+        reason = t["reason"] or _peer_url_refusal(t["url"])
         if reason:
-            out.append({"name": p["name"], "url": p["url"], "reason": reason, "has_key": bool(p["key"])})
+            out.append({"name": t["name"], "url": t["url"], "reason": reason,
+                        "has_key": bool(_secret(t["key_env"]))})
     return out
 
 
@@ -1329,9 +1419,21 @@ def _http_sync(peer: dict, body: dict) -> dict:
 
 
 def _peer_state(conn: sqlite3.Connection, peer: dict) -> sqlite3.Row:
-    conn.execute("INSERT OR IGNORE INTO peer_state(url, name) VALUES (?, ?)", (peer["url"], peer["name"]))
-    conn.execute("UPDATE peer_state SET name = ? WHERE url = ?", (peer["name"], peer["url"]))
-    return conn.execute("SELECT * FROM peer_state WHERE url = ?", (peer["url"],)).fetchone()
+    """This teammate's cursors and link health (one row per name). A changed URL resets the cursors:
+    they described the old address, and a re-sync is idempotent, so starting over is always safe."""
+    row = conn.execute("SELECT * FROM peer_state WHERE name = ?", (peer["name"],)).fetchone()
+    if row is None:
+        # A pre-rename row that never got a name is named after its URL (_rekey_peer_state): this teammate's.
+        legacy = conn.execute("SELECT name FROM peer_state WHERE url = ? AND name = ?",
+                              (peer["url"], peer["url"])).fetchone()
+        if legacy is not None:
+            conn.execute("UPDATE peer_state SET name = ? WHERE name = ?", (peer["name"], legacy["name"]))
+        else:
+            conn.execute("INSERT INTO peer_state(name, url) VALUES (?, ?)", (peer["name"], peer["url"]))
+    elif row["url"] != peer["url"]:
+        conn.execute("UPDATE peer_state SET url = ?, push_seq = 0, pull_seq = 0, push_rseq = 0, pull_rseq = 0, "
+                     "remote_gateway_id = '', remote_name = '' WHERE name = ?", (peer["url"], peer["name"]))
+    return conn.execute("SELECT * FROM peer_state WHERE name = ?", (peer["name"],)).fetchone()
 
 
 def _peer_reports_no_secret(exc: urllib.error.HTTPError) -> bool:
@@ -1367,7 +1469,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
     me = identity()
     with connect() as conn:
         _peer_state(conn, peer)
-        conn.execute("UPDATE peer_state SET last_attempt = ? WHERE url = ?", (_now(), peer["url"]))
+        conn.execute("UPDATE peer_state SET last_attempt = ? WHERE name = ?", (_now(), peer["name"]))
     pushed = pulled = rpushed = 0
     try:
         if not peer.get("key"):
@@ -1396,13 +1498,13 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
             with connect() as conn:
                 conn.execute(
                     "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, remote_gateway_id = ?, remote_name = ?, "
-                    "last_ok = ?, last_error = '' WHERE url = ?",
+                    "last_ok = ?, last_error = '' WHERE name = ?",
                     (out["next_seq"] if identified else st["push_seq"],
                      int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
                      out["next_rseq"] if identified else st["push_rseq"],
                      int(next_rpull) if isinstance(next_rpull, int) else st["pull_rseq"],
                      str(remote.get("gateway_id") or st["remote_gateway_id"])[:64],
-                     _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["url"]))
+                     _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["name"]))
             just_identified = not identified and bool(str(remote.get("gateway_id") or "").strip())
             if not just_identified and not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
                 break
@@ -1414,7 +1516,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                    else str(exc) if isinstance(exc, PeerRefusedError)
                    else _describe_error(exc))
         with connect() as conn:
-            conn.execute("UPDATE peer_state SET last_error = ? WHERE url = ?", (message, peer["url"]))
+            conn.execute("UPDATE peer_state SET last_error = ? WHERE name = ?", (message, peer["name"]))
         return {"name": peer["name"], "url": peer["url"], "ok": False, "error": message,
                 "pushed": pushed, "pulled": pulled}
 
@@ -1529,15 +1631,15 @@ def status() -> dict:
     me = identity()
     peers = configured_peers()
     with connect() as conn:
-        states = {r["url"]: dict(r) for r in conn.execute("SELECT * FROM peer_state").fetchall()}
+        states = {r["name"]: dict(r) for r in conn.execute("SELECT * FROM peer_state").fetchall()}
         inc_rows = [dict(r) for r in conn.execute(
             "SELECT * FROM incoming_peers ORDER BY last_seen DESC").fetchall()]
-    linked_ids = {states.get(p["url"], {}).get("remote_gateway_id") or "" for p in peers} - {""}
+    linked_ids = {states.get(p["name"], {}).get("remote_gateway_id") or "" for p in peers} - {""}
     incoming = [{"gateway_id": r["gateway_id"], "name": r["name"], "last_seen": r["last_seen"],
                  "syncs": r["syncs"], "linked_back": r["gateway_id"] in linked_ids} for r in inc_rows]
     out = []
     for p in peers:
-        st = states.get(p["url"], {})
+        st = states.get(p["name"], {})
         out.append({
             "name": p["name"], "url": p["url"], "has_key": bool(p["key"]),
             "remote_name": st.get("remote_name") or "", "last_ok": st.get("last_ok") or "",
