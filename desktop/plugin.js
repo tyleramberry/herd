@@ -586,30 +586,35 @@ function threadTitle(channel, selfId) {
   return channel.is_dm ? dmLabel(channel, selfId) : '# ' + channel.name
 }
 
-function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
+// The root message and its replies, oldest first. Shared by the side panel (route) and the in-column
+// thread view (compact pane), so both read the same thread state through the same query.
+function ThreadBody({ rootId }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.thread(rootId),
     queryFn: () => api('/messages/' + encodeURIComponent(rootId) + '/thread')
   })
   const replies = data && Array.isArray(data.replies) ? data.replies : []
-  let body
   if (isLoading) {
-    body = jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
-  } else if (isError || !data || !data.parent) {
-    body = jsx(EmptyState, { title: "Couldn't load this thread.", description: 'Herd will retry in a moment.' })
-  } else {
-    body = jsxs('div', {
-      className: 'flex flex-col py-1',
-      children: [
-        jsx(MessageRow, { message: data.parent }, data.parent.id),
-        jsx('div', { className: 'mx-3 my-1 border-t border-(--ui-stroke-secondary)' }),
-        replies.length === 0
-          ? jsx('div', { className: 'px-3 py-1.5 text-xs text-(--ui-text-tertiary)', children: 'No replies yet.' })
-          : null,
-        ...replies.map(m => jsx(MessageRow, { message: m }, m.id))
-      ]
-    })
+    return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
   }
+  if (isError || !data || !data.parent) {
+    return jsx(EmptyState, { title: "Couldn't load this thread.", description: 'Herd will retry in a moment.' })
+  }
+  return jsxs('div', {
+    className: 'flex flex-col py-1',
+    children: [
+      jsx(MessageRow, { message: data.parent }, data.parent.id),
+      jsx('div', { className: 'mx-3 my-1 border-t border-(--ui-stroke-secondary)' }),
+      replies.length === 0
+        ? jsx('div', { className: 'px-3 py-1.5 text-xs text-(--ui-text-tertiary)', children: 'No replies yet.' })
+        : null,
+      ...replies.map(m => jsx(MessageRow, { message: m }, m.id))
+    ]
+  })
+}
+
+// Compact pane: the thread replaces the message column (the 340px pane is too narrow for a side panel).
+function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
   return jsxs('div', {
     className: 'flex min-h-0 min-w-0 flex-1 flex-col',
     children: [
@@ -632,8 +637,52 @@ function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
         ]
       }),
       jsx(WorkLine, { status }),
-      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
+      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
       jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
+    ]
+  })
+}
+
+// Route: a right-hand panel beside the channel column (spec §2). Esc closes it. The composer takes focus when
+// the panel opens, so Esc works straight away; a composer that consumed the key (the @-menu) keeps it.
+function ThreadPanel({ channel, rootId, selfId, $thread }) {
+  const close = () => $thread.set(null)
+  return jsxs('section', {
+    role: 'region',
+    'aria-label': 'Thread',
+    tabIndex: -1,
+    onKeyDown: e => {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        e.preventDefault()
+        close()
+      }
+    },
+    className:
+      'flex min-h-0 w-[40%] min-w-64 max-w-[45%] shrink-0 flex-col border-l border-(--ui-stroke-secondary) bg-(--ui-bg-primary) outline-none',
+    children: [
+      jsxs('div', {
+        className: 'flex items-center justify-between gap-3 border-b border-(--ui-stroke-secondary) px-3 py-2',
+        children: [
+          jsxs('div', {
+            className: 'flex min-w-0 items-baseline gap-2',
+            children: [
+              jsx('span', { className: 'shrink-0 text-sm font-medium', children: 'Thread' }),
+              jsx('span', { className: 'truncate text-xs text-(--ui-text-tertiary)', children: threadTitle(channel, selfId) })
+            ]
+          }),
+          jsx(Button, {
+            type: 'button',
+            size: 'xs',
+            variant: 'ghost',
+            'aria-label': 'Close thread',
+            title: 'Close thread (Esc)',
+            onClick: close,
+            children: jsx(Codicon, { name: 'close', size: '0.8rem' })
+          })
+        ]
+      }),
+      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
+      jsx(Composer, { channel, compact: false, placeholderName: 'this thread', threadParentId: rootId, autoFocus: true })
     ]
   })
 }
@@ -733,7 +782,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   })
   const messages = Array.isArray(data) ? data : []
   const title = threadTitle(channel, selfId)
-  if (openThreadId) {
+  if (openThreadId && compact) {
     return jsx(ThreadView, { channel, rootId: openThreadId, selfId, status, $thread, compact }, openThreadId)
   }
   const openThread = id => $thread.set(id)
@@ -792,7 +841,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   })
 }
 
-function Composer({ channel, compact, placeholderName, threadParentId }) {
+function Composer({ channel, compact, placeholderName, threadParentId, autoFocus }) {
   const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
   // Each composer keys its own autocomplete, so a dropdown opened in the pane can
   // never render (or mangle a draft) in the page — or the other way round.
@@ -833,6 +882,7 @@ function Composer({ channel, compact, placeholderName, threadParentId }) {
       jsx(Textarea, {
         name: 'content',
         rows: 2,
+        autoFocus: Boolean(autoFocus),
         placeholder: threadParentId ? 'Reply in thread' : 'Message ' + placeholderName,
         'aria-label': 'Message',
         onChange: e => $mention.set(mentionAtCaret(e.currentTarget)),
@@ -924,6 +974,7 @@ function HerdView({ compact }) {
   const $menu = compact ? plusMenu.pane : plusMenu.page
   const $thread = compact ? thread.pane : thread.page
   const selectedId = useValue($selected)
+  const threadId = useValue($thread)
   const statusQuery = useStatus()
   const status = statusQuery.data
   const { data, isLoading, isError } = useQuery({ queryKey: KEYS.channels, queryFn: () => api('/channels') })
@@ -943,6 +994,11 @@ function HerdView({ compact }) {
   }
   const selected =
     channels.find(c => c.id === selectedId) || channels.find(c => c.id === 'general') || channels[0] || null
+  // The route's thread panel is a column of its own, so the channel column and the messages stay in view.
+  const panel =
+    !compact && threadId && selected
+      ? jsx(ThreadPanel, { channel: selected, rootId: threadId, selfId, $thread }, threadId)
+      : null
 
   return jsxs('div', {
     className: 'flex h-full min-h-0 flex-col',
@@ -965,7 +1021,8 @@ function HerdView({ compact }) {
           }),
           selected
             ? jsx(MessageView, { channel: selected, selfId, status, $thread, $selected, compact }, selected.id)
-            : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' })
+            : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' }),
+          panel
         ]
       })
     ]
