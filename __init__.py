@@ -1,9 +1,10 @@
 """Herd — multiplayer Hermes. Agent-side registration.
 
 * Four agent tools (``herd_list_channels``, ``herd_post``, ``herd_read_channel``, ``herd_set_status``).
-* The peer endpoint ``POST /herd/v1/sync`` on this gateway's ``api_server`` (the same server and
-  ``API_SERVER_KEY`` a teammate's Hermes already uses to reach this one), plus a background
-  sync loop that keeps this gateway and its configured peer converged.
+* The peer endpoints ``POST /herd/v1/sync`` and ``GET /herd/v1/ping`` on this gateway's
+  ``api_server``, authenticated with Herd's OWN credential: this gateway's Herd secret
+  (``HERD_SECRET``), never the gateway-wide ``API_SERVER_KEY``. Plus a background sync loop that
+  keeps this gateway and its configured peer converged.
 """
 
 from __future__ import annotations
@@ -54,13 +55,28 @@ def _sync_pass(store) -> None:
 
 
 def _wire_api_server(app, adapter) -> None:
-    """Add Herd's peer route to the api_server aiohttp app (called at connect, before freeze)."""
+    """Add Herd's peer route to the api_server aiohttp app (called at connect, before freeze).
+
+    ``adapter`` is intentionally unused: the platform handler factory passes it, but Herd no
+    longer borrows the adapter's gateway-wide API_SERVER_KEY check — it checks its own secret.
+    """
     from aiohttp import web
 
+    def _denied(request: "web.Request"):
+        """Herd's own Bearer check: the request must carry THIS gateway's Herd secret."""
+        store = _store()
+        if store.inbound_authorized(request.headers.get("Authorization")):
+            return None
+        message = "Invalid Herd secret (HERD_SECRET)" if store.herd_secret_set() else store.NO_LOCAL_SECRET
+        # Same shape as the api_server adapter's 401: the desktop pane keys off error.code.
+        return web.json_response(
+            {"error": {"message": message, "type": "gateway_auth_error",
+                       "code": "gateway_auth_failed"}}, status=401)
+
     async def herd_sync(request: "web.Request") -> "web.Response":
-        # The api_server's own Bearer API_SERVER_KEY check: only a gateway that holds this
-        # gateway's key (the linked peer) can read or write Herd data here.
-        denied = adapter._check_auth(request)
+        # Only a gateway holding this gateway's Herd secret (the linked peer) can read or write
+        # Herd data here. The gateway API_SERVER_KEY is not accepted.
+        denied = _denied(request)
         if denied is not None:
             return denied
         try:
@@ -78,7 +94,7 @@ def _wire_api_server(app, adapter) -> None:
         return web.json_response(result)
 
     async def herd_ping(request: "web.Request") -> "web.Response":
-        denied = adapter._check_auth(request)
+        denied = _denied(request)
         if denied is not None:
             return denied
         store = _store()

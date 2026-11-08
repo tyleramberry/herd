@@ -28,12 +28,23 @@ config_schema:
     type: str
     default: ""
     label: Teammate's gateway URL
-    description: Their Hermes API server address, e.g. http://brooklyn-mac.local:8642
+    description: "Their Hermes API server address, e.g. https://brooklyn-mac.tailnet-name.ts.net:8642 — prefer https:// (or your VPN/tailnet address). A plain http:// URL is accepted only for this machine (127.0.0.1, localhost, ::1)."
+  herd_secret:
+    type: secret
+    env: HERD_SECRET
+    label: This gateway's Herd secret
+    description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Herd access only, never your gateway's API key.
   peer_key:
     type: secret
     env: HERD_PEER_KEY
-    label: Teammate's API key
-    description: The API_SERVER_KEY of their gateway. Stored in Hermes's secret store, never in config.yaml.
+    label: Teammate's Herd secret
+    description: Your teammate's Herd secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
+  allow_cleartext_peer:
+    type: bool
+    default: false
+    env: HERD_ALLOW_CLEARTEXT
+    label: Send the peer key in cleartext (unsafe)
+    description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."
   mention_wake:
     type: bool
     default: false

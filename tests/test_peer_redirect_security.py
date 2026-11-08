@@ -84,7 +84,8 @@ class PeerRedirectSecurity(unittest.TestCase):
         source = (Path(__file__).resolve().parent.parent / "dashboard" / "herd_store.py").read_text()
         self.assertNotIn("urllib_security", source)
         self.assertNotIn("urllib.request.urlopen", source)
-        self.assertIn("build_opener(_NoRedirect()).open", source)
+        self.assertIn("build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open", source)
+        self.assertNotIn("build_opener(_NoRedirect()).open", source)  # the pre-fix form must be gone
 
 
 if __name__ == "__main__":

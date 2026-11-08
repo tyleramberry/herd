@@ -14,8 +14,8 @@ Topology (one machine, two processes, four loopback ports, nothing shared):
       <tmp>/a/herd.db                          <tmp>/b/herd.db
 
 Each side runs the plugin's own code: ``herd._wire_api_server`` (the peer route + the real 3 s
-background sync loop, behind the same ``Bearer <API_SERVER_KEY>`` check the Hermes api_server
-adapter performs) and ``dashboard/plugin_api.py`` (the FastAPI backend the desktop half calls).
+background sync loop, behind Herd's OWN ``Bearer <HERD_SECRET>`` check — the gateway's Herd
+secret, never its API_SERVER_KEY, which is refused on /herd/v1/*) and ``dashboard/plugin_api.py`` (the FastAPI backend the desktop half calls).
 B is spawned first with no peer (the README's one-sided link); A links to B.
 
 One harness-only route, ``POST /harness/agent-post`` on each gateway's peer app (never in plugin
@@ -62,6 +62,10 @@ CHANNEL = "general"
 NAME_A, NAME_B = "q11-a", "q11-b"
 KEY_A = "q11-a-api-server-key"
 KEY_B = "q11-b-api-server-key"
+# Each gateway's own Herd secret (HERD_SECRET): what a peer must present on /herd/v1/*. The
+# API_SERVER_KEYs above only guard StubAdapter / the harness-only agent-post route.
+SECRET_A = "q11-a-herd-secret"
+SECRET_B = "q11-b-herd-secret"
 ARRIVAL_TIMEOUT_S = 10.0
 S16_TASK_IDS = ("t_16d10f75", "t_2f22ab63", "t_810b8329")
 FALLBACK_OLD_REF = "a20f742^"
@@ -145,7 +149,8 @@ def gateway_main() -> int:
         "display_name": os.environ["HERD_GW_NAME"],
         "peer_name": os.environ.get("HERD_GW_PEER_NAME", ""),
         "peer_url": os.environ.get("HERD_GW_PEER_URL", ""),
-        "__secrets__": {"HERD_PEER_KEY": os.environ.get("HERD_GW_PEER_KEY", "")},
+        "__secrets__": {"HERD_PEER_KEY": os.environ.get("HERD_GW_PEER_KEY", ""),
+                        "HERD_SECRET": os.environ.get("HERD_GW_SECRET", "")},
     }
     store.AUTO_SYNC = True
     own_key = os.environ["HERD_GW_KEY"]
@@ -222,12 +227,13 @@ class Run:
         self.logs: list = []
 
     def spawn(self, name: str, short: str, own_key: str, peer_name: str, peer_url: str,
-              peer_key: str) -> dict:
+              peer_key: str, own_secret: str) -> dict:
         home = self.tmp / short
         peer_port, api_port = free_port(), free_port()
         env = dict(os.environ,
                    HERD_GW_HOME=str(home), HERD_GW_NAME=name, HERD_GW_PEER_NAME=peer_name,
                    HERD_GW_PEER_URL=peer_url, HERD_GW_PEER_KEY=peer_key, HERD_GW_KEY=own_key,
+                   HERD_GW_SECRET=own_secret,
                    HERD_GW_PEER_PORT=str(peer_port), HERD_GW_API_PORT=str(api_port),
                    # Isolate each gateway from the operator's real ~/.hermes.
                    HERMES_HOME=str(home / "hermes-home"),
@@ -239,7 +245,7 @@ class Run:
         self.procs.append(proc)
         return {"name": name, "short": short, "proc": proc, "log": log, "home": home,
                 "peer": f"http://127.0.0.1:{peer_port}", "api": f"http://127.0.0.1:{api_port}",
-                "key": own_key, "peer_key": peer_key, "gateway_id": ""}
+                "key": own_key, "secret": own_secret, "peer_key": peer_key, "gateway_id": ""}
 
     def stop_procs(self) -> None:
         for proc in self.procs:
@@ -266,8 +272,8 @@ class Run:
 
 
 def ping(gw: dict) -> tuple[int, dict]:
-    # Calling a gateway's OWN peer route needs its OWN API_SERVER_KEY.
-    status, body = http("GET", gw["peer"] + "/herd/v1/ping", key=gw["key"])
+    # Calling a gateway's OWN peer route needs its OWN Herd secret (not its API_SERVER_KEY).
+    status, body = http("GET", gw["peer"] + "/herd/v1/ping", key=gw["secret"])
     return status, (body or {})
 
 
@@ -404,7 +410,7 @@ def old_peer_check(a: dict, ref: str, task_ids: list[str]) -> None:
         return
 
     # Body from A's REAL export: A's own peer route, A's own key, empty request body.
-    status, export = http("POST", a["peer"] + PEER_PATH, {}, key=a["key"])
+    status, export = http("POST", a["peer"] + PEER_PATH, {}, key=a["secret"])
     export = export or {}
     tied = [m for m in (export.get("messages") or []) if m.get("id") in task_ids]
     body = {"v": 2, "from": export.get("from"), "channels": export.get("channels"),
@@ -512,12 +518,12 @@ def main() -> int:
         print(f"  root:    {ROOT}")
         print(f"  workdir: {run.tmp}")
         # B first (no peer configured: the README's one-sided link), then A linked to B.
-        b = run.spawn(NAME_B, "b", KEY_B, "", "", "")
-        a = run.spawn(NAME_A, "a", KEY_A, NAME_B, b["peer"], KEY_B)
+        b = run.spawn(NAME_B, "b", KEY_B, "", "", "", own_secret=SECRET_B)
+        a = run.spawn(NAME_A, "a", KEY_A, NAME_B, b["peer"], SECRET_B, own_secret=SECRET_A)
         if not (wait_up(a["api"] + API_PREFIX + "/status", "", 40)
                 and wait_up(b["api"] + API_PREFIX + "/status", "", 40)
-                and wait_up(a["peer"] + "/herd/v1/ping", a["key"], 20)
-                and wait_up(b["peer"] + "/herd/v1/ping", b["key"], 20)):
+                and wait_up(a["peer"] + "/herd/v1/ping", a["secret"], 20)
+                and wait_up(b["peer"] + "/herd/v1/ping", b["secret"], 20)):
             print("  gateway failed to start; log tails:")
             for gw in (a, b):
                 gw["log"].flush()
@@ -541,6 +547,14 @@ def main() -> int:
               f"A.gateway_id={a['gateway_id']} B.gateway_id={b['gateway_id']} v={ping_a.get('v')}")
         check("ENV.settings", (ping_a.get("from") or {}).get("display_name") == NAME_A,
               f"A ping display_name={(ping_a.get('from') or {}).get('display_name')!r} (spawned as {NAME_A!r})")
+        # S-20: the gateway's API_SERVER_KEY must NOT open Herd's peer routes (only its Herd secret does).
+        ka, kbody_a = http("GET", a["peer"] + "/herd/v1/ping", key=a["key"])
+        kb, kbody_b = http("GET", b["peer"] + "/herd/v1/ping", key=b["key"])
+        codes = [((body or {}).get("error") or {}).get("code") if isinstance((body or {}).get("error"), dict)
+                 else None for body in (kbody_a, kbody_b)]
+        check("ENV.gateway-key-refused", ka == 401 and kb == 401
+              and codes == ["gateway_auth_failed", "gateway_auth_failed"],
+              f"/herd/v1/ping with API_SERVER_KEY: A={ka} B={kb}; error.code={codes}")
 
         # --- TC-2.1 A->B ---------------------------------------------------------
         print("\n-- TC-2.1  A -> B (human, A's composer route; read on B) --")
