@@ -21,8 +21,8 @@ import _pkg  # noqa: E402
 _, store, tools = _pkg.load()
 
 # Loopback http is allowed by the default cleartext policy, so every test teammate can use a local URL.
-URL = {"riley": "http://127.0.0.1:8641", "ash": "http://127.0.0.1:8642", "kai": "http://127.0.0.1:8643",
-       "noor": "http://127.0.0.1:8644"}
+URL = {"tyler": "http://127.0.0.1:8640", "riley": "http://127.0.0.1:8641", "ash": "http://127.0.0.1:8642",
+       "kai": "http://127.0.0.1:8643", "noor": "http://127.0.0.1:8644"}
 
 
 def _roundtrip(gw, body):
@@ -70,6 +70,10 @@ class Mesh:
     def sync(self, name):
         with self.gw(name):
             return store.sync_all()
+
+    def gid(self, name):
+        with self.gw(name):
+            return store.identity()["gateway_id"]
 
     def texts(self, name, channel="general"):
         with self.gw(name):
@@ -264,6 +268,283 @@ class PeerStateMigrationTest(_Base):
             store._peer_state(conn, {"name": "riley", "url": "http://127.0.0.1:8699"})
             row = conn.execute("SELECT url, push_seq, remote_gateway_id FROM peer_state WHERE name = 'riley'").fetchone()
         self.assertEqual(tuple(row), ("http://127.0.0.1:8699", 0, ""))
+
+
+
+class MeshSyncTest(_Base):
+    """Spec §1.3-1.5: fan-out to every teammate, no echo to the author, convergence, per-teammate isolation."""
+
+    @staticmethod
+    def star(hub, leaves):
+        """``hub`` links to every leaf; a leaf links only to the hub (the usual case: Tyler in the middle)."""
+        links = {hub: list(leaves)}
+        for leaf in leaves:
+            links[leaf] = [hub]
+        return links
+
+    def build(self, names, links):
+        self.mesh = Mesh(Path(self.tmp.name), names, links)
+        self.addCleanup(self.mesh.close)
+        return self.mesh
+
+    # --- fan-out ------------------------------------------------------------------------------
+
+    def test_three_gateways_converge_through_the_hub(self):
+        m = self.build(["tyler", "riley", "ash"], self.star("tyler", ["riley", "ash"]))
+        with m.gw("riley"):
+            store.post_message("general", "from riley")
+        m.sync("riley")                       # riley -> tyler
+        self.assertEqual(m.texts("tyler"), ["from riley"])
+        m.sync("tyler")                       # tyler forwards riley's message to ash (not back to riley)
+        self.assertEqual(m.texts("ash"), ["from riley"])
+        with m.gw("ash"):
+            store.post_message("general", "from ash")
+        m.sync("ash")
+        m.sync("tyler")
+        m.sync("riley")
+        for name in ("tyler", "riley", "ash"):
+            self.assertEqual(m.texts(name), ["from ash", "from riley"], name)
+
+    def test_five_gateways_fan_out_from_the_hub_and_back(self):
+        leaves = ["riley", "ash", "kai", "noor"]
+        names = ["tyler", *leaves]
+        m = self.build(names, self.star("tyler", leaves))
+        with m.gw("tyler"):
+            store.post_message("general", "hello mesh")
+        m.sync("tyler")
+        for leaf in leaves:
+            with m.gw(leaf):
+                store.post_message("general", f"hi from {leaf}")
+            m.sync(leaf)
+        m.sync("tyler")
+        for leaf in leaves:
+            m.sync(leaf)
+        expected = sorted(["hello mesh", *(f"hi from {leaf}" for leaf in leaves)])
+        for name in names:
+            self.assertEqual(m.texts(name), expected, name)
+
+    def test_a_gateway_with_no_link_gets_nothing_and_breaks_nothing(self):
+        # ash is configured with nobody; the rest of the mesh still converges.
+        links = {"tyler": ["riley"], "riley": ["tyler"], "ash": []}
+        m = self.build(["tyler", "riley", "ash"], links)
+        with m.gw("tyler"):
+            store.post_message("general", "two of us")
+        m.sync("tyler")
+        m.sync("riley")
+        self.assertEqual(m.texts("riley"), ["two of us"])
+        self.assertEqual(m.texts("ash"), [])
+
+    # --- no echo ------------------------------------------------------------------------------
+
+    def test_inbound_message_is_never_sent_back_to_its_author(self):
+        # riley's message reaches tyler through ash (ash has no direct link to tyler's riley pass),
+        # then tyler must forward it to ash but never back to riley, its author.
+        links = {"tyler": ["riley", "ash"], "riley": ["ash"], "ash": ["riley", "tyler"]}
+        m = self.build(["tyler", "riley", "ash"], links)
+        with m.gw("riley"):
+            store.post_message("general", "riley's own words")
+        m.sync("riley")      # ash now holds riley's message
+        m.sync("tyler")      # tyler pulls it from ash
+        m.sync("riley")
+        m.sync("tyler")
+        riley_gid = m.gid("riley")
+        to_riley = [body for (_sender, url, _key, body) in m.calls if m.by_url[url] == "riley"]
+        self.assertTrue(to_riley)
+        for body in to_riley:
+            self.assertNotIn(riley_gid, {row["gateway_id"] for row in body["messages"]})
+        self.assertEqual(m.texts("tyler"), ["riley's own words"])
+
+    def test_first_request_to_a_new_teammate_carries_no_rows(self):
+        # Until a teammate identifies itself, our rows (which may include its own) are not sent to it.
+        m = self.build(["tyler", "riley", "ash"], self.star("tyler", ["riley", "ash"]))
+        with m.gw("ash"):
+            store.post_message("general", "relayed")
+        m.sync("ash")
+        m.sync("tyler")                       # tyler now holds ash's row; riley is not identified yet
+        first_to_riley = next(body for (_s, url, _k, body) in m.calls if m.by_url[url] == "riley")
+        self.assertEqual(first_to_riley["messages"], [])
+        # The same pass identifies riley in round one and carries the window in round two: ash's row goes
+        # out, riley's own rows never do (riley has none here, and origin exclusion would drop them anyway).
+        self.assertEqual(m.texts("riley"), ["relayed"])
+        riley_rows = [row for row in m.rows("riley") if row[3] == m.gid("riley")]
+        self.assertEqual(riley_rows, [])
+
+    # --- convergence ----------------------------------------------------------------------------
+
+    def test_simultaneous_posts_converge_to_the_same_rows_everywhere(self):
+        names = ["tyler", "riley", "ash"]
+        m = self.build(names, self.star("tyler", ["riley", "ash"]))
+        # Everyone posts before anyone syncs: the two leaves write at the same moment as the hub.
+        for name in names:
+            with m.gw(name):
+                for i in range(3):
+                    store.post_message("general", f"{name}-{i}")
+        for _ in range(3):
+            for name in names:
+                m.sync(name)
+        reference = m.rows("tyler")
+        self.assertEqual(len(reference), 9)
+        for name in names:
+            self.assertEqual(m.rows(name), reference, name)
+
+    def test_the_same_message_delivered_by_two_paths_is_one_row(self):
+        m = self.build(["tyler", "riley", "ash"], self.star("tyler", ["riley", "ash"]))
+        with m.gw("riley"):
+            store.post_message("general", "once", message_id="00000000-0000-4000-8000-000000000001")
+        for _ in range(2):
+            m.sync("riley")
+            m.sync("ash")
+            m.sync("tyler")
+        for name in ("tyler", "riley", "ash"):
+            self.assertEqual(m.texts(name), ["once"], name)
+
+    # --- isolation ------------------------------------------------------------------------------
+
+    def test_one_failing_teammate_does_not_stop_the_others(self):
+        m = self.build(["tyler", "riley", "ash", "kai"], self.star("tyler", ["riley", "ash", "kai"]))
+        m.down.add("riley")                   # riley's address refuses every request
+        with m.gw("tyler"):
+            store.post_message("general", "still goes out")
+            results = store.sync_all()
+            st = store.status()
+        by_name = {r["name"]: r for r in results}
+        self.assertFalse(by_name["riley"]["ok"])
+        self.assertTrue(by_name["ash"]["ok"])
+        self.assertTrue(by_name["kai"]["ok"])
+        peers = {p["name"]: p for p in st["peers"]}
+        self.assertFalse(peers["riley"]["connected"])
+        self.assertTrue(peers["ash"]["connected"])
+        self.assertTrue(peers["kai"]["connected"])
+        self.assertEqual(m.texts("ash"), ["still goes out"])
+        self.assertEqual(m.texts("kai"), ["still goes out"])
+        self.assertEqual(m.texts("riley"), [])
+        # riley's own cursor did not move, so it catches up once it is back.
+        m.down.clear()
+        m.sync("tyler")
+        self.assertEqual(m.texts("riley"), ["still goes out"])
+
+    def test_a_teammate_that_throws_is_one_error_line_not_a_crash(self):
+        m = self.build(["tyler", "riley", "ash"], self.star("tyler", ["riley", "ash"]))
+        real = store.TRANSPORT
+
+        def boom_for_riley(peer, body):
+            if peer["name"] == "riley":
+                raise RuntimeError("internal detail that must not reach the pane")
+            return real(peer, body)
+
+        store.TRANSPORT = boom_for_riley
+        try:
+            with m.gw("tyler"):
+                store.post_message("general", "x")
+                results = store.sync_all()
+                st = store.status()
+        finally:
+            store.TRANSPORT = real
+        by_name = {r["name"]: r for r in results}
+        self.assertEqual(by_name["riley"]["error"], "Sync failed.")
+        self.assertNotIn("internal detail", json.dumps(st))
+        self.assertTrue(by_name["ash"]["ok"])
+
+    def test_each_request_carries_only_its_own_teammates_key(self):
+        m = self.build(["tyler", "riley", "ash", "kai"], self.star("tyler", ["riley", "ash", "kai"]))
+        with m.gw("tyler"):
+            store.post_message("general", "keys")
+        m.sync("tyler")
+        self.assertTrue(m.calls)
+        for (_sender, url, key, _body) in m.calls:
+            self.assertEqual(key, "k-" + m.by_url[url])
+
+    def test_status_lists_every_teammate_and_never_a_key(self):
+        m = self.build(["tyler", "riley", "ash", "kai", "noor"], self.star("tyler", ["riley", "ash", "kai", "noor"]))
+        m.sync("tyler")
+        with m.gw("tyler"):
+            st = store.status()
+        self.assertEqual(sorted(p["name"] for p in st["peers"]), ["ash", "kai", "noor", "riley"])
+        self.assertTrue(all(p["connected"] for p in st["peers"]))
+        blob = json.dumps(st)
+        for name in ("riley", "ash", "kai", "noor"):
+            self.assertNotIn("k-" + name, blob)
+
+
+class ParallelIsolationTest(unittest.TestCase):
+    """Production path (no transport seam): a hanging teammate costs its own timeout, not everyone else's."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._saved = (store.AUTO_SYNC, store.TRANSPORT, store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE,
+                       store.SYNC_TIMEOUT_S)
+        self.fast_at = None
+        self.started = time.time()
+        test = self
+
+        class Slow(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                time.sleep(1.5)  # longer than the timeout below: this teammate hangs
+                self.send_response(503)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        class Fast(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                test.fast_at = time.time() - test.started
+                body = json.dumps({"v": 2, "from": {"gateway_id": "g-fast", "display_name": "fast"},
+                                   "channels": [], "messages": [], "reactions": [], "next_seq": 0,
+                                   "more": False, "next_rseq": 0, "rmore": False}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.servers = []
+        for handler in (Slow, Fast):
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            self.servers.append(srv)
+        slow, fast = self.servers
+        self.urls = {"slow": f"http://127.0.0.1:{slow.server_address[1]}",
+                     "fast": f"http://127.0.0.1:{fast.server_address[1]}"}
+        store.TRANSPORT = None
+        store.AUTO_SYNC = False
+        store.SYNC_TIMEOUT_S = 0.6
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "a.db"
+        # The hanging teammate is listed first: a sequential pass would make the fast one wait for it.
+        store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {"HERD_PEER_KEY": "k-slow",
+                                                                             "HERD_PEER_KEY_2": "k-fast"},
+                                   "peers": [{"name": "slow", "url": self.urls["slow"], "key_env": "HERD_PEER_KEY"},
+                                             {"name": "fast", "url": self.urls["fast"],
+                                              "key_env": "HERD_PEER_KEY_2"}]}
+
+    def tearDown(self):
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
+        (store.AUTO_SYNC, store.TRANSPORT, store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE,
+         store.SYNC_TIMEOUT_S) = self._saved
+        self.tmp.cleanup()
+
+    def test_fast_teammate_is_not_held_up_by_a_hanging_one(self):
+        results = store.sync_all()
+        by_name = {r["name"]: r for r in results}
+        self.assertFalse(by_name["slow"]["ok"])
+        self.assertTrue(by_name["fast"]["ok"], by_name["fast"])
+        self.assertIsNotNone(self.fast_at)
+        self.assertLess(self.fast_at, 0.5, "the fast teammate waited for the hanging one")
+
+
+class FiveGatewayStatusTest(_Base):
+    def test_status_reports_the_count_of_linked_teammates(self):
+        self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
+                            "__secrets__": {"HERD_PEER_KEY": "k"}})
+        self.assertEqual(len(store.status()["peers"]), 1)
 
 
 if __name__ == "__main__":

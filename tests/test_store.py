@@ -662,14 +662,23 @@ class SyncedIdentityTest(unittest.TestCase):
         self.assertIsNone(store.get_message("spoof-2"))
         self.assertEqual(store.list_messages("general"), [])
 
-    def test_message_claiming_a_third_gateway_is_dropped_and_counted(self):
+    def test_relayed_message_keeps_its_origin_gateway(self):
+        # Spec §1.3: a linked gateway relays rows written on other mesh members. The row keeps its origin id
+        # and the origin's declared name; the relayer is not credited with the row.
         counts = {}
-        n = store.ingest(self.peer([self.msg("third-1", "some-other-gw"), self.msg("own-1", "peer-gw")]),
-                         stats=counts)
-        self.assertEqual(n, 1)
-        self.assertEqual(counts, {"accepted": 1, "dropped": 1})
-        self.assertIsNone(store.get_message("third-1"))
-        self.assertEqual([m["id"] for m in store.list_messages("general")], ["own-1"])
+        n = store.ingest(self.peer([self.msg("third-1", "some-other-gw", gateway_name="Kai"),
+                                    self.msg("own-1", "peer-gw")]), stats=counts)
+        self.assertEqual(n, 2)
+        self.assertEqual(counts, {"accepted": 2, "dropped": 0})
+        third = store.get_message("third-1")
+        self.assertEqual((third["gateway_id"], third["gateway_name"]), ("some-other-gw", "Kai"))
+        self.assertEqual(store.get_message("own-1")["gateway_name"], "Brooklyn")
+
+    def test_relayed_message_with_a_malformed_origin_id_is_dropped(self):
+        counts = {}
+        store.ingest(self.peer([self.msg("bad-1", "not an id!"), self.msg("bad-2", "has/slash")]), stats=counts)
+        self.assertEqual(counts, {"accepted": 0, "dropped": 2})
+        self.assertIsNone(store.get_message("bad-1"))
 
     def test_reaction_claiming_local_gateway_id_is_dropped(self):
         local = store.identity()["gateway_id"]
@@ -722,9 +731,9 @@ class SyncedIdentityTest(unittest.TestCase):
               "created_at": "2026-11-07T00:00:00.000+00:00"}])
         resp = store.handle_peer_sync(batch)
         self.assertIsInstance(resp, dict)
-        self.assertEqual(resp["accepted"], 1)
-        self.assertEqual(resp["dropped"], 3)
-        self.assertEqual([m["id"] for m in store.list_messages("general")], ["h-ok"])
+        self.assertEqual(resp["accepted"], 2)   # h-ok, and h-other, which is relayed under its own origin id
+        self.assertEqual(resp["dropped"], 2)    # h-local, and the reaction that claims this gateway
+        self.assertEqual(sorted(m["id"] for m in store.list_messages("general")), ["h-ok", "h-other"])
         with store.connect() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM reactions").fetchone()[0], 0)
         resp = store.handle_peer_sync(self.peer([self.msg("h-next", "peer-gw")]))

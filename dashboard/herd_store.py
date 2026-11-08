@@ -35,6 +35,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -872,24 +873,26 @@ def _local_gateway_id(conn: sqlite3.Connection) -> str:
 
 
 def _bound_gateway_id(claimed: Any, sender_gid: str, local_gid: str) -> Optional[str]:
-    """The gateway id a synced row may be stored under (S-21).
+    """The gateway id a synced row is stored under (S-21, widened for relays in spec §1.3).
 
-    Returns the id to store — the authenticated sender's — or ``None`` when the row must be dropped:
-    a row may never claim THIS gateway's id, and a peer may only sync rows that claim its own id.
-    An *absent* claim is not a wrong one: it binds to the sender. A real peer's export always sets
-    the field; a hand-built batch may omit it, and the row then belongs to whoever authenticated.
+    A row keeps its ORIGIN id. A linked gateway relays rows written on the other gateways of the mesh, so a
+    row may name a gateway other than the one that sent it. Refused (``None``, counted as dropped): a row
+    claiming THIS gateway's id, since nothing is ever stored as us, and a claim that is not a plain identifier.
+    An *absent* claim is not a wrong one: it binds to the sender, as a hand-built batch relies on.
     """
     claimed = str(claimed or "").strip()[:64]
     if claimed and local_gid and claimed == local_gid:
         return None
-    if claimed and sender_gid and claimed != sender_gid:
+    if claimed and not _MEMBER_ID_RE.match(claimed):
         return None
-    return sender_gid or claimed
+    return claimed or sender_gid
 
 
-def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str) -> str:
-    """``gateway_name`` follows the authenticated sender, not the row (S-21)."""
-    return sender_name if sender_gid else row_name
+def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str, origin_gid: str) -> str:
+    """``gateway_name`` follows the sender for its own rows; a relayed row keeps the name its origin declared."""
+    if not sender_gid or origin_gid == sender_gid:
+        return sender_name
+    return row_name
 
 
 def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = None) -> int:
@@ -898,8 +901,9 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     ``suppress_wakes``: store everything but never wake the agent (a peer's first exchange is history).
 
     ``stats``: optional dict filled with ``{"accepted": <inserted>, "dropped": <refused>}``. A row is
-    refused when the gateway id it claims is not the authenticated sender's (S-21) — the batch is
-    untrusted input, so a synced row's identity comes from ``batch["from"]``, never from the row.
+    refused when it claims THIS gateway's id, or a malformed one (S-21). Otherwise it keeps the origin id it
+    claims, which is how a relayed row arrives (spec §1.3). A row with no claim binds to the sender. The batch is
+    untrusted input: the sender comes from ``batch["from"]``, and no row can be stored as this gateway.
     """
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
     sender_gid = str(sender.get("gateway_id") or "").strip()[:64]
@@ -929,7 +933,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 dropped += 1
                 continue
             m["gateway_id"] = gid
-            m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid)
+            m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid, gid)
             if not conn.execute("SELECT 1 FROM channels WHERE id = ?", (m["channel_id"],)).fetchone():
                 continue
             tid = m.get("thread_parent_id")
@@ -1068,7 +1072,9 @@ def handle_peer_sync(body: Any) -> dict:
         with connect() as conn:
             first_contact = not _peer_wake_primed(conn, sender_gid)
     counts: dict = {}
-    accepted = ingest(body, suppress_wakes=first_contact, stats=counts)
+    # The peer says its first pass is history (it may be spread over more than one request); we also treat
+    # our own first request from a peer as history, so an older peer that never sends the flag is covered.
+    accepted = ingest(body, suppress_wakes=first_contact or body.get("first_contact") is True, stats=counts)
     if first_contact:
         with connect() as conn:
             _prime_peer_wake(conn, sender_gid)
@@ -1481,18 +1487,24 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                 st = _peer_state(conn, peer)
             out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"],
                                after_rseq=st["push_rseq"], viewer_gateway=st["remote_gateway_id"])
+            # Until the peer has told us who it is, send no message or reaction rows. Origin exclusion (no
+            # echo back to the author) needs its gateway id, and without it our own rows, and rows relayed
+            # from a third gateway, would travel back to their author. Channels still go, and the next round
+            # carries the window once the id is known. Cursors hold for this round, so nothing is skipped.
+            identified = bool(st["remote_gateway_id"])
+            sent_messages = out["messages"] if identified else []
+            sent_reactions = out["reactions"] if identified else []
+            # ``first_contact`` marks the whole first pass as history, not only the round that happens to carry
+            # it: the identifying round is empty, so the history arrives a request later.
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
-                                    "messages": out["messages"], "after_seq": st["pull_seq"],
-                                    "reactions": out["reactions"], "after_rseq": st["pull_rseq"]})
+                                    "messages": sent_messages, "after_seq": st["pull_seq"],
+                                    "reactions": sent_reactions, "after_rseq": st["pull_rseq"],
+                                    "first_contact": first_contact})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             pulled += ingest(resp, suppress_wakes=first_contact)
-            # Until we know who the peer is, the export carries no DMs (fail closed). Hold the push
-            # cursors for that round so the next round — peer now identified — re-sends the window
-            # with the DM it is a member of, instead of skipping it forever (ingest is idempotent).
-            identified = bool(st["remote_gateway_id"])
             if identified:
-                pushed += len(out["messages"])
-                rpushed += len(out["reactions"])
+                pushed += len(sent_messages)
+                rpushed += len(sent_reactions)
             next_pull = resp.get("next_seq")
             next_rpull = resp.get("next_rseq")
             with connect() as conn:
@@ -1539,9 +1551,27 @@ def sync_all(wait: bool = False) -> list[dict]:
     elif not _sync_lock.acquire(blocking=False):
         return []
     try:
-        return [sync_peer(p) for p in configured_peers()]
+        peers = configured_peers()
+        # The test transport swaps this process's database and settings overrides for each gateway it
+        # serves, so those tests run one teammate at a time. In production each teammate gets its own
+        # thread: a slow or unreachable teammate waits on its own socket and never delays the others.
+        if TRANSPORT is not None or len(peers) < 2:
+            return [_sync_isolated(p) for p in peers]
+        with ThreadPoolExecutor(max_workers=len(peers), thread_name_prefix="herd-peer") as pool:
+            # A thread starts with an empty context; copy the caller's so the profile's secret scope applies.
+            futures = [pool.submit(contextvars.copy_context().run, _sync_isolated, p) for p in peers]
+            return [f.result() for f in futures]
     finally:
         _sync_lock.release()
+
+
+def _sync_isolated(peer: dict) -> dict:
+    """``sync_peer`` with a last-resort guard, so an unexpected failure is one teammate's result."""
+    try:
+        return sync_peer(peer)
+    except Exception:  # noqa: BLE001 — the other teammates' passes must still run and report
+        return {"name": peer["name"], "url": peer["url"], "ok": False, "error": "Sync failed.",
+                "pushed": 0, "pulled": 0}
 
 
 _pending = threading.Event()
