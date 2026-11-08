@@ -144,7 +144,8 @@ one persistent channel.
   id, including yours, and DMs are scoped by that declared id. Closing this needs
   per-peer credentials (a design change, not shipped).
 - **Sync input hardening (S-23):** a DM is stored only if both member ids are
-  plain identifiers (letters, digits, `-`, `_`) — anything else is refused, not
+  plain identifiers (lowercase letters, digits, `-`, `_`, at most 64 characters,
+  so no trailing newline or other whitespace) — anything else is refused, not
   repaired; and every peer-supplied field in an @mention wake prompt outside the
   quoted block is forced to one line with control characters and quote-breakouts
   removed.
