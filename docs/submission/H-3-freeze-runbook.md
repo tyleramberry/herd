@@ -4,11 +4,23 @@ Owner: @herald · Created Nov 7 · Executes Sun **Nov 8** (freeze + record) → 
 Gate: **nothing opens or posts until Foreman review + Tyler sign-off (Nov 8).**
 
 ## A. Freeze-day pin procedure (~2 minutes, mechanical)
-1. `cd ~/herd && git fetch origin && git rev-parse origin/main` → **FREEZE SHA** (40 hex). Record it here: `__________`
+1. `cd ~/herd && git fetch origin && git rev-parse origin/main` → **the pin** (40 hex) — the frozen
+   `origin/main` after PR #56 (SEC-1 + S-24) merges. Record it here: `__________`
 2. Confirm the tree at that SHA still carries the fixes the package assumes:
    `git show <SHA>:dashboard/herd_store.py | grep -c '_NoRedirect'` → expect `2`
    `git show <SHA>:plugin.yaml | grep -c 'herd_set_status'` → expect `1`
    `git show <SHA>:README.md | grep -ci 'doesn't do (yet)'` and confirm "reactions" is absent from that line
+2b. Confirm the **SEC-1 (S-19…S-23) controls** are in the pinned tree (folded in by card H-7; counts are
+    at the Nov 7 SEC-1 head — if the tree moved, read them as *present / absent*):
+   `git show <SHA>:__init__.py | grep -c 'inbound_authorized'` → expect non-zero (peer routes check **this gateway's Herd secret**)
+   `git show <SHA>:dashboard/herd_store.py | grep -c 'compare_digest'` → expect non-zero (constant-time secret compare)
+   `git show <SHA>:__init__.py | grep -c '_check_auth'` → expect `0` (the gateway API-key check is **gone**; `API_SERVER_KEY` not accepted on `/herd/v1/*`)
+   `git show <SHA>:dashboard/herd_store.py | grep -c '_peer_url_refusal'` → expect non-zero (cleartext policy checked **before** the request is built)
+   `git show <SHA>:dashboard/herd_store.py | grep -c 'CLEARTEXT_REFUSED'` → expect non-zero (off-loopback `http://` refused by default)
+   `git show <SHA>:dashboard/herd_store.py | grep -c '_bound_gateway_id'` → expect non-zero (synced-row identity bound to the declared sender)
+   `git show <SHA>:dashboard/herd_store.py | grep -c '_dm_export_allowed'` → expect non-zero (DM export is members-only)
+   `git show <SHA>:plugin.yaml | grep -c 'e\.g\. http://'` → expect `0` (the settings copy ships **no** `http://` example)
+   `git show <SHA>:plugin.yaml | grep -c 'e\.g\. https://'` → expect `1` (the `peer_url` example is `https://`)
 3. Re-run both gates **at that SHA**:
    `hermes plugins validate <checkout> --install-deps` → expect `Validation passed.`
    `python3 scripts/qa/catalog_audit.py <checkout> --entry herd.yaml` → expect `0 FAIL, 0 WARN` and **4** tools

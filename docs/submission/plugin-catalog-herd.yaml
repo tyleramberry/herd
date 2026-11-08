@@ -1,10 +1,15 @@
+# Herd — ready-to-open catalog entry (target: plugin-catalog/herd.yaml in NousResearch/hermes-agent).
+# NOT FILEABLE AS-IS: `sha:` is a PLACEHOLDER. At open, replace it with the frozen `origin/main`
+# (after PR #56 merges, S-24 included) and re-run `scripts/qa/catalog_audit.py . --entry herd.yaml`
+# at that exact SHA (H-2 §3, runbook §A). Supersedes cd6d46c (the scanned commit) and the pre-S-24
+# head 047a5b09. The audit will FAIL on the placeholder sha until it is swapped — that is intended.
 name: herd
 title: Herd
 description: >-
   Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
   your Hermes agents work together across two machines.
 repo: https://github.com/tyleramberry/herd
-sha: cd6d46cc5f324ade11a814fa50889ce33324c607
+sha: REPIN_AT_OPEN_ORIGIN_MAIN
 tier: community
 category: desktop
 maintainer: tyleramberry
