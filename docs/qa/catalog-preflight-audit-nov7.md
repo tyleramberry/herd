@@ -8,6 +8,44 @@
 
 ---
 
+## STATUS — post-SEC-1 (added Nov 7; findings below are not edited)
+
+The SEC-1 hardening branch (`54b3284`…`8840f78`, PR #56) and S-20 (`e2a6411`) landed after this
+audit was written. What they closed, re-derived at the pin `8840f78`:
+
+- **B1 — CLOSED.** S-19 (`54b3284`) refuses the peer key in cleartext off loopback and stops steering
+  users to `http://`; S-24 (`8840f78`) closes the proxy key leak. At the pin the peer client is
+  `build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open` (`dashboard/herd_store.py:1312`) —
+  an explicit empty proxy map suppresses urllib's ambient `http_proxy`, and `_NoRedirect` surfaces a 3xx
+  as an error instead of following it, so the key is never re-sent. `README.md:75` (the inbound-endpoint
+  disclosure; was `:63` at this audit's HEAD) now reads "Outbound sync never follows a redirect … the key
+  is never re-sent to another host". Command: `git grep -n 'build_opener' 8840f78 -- 'dashboard/*.py'`.
+- **B2 — procedural; still open by design.** No code defect: the catalog entry's `sha:` is an intentional
+  placeholder until the pin is taken on `origin/main`. At the H-7 branch head it reads
+  `REPIN_AT_OPEN_ORIGIN_MAIN` (`docs/submission/plugin-catalog-herd.yaml:12`, `H-2:60`), which the catalog
+  audit FAILs on until it is swapped — intended. H-7/H-2 own the repin.
+- **W1 — CLOSED by S-20 (`e2a6411`).** The plugin no longer calls `adapter._check_auth`. Proof at the pin,
+  `git grep -n _check_auth 8840f78 -- '*.py'`:
+
+  ```
+  8840f78:scripts/qa/two_gateway_run.py:168:        def _check_auth(self, request):
+  8840f78:scripts/qa/two_gateway_run.py:180:        denied = adapter._check_auth(request)
+  8840f78:tests/test_peer_secret_scope.py:39:    def _check_auth(self, request):
+  8840f78:tests/test_peer_secret_scope.py:180:        self.assertEqual(self.adapter.calls, 0, "the plugin must not consult adapter._check_auth")
+  ```
+
+  Only the QA harness's own stub (`scripts/qa/two_gateway_run.py`) and `tests/` match — nothing in the
+  plugin (`git grep -c _check_auth 8840f78 -- __init__.py dashboard/herd_store.py dashboard/plugin_api.py
+  desktop/plugin.js` = 0 in all four). At `origin/main` the call was still present
+  (`e23a319:__init__.py:63`, `:81`), which is exactly what S-20 removed. The W1 text's "disclosed at
+  `README.md:63`" note is obsolete: at the pin `README.md:75` discloses the Herd-scoped credential and
+  makes no private-core claim.
+
+This file is a point-in-time snapshot (Nov 7, HEAD `10cc2b98`). The status block above records what later
+commits closed; findings are not edited.
+
+---
+
 ## BLOCKERS
 
 ### B1. The peer API key is sent through plain `urllib`, which forwards it across origins on redirect

@@ -42,11 +42,14 @@ hermes plugins install tyleramberry/herd --no-enable   # or install by local pat
 hermes plugins enable herd                              # backend import gate (plugins.enabled)
 ```
 
-Then link the pair on ONE side (README contract):
+Then link the pair on ONE side (README §"Connect with a teammate"):
 
-```
-hermes peer add <name> --url <their-gateway-url> --key <API_SERVER_KEY>
-```
+Open **Settings → Plugins → Herd** (or the pane's **Connect a teammate** button) and
+fill in *Teammate's name*, *Teammate's gateway URL*, and *Teammate's Herd secret*
+(`HERD_PEER_KEY`) — the teammate's own `HERD_SECRET` from their gateway. That one-sided
+link carries both directions. This is NOT core `hermes peer add` (see §6c TC-5.7), and
+the credential is the teammate's Herd secret, NOT `API_SERVER_KEY`: `/herd/v1/*` accepts
+only the Herd secret.
 
 Preconditions to verify BEFORE testing (a failure here is env, not product):
 
