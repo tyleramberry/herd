@@ -100,6 +100,12 @@ def post_channel(body: dict[str, Any]):
     return _call(store.create_channel, body.get("name"), body.get("topic", ""), members=body.get("members"))
 
 
+@router.post("/channels/{channel_id}/topic")
+def post_topic(channel_id: str, body: dict[str, Any]):
+    """Set a channel's topic (one line; empty clears). Renaming is not offered: a channel's name is its identity."""
+    return _call(store.set_topic, channel_id, body.get("topic"))
+
+
 @router.post("/channels/{channel_id}/read")
 def post_read(channel_id: str):
     """Mark a channel read on this gateway (the pane calls it when the channel is on screen)."""

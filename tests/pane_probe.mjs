@@ -25,6 +25,8 @@ export const ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot'
 export const Textarea = 'Textarea'
 export const PALETTE_AREA = 'palette'
+export const KEYBINDS_AREA = 'keybinds'
+export const SearchField = 'SearchField'
 export const STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
 export const PANES_AREA = 'panes'
 export const ROUTES_AREA = 'routes'
@@ -50,11 +52,14 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
 globalThis.__notified = []
+globalThis.__drafts = {}
+// Node's FormData only takes real form elements; the plugin only needs getAll/get on a form-like object.
+globalThis.FormData = class { constructor (f) { this.f = f } getAll (n) { return (this.f.__values && this.f.__values[n]) || [] } get (n) { return this.getAll(n)[0] ?? null } }
 globalThis.__query = null
 const { host: sdkHost } = await import(pathToFileURL(join(work, 'sdk.mjs')).href)
 const {
@@ -63,7 +68,9 @@ const {
   probeOpenHit: openHit, probeArriveAt: arriveAt, probeSearchQuery: searchQuery, probeScrollTarget: scrollTarget,
   probeSelection: selection, probeThread: thread, probeJumpNote: jumpNote, probePlugin: plugin,
   probeNotifyIncoming: notifyIncoming, probeUnreadCount: UnreadCount, probeChannelButton: ChannelButton,
-  probeWorkLine: WorkLine
+  probeWorkLine: WorkLine, probeRenderContent, probeComposer, probeTopicLine,
+  probeNewChannelForm, probeInsertAtCaret, probePickedMembers,
+  probeEmojiTray, probeTopicEditing, probeComposeRequest
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
@@ -71,6 +78,7 @@ const failures = []
 const fakeCtx = {
   items: [], handlers: {}, registerMany: list => fakeCtx.items.push(...list),
   onEvent: (name, fn) => { fakeCtx.handlers[name] = fn }, setInterval () {},
+  storage: { get: (k, fb) => (k in globalThis.__drafts ? globalThis.__drafts[k] : fb), set: (k, v) => { globalThis.__drafts[k] = v }, remove: k => { delete globalThis.__drafts[k] } },
   setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms), onDispose () {},
   os: { notify: input => globalThis.__notified.push(input) }
 }
@@ -250,7 +258,7 @@ const flat = root => nodes(root).filter(n => typeof n.type === 'string')
   globalThis.__query = null
   const idle = SearchBar({})
   check('empty search box shows no results list', !find(idle, n => n.props.role === 'list'))
-  check('search box is labelled', Boolean(find(idle, n => n.props['aria-label'] === 'Search messages')))
+  check('the search box is the SDK search field', Boolean(find(idle, n => n.type === 'SearchField')))
 
   searchQuery.set('deploy')
   globalThis.__query = { data: { results: [{
@@ -369,6 +377,132 @@ const item = (channel, author, preview, extra = {}) => ({
   check('no phrases means no work line', WorkLine({ status: { agent_status: null, peer_status: [] } }) === null)
 }
 
+
+// ---- composer, markdown, drafts, topics and keybinds (Track 3) ------------------------
+const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'string').map(n => n.type))]
+{
+  const parts = probeRenderContent('a **bold** and *it* and `code`')
+  const strong = nodes(parts).find(n => n.type === 'strong')
+  const em = nodes(parts).find(n => n.type === 'em')
+  const code = nodes(parts).find(n => n.type === 'code')
+  check('bold renders as strong', strong && strong.props.children === 'bold')
+  check('italic renders as em', em && em.props.children === 'it')
+  check('code renders as code', code && code.props.children === 'code')
+  check('snake_case words are left alone', kinds(probeRenderContent('snake_case_name here')).every(t => t !== 'em'))
+  check('a sum with stars is left alone', kinds(probeRenderContent('2*3*4 = 24')).every(t => t !== 'em'))
+  check('a mention still highlights inside plain text', nodes(probeRenderContent('hi @tyler there')).some(n => n.type === 'span' && n.props.children === '@tyler'))
+  check('code keeps its asterisks literal', nodes(probeRenderContent('`**x**`')).find(n => n.type === 'code').props.children === '**x**')
+  const hostile = ['<img src=x onerror=alert(1)>', '**<script>alert(1)</script>**', '[click](javascript:alert(1))',
+    '<a href="javascript:alert(1)">x</a>', '`<svg onload=alert(1)>`', '*"><iframe src=evil>*', '**a** <b>bold?</b> _x_ &amp;']
+  for (const h of hostile) {
+    const allowed = ['span', 'strong', 'em', 'code']
+    check('hostile markup stays text: ' + h.slice(0, 24), kinds(probeRenderContent(h)).every(t => allowed.includes(t)), JSON.stringify(kinds(probeRenderContent(h))))
+  }
+  const script = nodes(probeRenderContent('**<script>alert(1)</script>**')).find(n => n.type === 'strong')
+  check('a script inside bold is a literal string', script && script.props.children === '<script>alert(1)</script>')
+  check('a link is not turned into an element', kinds(probeRenderContent('[x](https://a.test)')).every(t => t !== 'a'))
+}
+{
+  // Drafts: saved as you type, restored into the composer, cleared when empty.
+  globalThis.__drafts = {}
+  probeComposeRequest.set(0)
+  const form = probeComposer({ channel: { id: 'general' }, compact: false, placeholderName: '#general' })
+  const field = nodes(form).find(n => n.type === 'Textarea' || (n.props && n.props.name === 'content'))
+  check('a composer starts from the saved draft', field && field.props.defaultValue === '')
+  globalThis.__drafts['draft:channel:general'] = 'half a thought'
+  const again = probeComposer({ channel: { id: 'general' }, compact: false, placeholderName: '#general' })
+  const restored = nodes(again).find(n => n.props && n.props.name === 'content')
+  check('a draft comes back into the composer', restored && restored.props.defaultValue === 'half a thought')
+  restored.props.onChange({ currentTarget: { value: 'typed more', selectionStart: 0, selectionEnd: 0 } })
+  check('typing saves the draft', globalThis.__drafts['draft:channel:general'] === 'typed more')
+  restored.props.onChange({ currentTarget: { value: '   ', selectionStart: 0, selectionEnd: 0 } })
+  check('a blank field clears the saved draft', !('draft:channel:general' in globalThis.__drafts))
+  globalThis.__drafts['draft:channel:general'] = 'only for general'
+  const other = nodes(probeComposer({ channel: { id: 'ops' }, compact: false, placeholderName: '#ops' })).find(n => n.props && n.props.name === 'content')
+  check('drafts are per channel', other.props.defaultValue === '', JSON.stringify(other.props.defaultValue))
+}
+{
+  // Caret insertion keeps the rest of the text and leaves the caret after the emoji.
+  const field = { value: 'ab', selectionStart: 1, selectionEnd: 1, focus () { this.focused = true } }
+  probeInsertAtCaret(field, '🎉')
+  check('an emoji is inserted at the caret', field.value === 'a🎉b', field.value)
+  check('the caret moves past the emoji', field.selectionStart === 1 + '🎉'.length)
+  check('focus returns to the field', field.focused === true)
+}
+{
+  // The emoji tray opens from the composer and inserts through the form's own field.
+  probeEmojiTray.pane.set(true)
+  const tray = nodes(probeComposer({ channel: { id: 'general' }, compact: true, placeholderName: '#general' }))
+  const btn = tray.find(n => n.props['aria-label'] === 'Insert 🎉')
+  check('the tray offers emoji when open', Boolean(btn))
+  probeEmojiTray.pane.set(false)
+  check('a closed tray is not rendered', !nodes(probeComposer({ channel: { id: 'general' }, compact: true, placeholderName: '#general' })).find(n => n.props['aria-label'] === 'Insert 🎉'))
+  probeEmojiTray.pane.set(true)
+  const inserting = nodes(probeComposer({ channel: { id: 'general' }, compact: true, placeholderName: '#general' })).find(n => n.props['aria-label'] === 'Insert 🎉')
+  const fieldShim = { value: 'hi', selectionStart: 2, selectionEnd: 2, focus () {} }
+  const fakeForm = { elements: { content: fieldShim } }
+  inserting.props.onClick({ currentTarget: { form: fakeForm } })
+  check('clicking an emoji puts it in the message', fieldShim.value === 'hi🎉')
+  check('and closes the tray', probeEmojiTray.pane.get() === false)
+  check('the emoji is saved as the draft', globalThis.__drafts['draft:channel:general'] === 'hi🎉')
+}
+{
+  // The new-message keybind focuses the composer that mounts next, and only then.
+  probeComposeRequest.set(Date.now())
+  const fresh = nodes(probeComposer({ channel: { id: 'general' }, compact: false, placeholderName: '#general' })).find(n => n.props && n.props.name === 'content')
+  check('a new-message request focuses the composer', fresh.props.autoFocus === true)
+  probeComposeRequest.set(Date.now() - 60000)
+  const stale = nodes(probeComposer({ channel: { id: 'general' }, compact: false, placeholderName: '#general' })).find(n => n.props && n.props.name === 'content')
+  check('an old request does not steal focus later', stale.props.autoFocus === false)
+  probeComposeRequest.set(0)
+}
+{
+  const keybinds = fakeCtx.items.filter(i => i.area === 'keybinds')
+  const open = keybinds.find(i => i.data.id === 'herd.open')
+  const fresh = keybinds.find(i => i.data.id === 'herd.newMessage')
+  check('open-Herd keybind is registered', Boolean(open) && open.data.defaults[0] === 'mod+alt+h')
+  check('new-message keybind is registered', Boolean(fresh) && fresh.data.defaults[0] === 'mod+alt+n')
+  globalThis.__navigations.length = 0
+  fresh.data.run()
+  check('the new-message keybind opens Herd', globalThis.__navigations.at(-1) === '/herd')
+  check('and asks for the composer', probeComposeRequest.get() > 0)
+  probeComposeRequest.set(0)
+  open.data.run()
+  check('the open keybind opens Herd', globalThis.__navigations.at(-1) === '/herd')
+}
+{
+  // Topic: viewable, editable for a public channel, never shown for a DM.
+  probeTopicEditing.page.set(null)
+  check('a DM has no topic line', probeTopicLine({ channel: { id: 'dm:a+b', is_dm: true, topic: '' }, $editing: probeTopicEditing.page }) === null)
+  const shown = probeTopicLine({ channel: { id: 'general', is_dm: false, topic: 'ship it' }, $editing: probeTopicEditing.page })
+  check('the topic is shown with an edit control', texts(shown).includes('ship it') && Boolean(find(shown, n => n.type === 'button' && n.props.children === 'Edit topic')))
+  const empty = probeTopicLine({ channel: { id: 'ops', is_dm: false, topic: '' }, $editing: probeTopicEditing.page })
+  check('an empty topic offers to add one', Boolean(find(empty, n => n.type === 'button' && n.props.children === 'Add a topic')))
+  find(shown, n => n.type === 'button' && n.props.children === 'Edit topic').props.onClick()
+  check('editing opens the topic field', probeTopicEditing.page.get() === 'general')
+  const editing = probeTopicLine({ channel: { id: 'general', is_dm: false, topic: 'ship it' }, $editing: probeTopicEditing.page })
+  const field = find(editing, n => n.type === 'Input' && n.props.name === 'topic')
+  check('the topic field is limited to 200 characters', field && field.props.maxLength === 200)
+  probeTopicEditing.page.set(null)
+}
+{
+  // The new-channel form: teammates to pick (not you), and the honest answer about private channels.
+  globalThis.__query = { data: [{ id: 'me', display_name: 'Tyler', is_self: true }, { id: 'riley', display_name: 'Riley', is_self: false }] }
+  const form = probeNewChannelForm({ onDone () {} })
+  const box = find(form, n => n.type === 'input' && n.props.type === 'checkbox')
+  check('the member picker offers teammates, not you', box && box.props.value === 'riley')
+  check('the form says private channels are not supported yet', texts(form).join(' ').includes('Private channels aren’t supported yet.'))
+  globalThis.__query = null
+  const fakeForm = { __values: { name: ['ops'], member: ['riley'] } }
+  globalThis.__mutations.length = 0
+  form.props.onSubmit({ preventDefault () {}, currentTarget: fakeForm })
+  check('creating sends the chosen members', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ name: 'ops', members: ['riley'] }),
+    JSON.stringify(globalThis.__mutations))
+  globalThis.__mutations.length = 0
+  form.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { name: ['everyone'] } } })
+  check('creating with nobody ticked sends no member list', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ name: 'everyone', members: [] }))
+  check('picked members are capped at four', probePickedMembers({ __values: { member: ['a', 'b', 'c', 'd', 'e'] } }).length === 4)
+}
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')
 process.exit(failures.length ? 1 : 0)

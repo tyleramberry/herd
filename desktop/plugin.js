@@ -6,12 +6,14 @@ import {
   Codicon,
   EmptyState,
   Input,
+  KEYBINDS_AREA,
   PALETTE_AREA,
   PANES_AREA,
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
   STATUSBAR_AREAS,
   ScrollArea,
+  SearchField,
   StatusDot,
   Textarea,
   atom,
@@ -54,6 +56,12 @@ const sharing = { page: atom(false), pane: atom(false) } // is the DM's 'Share t
 const mentionState = { page: atom(null), pane: atom(null) }
 // Which message's reaction picker is open (its id), or null. One picker at a time, shared by page and pane.
 const reactionPicker = atom(null)
+// Composer emoji tray per surface, and the channel whose topic is being edited (or null).
+const emojiTray = { page: atom(false), pane: atom(false) }
+const topicEditing = { page: atom(null), pane: atom(null) }
+// Set by the "New Herd message" keybind: the composer that mounts next takes focus (see Composer).
+const composeRequest = atom(0)
+const COMPOSE_FOCUS_MS = 3000
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -245,9 +253,15 @@ function refusedLine(entry) {
 // New channel / new DM
 // ---------------------------------------------------------------------------
 
+// Up to four teammates besides you. A channel with no one ticked is open to the whole mesh; ticking people limits it
+// to them. There is no private flag: a member list is the only restriction the backend has, and it is fixed at creation.
+const MAX_PICKED_MEMBERS = 4
+
 function NewChannelForm({ onDone }) {
+  const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
+  const others = Array.isArray(participants) ? participants.filter(p => p && !p.is_self) : []
   const create = useMutation({
-    mutationFn: ({ name }) => api('/channels', { method: 'POST', body: { name } }),
+    mutationFn: ({ name, members }) => api('/channels', { method: 'POST', body: members.length ? { name, members } : { name } }),
     onSuccess: channel => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
       onDone(channel && channel.id)
@@ -257,10 +271,34 @@ function NewChannelForm({ onDone }) {
     className: 'flex flex-col gap-1.5',
     onSubmit: e => {
       e.preventDefault()
-      const name = String(new FormData(e.currentTarget).get('name') || '').trim()
-      if (name && !create.isPending) create.mutate({ name })
+      const form = e.currentTarget
+      const name = String(new FormData(form).get('name') || '').trim()
+      const members = pickedMembers(form)
+      if (name && !create.isPending) create.mutate({ name, members })
     },
     children: [
+      others.length
+        ? jsxs('fieldset', {
+            className: 'flex flex-col gap-1 text-xs text-(--ui-text-secondary)',
+            children: [
+              jsx('legend', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Only these people (optional, up to four)' }),
+              others.map(p =>
+                jsxs(
+                  'label',
+                  {
+                    className: 'flex items-center gap-1.5',
+                    children: [jsx('input', { type: 'checkbox', name: 'member', value: p.id }), jsx('span', { children: p.display_name })]
+                  },
+                  p.id
+                )
+              ),
+              jsx('div', {
+                className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: 'Leave all unticked and everyone in the mesh receives it. The list is fixed once the channel exists. Private channels aren\u2019t supported yet.'
+              })
+            ]
+          })
+        : null,
       jsxs('div', {
         className: 'flex items-center gap-1.5',
         children: [
@@ -284,6 +322,11 @@ function NewChannelForm({ onDone }) {
         : null
     ]
   })
+}
+
+// The ticked teammates, in form order. FormData lists only checked boxes, whatever their number.
+function pickedMembers(form) {
+  return new FormData(form).getAll('member').map(String).slice(0, MAX_PICKED_MEMBERS)
 }
 
 function NewDmPicker({ onDone }) {
@@ -534,16 +577,41 @@ function insertMention(textarea, state, handle, $mention) {
 }
 
 // Plain strings + <span>s only (React escapes text), so message bodies stay XSS-safe.
+// A safe markdown subset for message bodies: `code`, **bold** and *italic* (or _italic_). Built as React elements
+// and text, never as HTML, so a message cannot inject markup. Underscores and asterisks inside a word don't count
+// (snake_case_name stays as typed). Links are not rendered: their text is shown as typed.
+const MARKUP_TOKEN = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|((?<![\p{L}\p{N}*])\*[^*\s][^*\n]*\*(?![\p{L}\p{N}*]))|((?<![\p{L}\p{N}_])_[^_\s][^_\n]*_(?![\p{L}\p{N}_]))/gu
+
+function mentionParts(segment, offset) {
+  const parts = []
+  let last = 0
+  for (const m of segment.matchAll(MENTION_TOKEN)) {
+    if (m.index > last) parts.push(segment.slice(last, m.index))
+    parts.push(jsx('span', { className: 'font-medium text-(--ui-accent)', children: m[0] }, 'm' + (offset + m.index)))
+    last = m.index + m[0].length
+  }
+  if (last < segment.length) parts.push(segment.slice(last))
+  return parts
+}
+
 function renderContent(text) {
   const str = String(text == null ? '' : text)
   const parts = []
   let last = 0
-  for (const m of str.matchAll(MENTION_TOKEN)) {
-    if (m.index > last) parts.push(str.slice(last, m.index))
-    parts.push(jsx('span', { className: 'font-medium text-(--ui-accent)', children: m[0] }, 'm' + m.index))
-    last = m.index + m[0].length
+  for (const m of str.matchAll(MARKUP_TOKEN)) {
+    if (m.index > last) parts.push(...mentionParts(str.slice(last, m.index), last))
+    const raw = m[0]
+    const key = 'f' + m.index
+    if (raw.startsWith('`')) {
+      parts.push(jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono text-[0.85em]', children: raw.slice(1, -1) }, key))
+    } else if (raw.startsWith('**')) {
+      parts.push(jsx('strong', { className: 'font-semibold', children: raw.slice(2, -2) }, key))
+    } else {
+      parts.push(jsx('em', { children: raw.slice(1, -1) }, key))
+    }
+    last = m.index + raw.length
   }
-  if (last < str.length) parts.push(str.slice(last))
+  if (last < str.length) parts.push(...mentionParts(str.slice(last), last))
   return parts
 }
 
@@ -724,6 +792,61 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
           })
         : null,
       onOpenThread && message.reply_count > 0 ? jsx(ReplySummary, { message, onOpen: onOpenThread }) : null
+    ]
+  })
+}
+
+// The channel's topic, with an inline editor for public channels. A DM has no topic, so it shows nothing here.
+function TopicLine({ channel, $editing }) {
+  const editingId = useValue($editing)
+  const save = useMutation({
+    mutationFn: topic => api('/channels/' + encodeURIComponent(channel.id) + '/topic', { method: 'POST', body: { topic } }),
+    onSuccess: () => {
+      $editing.set(null)
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+    }
+  })
+  if (channel.is_dm) return null
+  if (editingId !== channel.id) {
+    return jsxs('span', {
+      className: 'flex min-w-0 items-baseline gap-1.5',
+      children: [
+        channel.topic ? jsx('span', { className: 'truncate text-xs text-(--ui-text-tertiary)', children: channel.topic }) : null,
+        jsx('button', {
+          type: 'button',
+          className: 'shrink-0 text-[0.6875rem] text-(--ui-text-quaternary) hover:text-(--ui-accent)',
+          onClick: () => $editing.set(channel.id),
+          children: channel.topic ? 'Edit topic' : 'Add a topic'
+        })
+      ]
+    })
+  }
+  return jsxs('form', {
+    className: 'flex min-w-0 items-center gap-1',
+    onSubmit: e => {
+      e.preventDefault()
+      save.mutate(String(new FormData(e.currentTarget).get('topic') || ''))
+    },
+    children: [
+      jsx(Input, {
+        name: 'topic',
+        defaultValue: channel.topic || '',
+        maxLength: 200,
+        autoFocus: true,
+        placeholder: 'What is this channel for?',
+        'aria-label': 'Channel topic',
+        className: 'h-7 min-w-0 w-64 text-xs',
+        onKeyDown: e => {
+          if (e.key !== 'Escape') return
+          e.stopPropagation()
+          $editing.set(null)
+        }
+      }),
+      jsx(Button, { type: 'submit', size: 'xs', disabled: save.isPending, children: 'Save' }),
+      jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => $editing.set(null), children: 'Cancel' }),
+      save.isError
+        ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(save.error, "Couldn't save the topic.") })
+        : null
     ]
   })
 }
@@ -987,9 +1110,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
             className: 'flex min-w-0 items-baseline gap-2',
             children: [
               jsx('span', { className: 'truncate text-sm font-medium', children: title }),
-              channel.topic
-                ? jsx('span', { className: 'truncate text-xs text-(--ui-text-tertiary)', children: channel.topic })
-                : null
+              jsx(TopicLine, { channel, $editing: compact ? topicEditing.pane : topicEditing.page })
             ]
           }),
           jsxs('div', {
@@ -1019,7 +1140,38 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   })
 }
 
+// Drafts live in the plugin's own storage, per channel (or per thread), so switching channels keeps what you typed.
+function draftKey(channel, threadParentId) {
+  return threadParentId ? 'draft:thread:' + threadParentId : 'draft:channel:' + channel.id
+}
+
+function readDraft(key) {
+  return ctx ? String(ctx.storage.get(key, '') || '') : ''
+}
+
+function writeDraft(key, value) {
+  if (!ctx) return
+  if (value.trim()) ctx.storage.set(key, value)
+  else ctx.storage.remove(key)
+}
+
+const EMOJI_TRAY = ['😀', '😂', '🙂', '😅', '🤔', '😎', '🥳', '😢', '👍', '👎', '👏', '🙌', '🙏', '👀', '💯', '🔥', '🎉', '✅', '❌', '⚠️', '🚀', '💡', '📌', '☕']
+
+// Insert at the caret of a plain (uncontrolled) textarea and leave the caret after it.
+function insertAtCaret(textarea, text) {
+  const start = textarea.selectionStart == null ? textarea.value.length : textarea.selectionStart
+  const end = textarea.selectionEnd == null ? start : textarea.selectionEnd
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end)
+  textarea.selectionStart = textarea.selectionEnd = start + text.length
+  textarea.focus()
+  return textarea.value
+}
+
 function Composer({ channel, compact, placeholderName, threadParentId, autoFocus }) {
+  const focusAsked = useValue(composeRequest)
+  const key = draftKey(channel, threadParentId)
+  const $emoji = compact ? emojiTray.pane : emojiTray.page
+  const trayOpen = useValue($emoji)
   const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
   // Each composer keys its own autocomplete, so a dropdown opened in the pane can
   // never render (or mangle a draft) in the page — or the other way round.
@@ -1040,8 +1192,10 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
           ? { id: newMessageId(), content, thread_parent_id: threadParentId }
           : { id: newMessageId(), content }
       }),
-    onSuccess: (_message, { form }) => {
-      form.reset()
+    onSuccess: (_message, { form, draft }) => {
+      // Clear the field and its saved draft. form.reset() would bring the draft back, since it resets to the default.
+      if (form && form.elements.content) form.elements.content.value = ''
+      writeDraft(draft, '')
       queryClient.invalidateQueries({ queryKey: KEYS.messages(channel.id) })
       queryClient.invalidateQueries({ queryKey: KEYS.threads })
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
@@ -1053,17 +1207,48 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
       e.preventDefault()
       const form = e.currentTarget
       const content = String(new FormData(form).get('content') || '')
-      if (content.trim() && !send.isPending) send.mutate({ content, form })
+      if (content.trim() && !send.isPending) send.mutate({ content, form, draft: key })
     },
     children: [
       menuOpen ? jsx(MentionMenu, { items, index: activeIndex, onPick: pick }) : null,
+      trayOpen
+        ? jsx('div', {
+            role: 'group',
+            'aria-label': 'Insert an emoji',
+            className: 'flex flex-wrap gap-0.5 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-surface-primary) p-1',
+            children: EMOJI_TRAY.map(emoji =>
+              jsx(
+                'button',
+                {
+                  type: 'button',
+                  title: emoji,
+                  'aria-label': 'Insert ' + emoji,
+                  className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
+                  onClick: e => {
+                    const form = e.currentTarget.form
+                    const field = form && form.elements.content
+                    if (!field) return
+                    writeDraft(key, insertAtCaret(field, emoji))
+                    $emoji.set(false)
+                  },
+                  children: emoji
+                },
+                emoji
+              )
+            )
+          })
+        : null,
       jsx(Textarea, {
         name: 'content',
         rows: 2,
-        autoFocus: Boolean(autoFocus),
+        defaultValue: readDraft(key),
+        autoFocus: Boolean(autoFocus) || (!compact && Date.now() - focusAsked < COMPOSE_FOCUS_MS),
         placeholder: threadParentId ? 'Reply in thread' : 'Message ' + placeholderName,
         'aria-label': 'Message',
-        onChange: e => $mention.set(mentionAtCaret(e.currentTarget)),
+        onChange: e => {
+          writeDraft(key, e.currentTarget.value)
+          $mention.set(mentionAtCaret(e.currentTarget))
+        },
         onClick: e => $mention.set(mentionAtCaret(e.currentTarget)),
         onBlur: () => $mention.set(null),
         onKeyUp: e => {
@@ -1097,7 +1282,7 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
           }
         },
         className: 'min-h-0 resize-none text-sm'
-      }),
+      }, key),
       jsxs('div', {
         className: 'flex items-center justify-between gap-2',
         children: [
@@ -1105,7 +1290,20 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
             className: 'truncate text-[0.6875rem] text-(--ui-text-tertiary)',
             children: send.isError ? errorText(send.error, "Couldn't send. Try again.") : ''
           }),
-          jsx(Button, { type: 'submit', size: 'xs', disabled: send.isPending, children: send.isPending ? 'Sending…' : 'Send' })
+          jsxs('div', {
+            className: 'flex shrink-0 items-center gap-1.5',
+            children: [
+              jsx(Button, {
+                type: 'button',
+                size: 'xs',
+                variant: 'secondary',
+                'aria-expanded': String(trayOpen),
+                onClick: () => $emoji.set(!trayOpen),
+                children: 'Emoji'
+              }),
+              jsx(Button, { type: 'submit', size: 'xs', disabled: send.isPending, children: send.isPending ? 'Sending…' : 'Send' })
+            ]
+          })
         ]
       })
     ]
@@ -1224,16 +1422,11 @@ function SearchBar() {
   return jsxs('div', {
     className: 'flex flex-col gap-1 border-b border-(--ui-stroke-secondary) px-3 py-2',
     children: [
-      jsx(Input, {
-        type: 'search',
-        name: 'search',
+      jsx(SearchField, {
         value: q,
-        autoFocus: true,
-        autoComplete: 'off',
         placeholder: 'Search messages…',
-        'aria-label': 'Search messages',
-        className: 'h-7 text-xs',
-        onChange: e => searchQuery.set(e.currentTarget.value),
+        inputClassName: 'h-7 text-xs',
+        onChange: value => searchQuery.set(value),
         onKeyDown: e => {
           if (e.key !== 'Escape' || !q) return
           e.stopPropagation()
@@ -1439,6 +1632,11 @@ export default {
     jumpNote.set(null)
     notifyState.sent = []
     notifyState.lastByChannel = {}
+    composeRequest.set(0)
+    emojiTray.page.set(false)
+    emojiTray.pane.set(false)
+    topicEditing.page.set(null)
+    topicEditing.pane.set(null)
     ctx.onDispose(() => {
       rest = null
       ctx = null
@@ -1455,6 +1653,31 @@ export default {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
         data: { path: ROUTE_PATH, label: 'Herd', codicon: 'comment-discussion' }
+      },
+      {
+        id: 'open',
+        area: KEYBINDS_AREA,
+        data: {
+          id: 'herd.open',
+          category: 'navigation',
+          defaults: ['mod+alt+h'],
+          label: 'Open Herd',
+          run: () => host.navigate(ROUTE_PATH)
+        }
+      },
+      {
+        id: 'new-message',
+        area: KEYBINDS_AREA,
+        data: {
+          id: 'herd.newMessage',
+          category: 'composer',
+          defaults: ['mod+alt+n'],
+          label: 'New Herd message',
+          run: () => {
+            composeRequest.set(Date.now())
+            host.navigate(ROUTE_PATH)
+          }
+        }
       },
       {
         id: 'unread',

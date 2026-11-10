@@ -146,7 +146,8 @@ CREATE TABLE IF NOT EXISTS channels (
     topic TEXT NOT NULL DEFAULT '',
     is_dm INTEGER NOT NULL DEFAULT 0,
     members TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    topic_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -294,6 +295,8 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
             conn.execute("ALTER TABLE messages ADD COLUMN promoted_from TEXT")
         if "task_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
             conn.execute("ALTER TABLE messages ADD COLUMN task_id TEXT")
+        if "topic_at" not in {r[1] for r in conn.execute("PRAGMA table_info(channels)")}:
+            conn.execute("ALTER TABLE channels ADD COLUMN topic_at TEXT NOT NULL DEFAULT ''")
         # Pre-S-12 DBs have peer_state without the reaction cursors (CREATE IF NOT EXISTS won't add them).
         have = {r[1] for r in conn.execute("PRAGMA table_info(peer_state)").fetchall()}
         for col in ("push_rseq", "pull_rseq"):
@@ -507,6 +510,24 @@ def mark_read(channel_ref: str) -> dict:
     return {"channel_id": channel["id"], "unread": 0}
 
 
+TOPIC_MAX_CHARS = 200
+
+
+def set_topic(channel_ref: str, topic: Any) -> dict:
+    """Set a public channel's topic (one line, at most 200 characters; empty clears it). It syncs to the mesh:
+    a teammate keeps whichever topic was set most recently. DMs have no topic."""
+    channel = resolve_channel(channel_ref)
+    if not channel:
+        raise HerdError(404, f"No channel named '{str(channel_ref)[:64]}'.")
+    if channel["is_dm"]:
+        raise HerdError(422, "A direct message has no topic.")
+    text = _one_line(topic)[:TOPIC_MAX_CHARS]
+    with connect() as conn:
+        conn.execute("UPDATE channels SET topic = ?, topic_at = ? WHERE id = ?", (text, _now(), channel["id"]))
+    _notify("channels.changed", {})
+    return get_channel(channel["id"]) or {}
+
+
 def list_channels() -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
@@ -569,7 +590,7 @@ def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
                 m["name"] = known[m["id"]]
             else:
                 raise HerdError(422, "That person isn't connected yet.")
-    channel = {"id": clean, "name": clean, "topic": str(topic or "")[:200], "is_dm": 0,
+    channel = {"id": clean, "name": clean, "topic": _one_line(topic)[:200], "is_dm": 0,
                "members": json.dumps(member_list), "created_at": _now()}
     with connect() as conn:
         try:
@@ -730,6 +751,15 @@ def _clean_members(value: Any) -> Optional[list[dict]]:
     return out if len(out) <= MAX_HUMANS else None
 
 
+def _valid_stamp(value: str) -> bool:
+    """A timestamp we can order by: parses as ISO-8601 (peers may send a trailing Z)."""
+    try:
+        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
+
+
 def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
     """Accept a channel from a peer. Validated: never trust peer input to shape our rows."""
     cid = str(ch.get("id") or "")
@@ -755,11 +785,20 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
             return  # malformed, or more than five people: refused, never repaired
         if members and _local_gateway_id(conn) not in _member_ids(members):
             return  # a member-listed channel that does not include this gateway is not ours to hold
-        conn.execute(
-            "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
-            "VALUES (?, ?, ?, 0, ?, ?)",
-            (cid, cid, str(ch.get("topic") or "")[:200], json.dumps(members),
-             str(ch.get("created_at") or _now())[:40]))
+        created = str(ch.get("created_at") or _now())[:40]
+        topic = str(ch.get("topic") or "")[:200]
+        their_at = str(ch.get("topic_at") or created)[:40]
+        if not _valid_stamp(their_at):
+            their_at = created
+        row = conn.execute("SELECT topic, topic_at FROM channels WHERE id = ?", (cid,)).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO channels(id, name, topic, is_dm, members, created_at, topic_at) "
+                "VALUES (?, ?, ?, 0, ?, ?, ?)", (cid, cid, topic, json.dumps(members), created, their_at))
+        elif _ts(their_at) > _ts(row["topic_at"] or created) and topic != row["topic"]:
+            conn.execute("UPDATE channels SET topic = ?, topic_at = ? WHERE id = ?", (topic, their_at, cid))
+        elif _ts(their_at) > _ts(row["topic_at"] or created):
+            conn.execute("UPDATE channels SET topic_at = ? WHERE id = ?", (their_at, cid))
 
 
 # ---------------------------------------------------------------------------
