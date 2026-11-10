@@ -46,6 +46,29 @@ HERD_POST = {
     },
 }
 
+HERD_SEARCH = {
+    "name": "herd_search",
+    "description": (
+        "Search the message history of every Herd channel and DM this Hermes holds, for example to check whether "
+        "an error was seen before. Every word in the query must appear; the last word also matches a prefix. "
+        "Returns the best matches with channel, author, time and a snippet. Pass a result's channel_id to "
+        "herd_read_channel to read around it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Words to look for. Plain text, not search syntax."},
+            "channel": {
+                "type": "string",
+                "description": "Optional: limit to one channel or DM (name, id, or the other person's name).",
+            },
+            "limit": {"type": "integer", "description": "How many results (1 to 25). Default 10."},
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}
+
 HERD_READ_CHANNEL = {
     "name": "herd_read_channel",
     "description": (

@@ -102,6 +102,27 @@ def herd_read_channel(args: dict, **kwargs: Any) -> str:
         return _fail(exc)
 
 
+def _brief_hit(r: dict) -> dict:
+    return {"id": r["id"], "channel": r["channel_name"], "channel_id": r["channel_id"],
+            "type": "dm" if r["is_dm"] else "channel", "author": r["author_name"], "author_type": r["author_type"],
+            "from_machine": r["gateway_name"], "at": r["created_at"], "snippet": r["snippet"],
+            "in_thread": bool(r["thread_parent_id"])}
+
+
+def herd_search(args: dict, **kwargs: Any) -> str:
+    """Search message history across channels and DMs this gateway holds. Read-only."""
+    try:
+        args = args or {}
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return json.dumps({"ok": False, "error": "query is required"})
+        channel = str(args.get("channel") or "").strip() or None
+        hits = _store().search_messages(query, channel=channel, limit=args.get("limit"))
+        return json.dumps({"ok": True, "query": query, "results": [_brief_hit(h) for h in hits]})
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
 def herd_set_status(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}

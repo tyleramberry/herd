@@ -1,9 +1,9 @@
-// Track 0 pane probe — imports the SHIPPED desktop/plugin.js with the plugin SDK stubbed and drives the
+// Pane probe — imports the SHIPPED desktop/plugin.js with the plugin SDK stubbed and drives the
 // real MessageRow (reaction affordance + picker + pills) and WakeBanner, so the behaviour is checked by
 // running the pane code rather than by grepping its source. Same method as s15_pane_render_probe.mjs:
 // only the two import specifiers are rewritten; no code is re-typed, no dynamic evaluation.
 //
-//     node tests/track0_pane_probe.mjs [path/to/plugin.js]
+//     node tests/pane_probe.mjs [path/to/plugin.js]
 // Exit code 0 when every check passes; each check prints one line.
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,16 +24,17 @@ export const Input = 'Input'
 export const ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot'
 export const Textarea = 'Textarea'
+export const PALETTE_AREA = 'palette'
 export const PANES_AREA = 'panes'
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'nav'
 export const atom = value => ({ value, set (next) { this.value = next }, get () { return this.value } })
-export const host = { state: { activeSessionId: atom(null) }, navigate () {} }
+export const host = { state: { activeSessionId: atom(null) }, navigate (path) { globalThis.__navigations.push(path) } }
 export const pluginSettingsHref = id => '/settings/plugins/' + id
 export const queryClient = { invalidateQueries () {} }
 export const relativeTime = ms => String(ms)
 export const useMutation = () => ({ isPending: false, mutate: v => { globalThis.__mutations.push(v) } })
-export const useQuery = () => ({})
+export const useQuery = () => globalThis.__query || {}
 export const useValue = $a => $a.get()
 `)
 writeFileSync(join(work, 'jsx-runtime.mjs'), `
@@ -45,15 +46,26 @@ const rewired = source
   .replace("from '@hermes/plugin-sdk'", "from './sdk.mjs'")
   .replace("from 'react/jsx-runtime'", "from './jsx-runtime.mjs'")
 if (rewired === source) throw new Error('import specifiers did not match — probe needs updating')
+if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
+const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${rewired}\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
 
 globalThis.__mutations = []
+globalThis.__navigations = []
+globalThis.__query = null
 const { host: sdkHost } = await import(pathToFileURL(join(work, 'sdk.mjs')).href)
-const { probeMessageRow: MessageRow, probeWakeBanner: WakeBanner, probeReactionPicker: ReactionPicker,
-  probePickerAtom: pickerAtom } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
+const {
+  probeMessageRow: MessageRow, probeWakeBanner: WakeBanner, probeReactionPicker: ReactionPicker,
+  probePickerAtom: pickerAtom, probeSearchBar: SearchBar, probeSnippetParts: snippetParts,
+  probeOpenHit: openHit, probeArriveAt: arriveAt, probeSearchQuery: searchQuery, probeScrollTarget: scrollTarget,
+  probeSelection: selection, probeThread: thread, probeJumpNote: jumpNote, probePlugin: plugin
+} = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
+// Register the plugin once, as the host does, so the timers have their context (ctx.setTimeout).
+const fakeCtx = { items: [], registerMany: list => fakeCtx.items.push(...list), onEvent () {}, setInterval () {}, setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms), onDispose () {} }
+plugin.register(fakeCtx)
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : ` -> ${detail}`}`)
   if (!ok) failures.push(name)
@@ -210,6 +222,85 @@ const base = { enabled: true, target_set: false, target_label: '', blocked_reaso
   const ok = banner({ ...base, target_set: true, target_label: 'this chat' })
   find(ok, n => n.type === 'Button' && n.props.children === 'Stop').props.onClick()
   check('Stop clears the target (empty session key)', globalThis.__mutations[0] === '', JSON.stringify(globalThis.__mutations))
+}
+
+// ---- search (Track 1) ----------------------------------------------------------------
+const flat = root => nodes(root).filter(n => typeof n.type === 'string')
+{
+  const parts = snippetParts('a [b] c')
+  const mark = parts.find(p => p && p.type === 'mark')
+  check('snippet highlights the bracketed match as a mark', mark && mark.props.children === 'b', JSON.stringify(parts))
+  check('snippet keeps the text around the match', parts.includes('a ') && parts.includes(' c'))
+  const hostile = snippetParts('<img src=x onerror=alert(1)> [<b>]')
+  const types = hostile.filter(p => p && typeof p === 'object').map(p => p.type)
+  check('snippet never builds markup from message text', types.every(t => t === 'mark'), JSON.stringify(types))
+  check('snippet of nothing renders nothing', snippetParts(null).length === 0)
+}
+{
+  searchQuery.set('')
+  globalThis.__query = null
+  const idle = SearchBar({})
+  check('empty search box shows no results list', !find(idle, n => n.props.role === 'list'))
+  check('search box is labelled', Boolean(find(idle, n => n.props['aria-label'] === 'Search messages')))
+
+  searchQuery.set('deploy')
+  globalThis.__query = { data: { results: [{
+    id: 'h1', channel_id: 'general', channel_name: 'general', is_dm: 0, author_name: 'Brooklyn',
+    created_at: '2026-11-05T00:00:00Z', snippet: 'the [deploy] failed', thread_parent_id: null
+  }] } }
+  const hits = SearchBar({})
+  const list = find(hits, n => n.props.role === 'list')
+  const item = list && findAll(list, n => n.props.role === 'listitem')[0]
+  check('a hit lists its channel', item && texts(item).includes('#general'), JSON.stringify(texts(item || {})))
+  check('a hit lists its author', item && texts(item).includes('Brooklyn'))
+  check('a hit shows its snippet', item && Boolean(find(item, n => n.type === 'mark')))
+
+  globalThis.__query = { data: { results: [] } }
+  check('no hits says so, in the query', texts(SearchBar({})).some(t => typeof t === 'string' && t.includes('No messages match')))
+
+  globalThis.__query = { isError: true, data: undefined }
+  check('a failed search says so instead of a blank list', texts(SearchBar({})).some(t => typeof t === 'string' && t.includes("couldn't run")))
+  globalThis.__query = null
+  searchQuery.set('')
+}
+{
+  // Clicking a hit opens its channel (or thread) and clears the search, then waits for its row to scroll to.
+  searchQuery.set('x')
+  selection.pane.set(null)
+  selection.page.set(null)
+  thread.page.set(null)
+  openHit({ id: 'h2', channel_id: 'general', channel_name: 'general', thread_parent_id: 'root9' })
+  check('open hit selects its channel', selection.page.get() === 'general')
+  check('open hit opens the thread a reply belongs to', thread.page.get() === 'root9')
+  check('open hit clears the search box', searchQuery.get() === '')
+  check('open hit arms the scroll for its row', scrollTarget.get() && scrollTarget.get().id === 'h2')
+}
+{
+  // A message row scrolls itself into view when it is the pending hit, and only then.
+  const scrolled = []
+  const node = { scrollIntoView: opts => scrolled.push(opts), style: {} }
+  scrollTarget.set({ id: 'other' })
+  arriveAt(node, 'h2')
+  check('a different row does not scroll', scrolled.length === 0 && scrollTarget.get().id === 'other')
+  scrollTarget.set({ id: 'h2' })
+  arriveAt(node, 'h2')
+  check('the pending row scrolls into view, once', scrolled.length === 1 && scrollTarget.get() === null)
+  arriveAt(node, 'h2')
+  check('it does not scroll again on the next render', scrolled.length === 1)
+  const row = MessageRow({ message: message({ id: 'rowid' }) })
+  check('message rows carry their id for the jump', row.props['data-herd-message-id'] === 'rowid')
+  check('message rows get the scroll ref', typeof row.props.ref === 'function')
+}
+{
+  // The palette entry is registered and opens the Herd page with an empty search.
+  const items = fakeCtx.items
+  const entry = items.find(i => i.area === 'palette')
+  check('a ⌘K palette entry is registered', Boolean(entry) && entry.data.id === 'herd.search')
+  check('the palette entry is labelled', entry && entry.data.label === 'Search Herd messages')
+  searchQuery.set('leftover')
+  entry.data.run()
+  check('running it opens the Herd page', globalThis.__navigations.at(-1) === '/herd')
+  check('running it starts with an empty search', searchQuery.get() === '')
 }
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')

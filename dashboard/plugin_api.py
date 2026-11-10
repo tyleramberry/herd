@@ -64,6 +64,14 @@ def get_status():
     return _call(store.status)
 
 
+@router.get("/search")
+def get_search(q: str = Query(default=""), channel: Optional[str] = Query(default=None),
+               limit: int = Query(default=store.SEARCH_DEFAULT_LIMIT)):
+    """Full-text search over message bodies (⌘K). ``q`` is plain text: every term must match; ``channel`` narrows."""
+    results = _call(store.search_messages, q, channel=channel, limit=limit)
+    return {"query": str(q or "")[:store.SEARCH_MAX_CHARS], "results": results}
+
+
 @router.post("/wake-target")
 def post_wake_target(body: dict[str, Any]):
     """One-click 'Answer @mentions here' from the pane: the active chat's session key becomes the wake target.

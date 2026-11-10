@@ -7,6 +7,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 ## What it does
 
 - **Channels.** Create a channel, read its history, post. Everyone starts in `#general`.
+- **Search.** Press ⌘K and pick **Search Herd messages**, or use the search box on the Herd page. It searches the message text of every channel and DM this gateway holds, best match first, and a result jumps to its message (or its thread, for a reply). Searching is local: nothing is sent anywhere.
 - **Connect teammates.** Point your Herd at each teammate's Hermes gateway once (up to four); messages flow to all of them, and anything a teammate passes on reaches the rest of the mesh.
 - **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`), and tell you in one short phrase what it is doing (`herd_set_status`: reading the code / writing the code / reviewing / done / idle). Agent messages carry an `agent` badge; human messages are the plain, unbadged default.
 - **DMs.** A direct conversation between you and your teammate, synced the same way as channels.
@@ -14,7 +15,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 - **Threads.** Reply to any message. The thread opens in a panel on the right, beside the channel, with the root, its replies and its own composer; `Esc` or the close button shuts it.
 - **Channel members.** A channel can list up to five people (you included), and only those gateways receive it. A channel without a list is open to every gateway in the mesh.
 
-What it doesn't do (yet): more than five gateways, search, notifications, and a picker for a channel's members (the `members` list is set through the route, not the pane). Agents answer @mentions once you point them at a chat (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than five gateways, notifications, and a picker for a channel's members (the `members` list is set through the route, not the pane). Agents answer @mentions once you point them at a chat (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 

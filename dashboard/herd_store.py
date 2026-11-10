@@ -194,6 +194,20 @@ CREATE TABLE IF NOT EXISTS wake_skips (
     reason TEXT NOT NULL,
     at TEXT NOT NULL
 );
+-- Full-text index over message bodies (Track 1, ⌘K search). Rowid = messages.seq, so the index and the table
+-- stay one-to-one; the triggers keep it current for every write path (ingest, local post, edit, delete).
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    content, message_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, content, message_id) VALUES (new.seq, new.content, new.id);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN
+    UPDATE messages_fts SET content = new.content WHERE rowid = new.seq;
+END;
+CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.seq;
+END;
 """
 
 _init_lock = threading.Lock()
@@ -202,7 +216,8 @@ _initialized: set[str] = set()
 # What a usable Herd DB must have. Checked per connect so a database replaced under a live
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
-_REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips")
+_REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips",
+                    "messages_fts")
 _REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
                           "promoted_from", "task_id")
 
@@ -260,6 +275,7 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         if key in _initialized and _schema_usable(conn):
             return
         conn.executescript(_SCHEMA)
+        _backfill_search_index(conn)
         # CREATE TABLE IF NOT EXISTS never adds columns to an existing table: migrate older DBs.
         if "thread_parent_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
             conn.execute("ALTER TABLE messages ADD COLUMN thread_parent_id TEXT")
@@ -284,6 +300,14 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         )
         conn.commit()
         _initialized.add(key)
+
+
+def _backfill_search_index(conn: sqlite3.Connection) -> None:
+    """Index the messages that predate the FTS table (or that a replaced index lost). Idempotent: only rows whose
+    rowid is missing from the index are added, and the index rowid is messages.seq, so the two stay in parity."""
+    conn.execute("INSERT INTO messages_fts(rowid, content, message_id) "
+                 "SELECT m.seq, m.content, m.id FROM messages m "
+                 "WHERE m.seq NOT IN (SELECT rowid FROM messages_fts)")
 
 
 def _rekey_peer_state(conn: sqlite3.Connection) -> None:
@@ -830,6 +854,60 @@ def list_thread(parent_id: str) -> dict:
             f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.thread_parent_id = ? AND m.channel_id = ? "
             "ORDER BY m.created_at, m.id", (root_id, parent["channel_id"])).fetchall()
     return {"parent": _with_wake_notes([parent])[0], "replies": _with_wake_notes([dict(r) for r in replies])}
+
+
+SEARCH_MAX_TERMS = 8
+SEARCH_MAX_CHARS = 200
+SEARCH_DEFAULT_LIMIT = 20
+SEARCH_MAX_LIMIT = 50
+
+
+def fts_query(text: Any) -> str:
+    """User text -> a safe FTS5 expression. Each whitespace-separated term becomes a quoted phrase, so FTS
+    operators (AND, OR, NOT, NEAR, *, -, :, parentheses, quotes) are inert text. The last term is a prefix match,
+    so a half-typed word still finds its messages. Empty or punctuation-only input gives ``""`` (no results)."""
+    terms = _PROMPT_CTRL_RE.sub(" ", str(text or ""))[:SEARCH_MAX_CHARS].split()[:SEARCH_MAX_TERMS]
+    phrases = ['"' + t.replace('"', '""') + '"' for t in terms if t.strip()]
+    if not phrases:
+        return ""
+    phrases[-1] += "*"
+    return " ".join(phrases)
+
+
+def search_messages(text: Any, *, channel: Optional[str] = None, limit: Any = None) -> list[dict]:
+    """Messages whose body matches every term, best match first (bm25), newest first among equal scores, then by id,
+    so the order is stable. Thread replies are included and say so (``thread_parent_id``). ``channel`` narrows to one
+    channel or DM by id or name. Each result carries a plain-text snippet with the matched words in [brackets]."""
+    match = fts_query(text)
+    if not match:
+        return []
+    try:
+        cap = int(limit) if limit is not None else SEARCH_DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        cap = SEARCH_DEFAULT_LIMIT
+    cap = max(1, min(cap, SEARCH_MAX_LIMIT))
+    args: list[Any] = [match]
+    where = "messages_fts MATCH ?"
+    if channel is not None and str(channel).strip():
+        found = resolve_channel(channel)
+        if not found:
+            raise HerdError(404, f"No channel or DM named '{str(channel)[:64]}'.")
+        where += " AND m.channel_id = ?"
+        args.append(found["id"])
+    args.append(cap)
+    with connect() as conn:
+        try:
+            rows = conn.execute(
+            "SELECT m.id, m.channel_id, c.name AS channel_name, c.is_dm, m.author_name, m.author_type, "
+            "m.gateway_name, m.created_at, m.thread_parent_id, "
+            "snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet "
+            "FROM messages_fts JOIN messages m ON m.seq = messages_fts.rowid "
+            "JOIN channels c ON c.id = m.channel_id "
+                f"WHERE {where} ORDER BY bm25(messages_fts), m.created_at DESC, m.id LIMIT ?",
+                args).fetchall()
+        except sqlite3.OperationalError:  # a query shape FTS5 still rejects: say so, never a stack trace
+            raise HerdError(422, "That search couldn't be run. Try fewer or simpler words.")
+    return [dict(r) for r in rows]
 
 
 def _with_wake_notes(rows: list[dict]) -> list[dict]:

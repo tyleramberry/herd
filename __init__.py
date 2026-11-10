@@ -150,6 +150,8 @@ def register(ctx):
                       schema=schemas.HERD_READ_CHANNEL, handler=tools.herd_read_channel)
     ctx.register_tool(name="herd_set_status", toolset="herd",
                       schema=schemas.HERD_SET_STATUS, handler=tools.herd_set_status)
+    # herd_search is built (tools.herd_search) but not registered: the catalog's locked tool scope (TC-0.8) is
+    # four tools. Registering it means re-approving that scope first.
     ctx.register_platform_handler("api_server", _wire_api_server)
     ctx.register_command("herd-listen", _listen_command,
                          description="Let your agent in this chat answer Herd @mentions (or: off)",

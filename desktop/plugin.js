@@ -6,6 +6,7 @@ import {
   Codicon,
   EmptyState,
   Input,
+  PALETTE_AREA,
   PANES_AREA,
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
@@ -41,6 +42,7 @@ const KEYS = {
 
 // Module-scope state; reset on every register() (hot reload / re-enable).
 let rest = null
+let ctx = null // the plugin context, set by register(); timers go through ctx.setTimeout (TC-1.7)
 const selection = { page: atom(null), pane: atom(null) }
 const composing = { page: atom(null), pane: atom(null) } // null | 'channel' | 'dm'
 const plusMenu = { page: atom(false), pane: atom(false) } // is the '+' dropdown open
@@ -595,6 +597,7 @@ function ReactionPicker({ message, react }) {
 
 function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
+  useValue(scrollTarget) // re-render when a search jump is pending, so the ref below sees it
   // Only agent-authored messages carry a badge: humans read as the default, unbadged case (spec §3).
   const agent = message.author_type === 'agent'
   const reactions = Array.isArray(message.reactions) ? message.reactions : []
@@ -611,6 +614,8 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   })
   return jsxs('div', {
     className: 'group relative flex flex-col gap-0.5 px-3 py-1.5',
+    'data-herd-message-id': message.id,
+    ref: node => arriveAt(node, message.id),
     children: [
       jsx(ReactionPicker, { message, react }),
       jsxs('div', {
@@ -1018,6 +1023,149 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
 // Page / pane
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Search: the ⌘K palette entry and the search box on the Herd page
+// ---------------------------------------------------------------------------
+
+const searchQuery = atom('') // what the page's search box holds; '' means no search
+const jumpNote = atom(null) // one line after a jump whose message isn't in the loaded history, or null
+
+// The backend's snippet marks each match as "[word]". Split it into text and <mark> parts; never HTML.
+function snippetParts(snippet) {
+  return String(snippet || '')
+    .split(/(\[[^\]]*\])/)
+    .filter(Boolean)
+    .map((part, i) =>
+      part.startsWith('[') && part.endsWith(']')
+        ? jsx('mark', {
+            key: i,
+            className: 'rounded-sm bg-(--ui-surface-secondary) px-0.5 text-(--ui-text-primary)',
+            children: part.slice(1, -1)
+          })
+        : part
+    )
+}
+
+// A search hit waiting for its message row to render: { id } or null. Rows subscribe to it (MessageRow).
+const scrollTarget = atom(null)
+
+// Open a search hit: its channel (or its thread, for a reply). The row scrolls itself into view when it renders.
+function openHit(hit) {
+  jumpNote.set(null)
+  searchQuery.set('')
+  selection.page.set(hit.channel_id)
+  thread.page.set(hit.thread_parent_id || null)
+  scrollTarget.set({ id: hit.id })
+  // The row may not be loaded yet, or may be older than the loaded history: give up after a short wait.
+  ctx.setTimeout(() => {
+    const pending = scrollTarget.get()
+    if (pending && pending.id === hit.id) {
+      scrollTarget.set(null)
+      jumpNote.set('Opened ' + hit.channel_name + '. That message is older than the loaded history.')
+    }
+  }, 2500)
+}
+
+// Ref callback for a message row: if it is the pending search hit, bring it into view and flash it.
+function arriveAt(node, id) {
+  const pending = scrollTarget.get()
+  if (!node || !pending || pending.id !== id) return
+  scrollTarget.set(null)
+  node.scrollIntoView({ block: 'center' })
+  node.style.outline = '2px solid var(--ui-accent)'
+  ctx.setTimeout(() => {
+    node.style.outline = ''
+  }, 1500)
+}
+
+function SearchResults({ term, results, failed }) {
+  if (failed) {
+    return jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children: "Search couldn't run right now." })
+  }
+  if (results.length === 0) {
+    return jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children: 'No messages match “' + term + '”.' })
+  }
+  return jsx('div', {
+    role: 'list',
+    'aria-label': 'Search results',
+    className: 'flex max-h-64 flex-col overflow-y-auto',
+    children: results.map(hit =>
+      jsxs(
+        'button',
+        {
+          type: 'button',
+          role: 'listitem',
+          onClick: () => openHit(hit),
+          className: 'flex min-w-0 flex-col items-start gap-0.5 rounded px-2 py-1 text-left hover:bg-(--ui-surface-secondary)',
+          children: [
+            jsxs('div', {
+              className: 'flex w-full min-w-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+              children: [
+                jsx('span', {
+                  className: 'truncate font-medium text-(--ui-text-secondary)',
+                  children: hit.type === 'dm' ? hit.channel_name : '#' + hit.channel_name
+                }),
+                jsx('span', { className: 'truncate', children: hit.author_name }),
+                jsx('span', { className: 'shrink-0', children: timeLabel(hit.created_at) }),
+                hit.thread_parent_id ? jsx('span', { className: 'shrink-0', children: 'in thread' }) : null
+              ]
+            }),
+            jsx('div', { className: 'w-full min-w-0 truncate text-xs', children: snippetParts(hit.snippet) })
+          ]
+        },
+        hit.id
+      )
+    )
+  })
+}
+
+function SearchBar() {
+  const q = useValue(searchQuery)
+  const note = useValue(jumpNote)
+  const term = q.trim()
+  const { data, isError } = useQuery({
+    queryKey: [PLUGIN_ID, 'search', term],
+    queryFn: () => (term ? api('/search?q=' + encodeURIComponent(term) + '&limit=25') : Promise.resolve({ results: [] }))
+  })
+  const results = data && Array.isArray(data.results) ? data.results : []
+  return jsxs('div', {
+    className: 'flex flex-col gap-1 border-b border-(--ui-stroke-secondary) px-3 py-2',
+    children: [
+      jsx(Input, {
+        type: 'search',
+        name: 'search',
+        value: q,
+        autoFocus: true,
+        autoComplete: 'off',
+        placeholder: 'Search messages…',
+        'aria-label': 'Search messages',
+        className: 'h-7 text-xs',
+        onChange: e => searchQuery.set(e.currentTarget.value),
+        onKeyDown: e => {
+          if (e.key !== 'Escape' || !q) return
+          e.stopPropagation()
+          searchQuery.set('')
+        }
+      }),
+      note
+        ? jsxs('div', {
+            className: 'flex items-center justify-between gap-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: [
+              jsx('span', { children: note }),
+              jsx('button', {
+                type: 'button',
+                className: 'hover:text-(--ui-accent)',
+                onClick: () => jumpNote.set(null),
+                children: 'Dismiss'
+              })
+            ]
+          })
+        : null,
+      term ? jsx(SearchResults, { term, results, failed: Boolean(isError) }) : null
+    ]
+  })
+}
+
 // One honest line about @mention wake: whether the agent answers in a chat, or exactly what is missing. The
 // one-click target comes from the pane's active session (host.state.activeSessionId), so no slash command.
 function WakeBanner({ status }) {
@@ -1135,6 +1283,7 @@ function HerdView({ compact }) {
     children: [
       statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
       statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
+      compact ? null : jsx(SearchBar),
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
         children: [
@@ -1177,7 +1326,8 @@ export default {
   name: 'Herd',
   defaultEnabled: false,
 
-  register(ctx) {
+  register(hostCtx) {
+    ctx = hostCtx
     rest = ctx.rest
     selection.page.set(null)
     selection.pane.set(null)
@@ -1192,8 +1342,11 @@ export default {
     mentionState.page.set(null)
     mentionState.pane.set(null)
     reactionPicker.set(null)
+    searchQuery.set('')
+    jumpNote.set(null)
     ctx.onDispose(() => {
       rest = null
+      ctx = null
     })
 
     ctx.registerMany([
@@ -1207,6 +1360,19 @@ export default {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
         data: { path: ROUTE_PATH, label: 'Herd', codicon: 'comment-discussion' }
+      },
+      {
+        id: 'search',
+        area: PALETTE_AREA,
+        data: {
+          id: 'herd.search',
+          label: 'Search Herd messages',
+          keywords: ['herd', 'search', 'find', 'messages', 'history'],
+          run: () => {
+            searchQuery.set('')
+            host.navigate(ROUTE_PATH)
+          }
+        }
       },
       {
         id: 'pane',
