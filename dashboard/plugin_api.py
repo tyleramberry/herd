@@ -72,6 +72,13 @@ def get_search(q: str = Query(default=""), channel: Optional[str] = Query(defaul
     return {"query": str(q or "")[:store.SEARCH_MAX_CHARS], "results": results}
 
 
+@router.post("/profile")
+def post_profile(body: dict[str, Any]):
+    """Set this person's name from the Herd page (empty clears it). Returns the fresh status."""
+    _call(store.set_display_name, body.get("display_name"))
+    return _call(store.status)
+
+
 @router.post("/pairing-code")
 def post_pairing_code():
     """A new one-time code for a teammate to pair with this gateway (replaces any live code)."""
@@ -81,7 +88,7 @@ def post_pairing_code():
 @router.post("/pair")
 def post_pair(body: dict[str, Any]):
     """Exchange a teammate's code for their Herd secret. Returns it once, for the owner to paste into Settings."""
-    return _call(store.redeem_pairing, body.get("url"), body.get("code"))
+    return _call(store.redeem_pairing, body.get("invite") or body.get("url"), body.get("code"))
 
 
 @router.post("/wake-target")
