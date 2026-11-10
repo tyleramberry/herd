@@ -53,7 +53,7 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, PairingPanel as probePairingPanel, pairingView as probePairingView, pairingResult as probePairingResult, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, PairingPanel as probePairingPanel, pairingView as probePairingView, pairingResult as probePairingResult, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote, renderBody as probeRenderBody, followNewest as probeFollowNewest, followState as probeFollowState, continuesPrevious as probeContinues, messageRows as probeMessageRows, dayLabel as probeDayLabel, mentionCandidates as probeMentionCandidates, buildInvite as probeBuildInvite, inviteLine as probeInviteLine, PeopleList as probePeopleList, renaming as probeRenaming, PlusMenu as probePlusMenu }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
@@ -76,7 +76,9 @@ const {
   probeNewChannelForm, probeInsertAtCaret, probePickedMembers,
   probeEmojiTray, probeTopicEditing, probeComposeRequest,
   probeOpenThreadWorkspace, probeCloseThreadWorkspace, probeThreadTabs, probeThreadWorkspace, probeThreadPanel,
-  probePairingPanel, probePairingView, probePairingResult
+  probePairingPanel, probePairingView, probePairingResult,
+  probeRenderBody, probeFollowNewest, probeFollowState, probeContinues, probeMessageRows, probeDayLabel,
+  probeMentionCandidates, probeBuildInvite, probeInviteLine, probePeopleList, probeRenaming
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
@@ -610,6 +612,139 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   find(done, n => n.type === 'Button' && n.props.children === 'Hide key').props.onClick()
   check('hiding the key clears it', probePairingResult.get() === null)
   check('and it is gone from the pane', !nodes(probePairingPanel({})).some(n => n.type === 'code'))
+}
+
+// ---- agent answers read as written: code blocks, lists, quotes, headings ----------------
+{
+  check('a plain message renders exactly as before', JSON.stringify(probeRenderBody('hello **there**')) === JSON.stringify(probeRenderContent('hello **there**')))
+  const body = probeRenderBody('Here you go:\n```js\nconst a = 1\n<b>x</b>\n```\n- first\n- **second**\n1. one\n> quoted\n# Title\nbye')
+  const all = nodes(body)
+  const code = all.find(n => n.type === 'div' && n.props.style && n.props.style.whiteSpace === 'pre')
+  check('a fenced block is one code box with its text untouched', Boolean(code) && code.props.children === 'const a = 1\n<b>x</b>', JSON.stringify(code && code.props.children))
+  check('markup inside a code block stays text', !all.some(n => n.type === 'b'))
+  check('bullets render as list rows', all.filter(n => n.type === 'span' && n.props.children === '•').length === 2)
+  check('inline markup still works inside a list row', all.some(n => n.type === 'strong' && n.props.children === 'second'))
+  check('a numbered row keeps its number', all.some(n => n.type === 'span' && n.props.children === '1.'))
+  check('a quote has a rule down its side', all.some(n => n.type === 'div' && n.props.style && String(n.props.style.borderLeft || '').includes('2px')))
+  check('a heading is bold', all.some(n => n.type === 'div' && n.props.style && n.props.style.fontWeight === 600))
+  const open = nodes(probeRenderBody('```\nstill code'))
+  check('an unclosed fence still reads as code', open.some(n => n.type === 'div' && n.props.children === 'still code'))
+  check('snake_case and a lone dash are not lists', JSON.stringify(probeRenderBody('a - b and snake_case')) === JSON.stringify(probeRenderContent('a - b and snake_case')))
+}
+
+// ---- the list follows the newest message ------------------------------------------------
+{
+  const box = { scrollHeight: 1000, scrollTop: 0, clientHeight: 300, parentElement: null }
+  const mk = () => { const n = { parentElement: box, scrolled: 0, scrollIntoView () { n.scrolled += 1 } }; return n }
+  probeFollowState.last.clear()
+  const first = mk()
+  probeFollowNewest(first, 'channel:x', 'm1', false)
+  check('a list opens at its newest message', first.scrolled === 1)
+  probeFollowNewest(first, 'channel:x', 'm1', false)
+  check('a re-render with nothing new leaves the scroll alone', first.scrolled === 1)
+  probeFollowNewest(first, 'channel:x', 'm2', false)
+  check('reading history, a teammate\'s new message does not yank the view', first.scrolled === 1)
+  probeFollowNewest(first, 'channel:x', 'm3', true)
+  check('your own message always comes into view', first.scrolled === 2)
+  box.scrollTop = 650
+  probeFollowNewest(first, 'channel:x', 'm4', false)
+  check('near the bottom, a new message is followed', first.scrolled === 3)
+  const again = mk()
+  probeFollowNewest(again, 'channel:x', 'm4', false)
+  check('coming back to a channel opens at the newest again', again.scrolled === 1)
+  scrollTarget.set({ id: 'hit' })
+  const jumping = mk()
+  probeFollowNewest(jumping, 'channel:y', 'm9', true)
+  check('a search jump keeps the scroll', jumping.scrolled === 0)
+  scrollTarget.set(null)
+  check('no rows, no scroll', probeFollowNewest(mk(), 'channel:z', null, false) === false)
+}
+
+// ---- grouping and day dividers ----------------------------------------------------------
+{
+  const a = message({ id: 'a', gateway_id: 'g1', created_at: '2026-11-05T10:00:00Z' })
+  const b = message({ id: 'b', gateway_id: 'g1', created_at: '2026-11-05T10:02:00Z' })
+  const late = message({ id: 'c', gateway_id: 'g1', created_at: '2026-11-05T10:30:00Z' })
+  const other = message({ id: 'd', gateway_id: 'g2', author_name: 'Ash', created_at: '2026-11-05T10:30:30Z' })
+  const agentRow = message({ id: 'e', gateway_id: 'g2', author_name: 'Ash', author_type: 'agent', created_at: '2026-11-05T10:30:40Z' })
+  check('a quick follow-up joins the message above', probeContinues(a, b) === true)
+  check('a long gap starts a new header', probeContinues(b, late) === false)
+  check('another person starts a new header', probeContinues(late, other) === false)
+  check('an agent never hides under a person\'s header', probeContinues(other, agentRow) === false)
+  const rows = probeMessageRows([a, b, late], { onOpenThread () {} })
+  check('one day divider for one day', rows.filter(r => r.type.name === 'DayDivider').length === 1)
+  const grouped = MessageRow(rows[2].props)
+  check('a grouped row has no author header', !texts(grouped).includes('Brooklyn'))
+  check('a grouped row still offers Reply on hover', nodes(grouped).some(n => n.type === 'button' && n.props['aria-label'] === 'Reply in thread'))
+  const headed = MessageRow(rows[1].props)
+  check('the first row of a group names its author', texts(headed).includes('Brooklyn'))
+  const now = new Date(2026, 10, 10, 12)
+  check('today reads Today', probeDayLabel(new Date(2026, 10, 10, 9).toISOString(), now) === 'Today')
+  check('yesterday reads Yesterday', probeDayLabel(new Date(2026, 10, 9, 23).toISOString(), now) === 'Yesterday')
+}
+
+// ---- your own agent is in the mention menu ----------------------------------------------
+{
+  const list = probeMentionCandidates([{ id: 'me', display_name: 'Tyler', is_self: true }, { id: 'b', display_name: 'Brooklyn', is_self: false }], '')
+  check('your own agent can be tagged', list.some(c => c.handle === 'tyler-hermes' && c.label === 'Your Hermes'))
+  check('you are not offered yourself', !list.some(c => c.handle === 'tyler'))
+  check('teammates and their agents are still offered', list.some(c => c.handle === 'brooklyn') && list.some(c => c.handle === 'brooklyn-hermes'))
+  const odd = probeMentionCandidates([{ id: 'me', display_name: '田中', is_self: true }], '')
+  check('a name with no latin letters falls back to @hermes', odd.length === 1 && odd[0].handle === 'hermes')
+}
+
+// ---- one-line invite --------------------------------------------------------------------
+{
+  check('an invite is address#code', probeBuildInvite('https://my-mac.ts.net:8642/', 'ABCDE-FGHJK') === 'https://my-mac.ts.net:8642#ABCDE-FGHJK')
+  check('no address, no invite', probeBuildInvite('  ', 'ABCDE-FGHJK') === '')
+  probePairingResult.set(null)
+  probePairingView.set('show')
+  probeInviteLine.set('')
+  globalThis.__mintData = { code: 'ABCDE-FGHJK', expires_in_s: 600 }
+  const shown = probePairingPanel({})
+  const form = find(shown, n => n.type === 'form')
+  form.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { address: ['https://my-mac.ts.net:8642'] } } })
+  check('making an invite remembers the address', globalThis.__drafts.gatewayAddress === 'https://my-mac.ts.net:8642')
+  check('the invite is shown as one line', nodes(probePairingPanel({})).some(n => n.type === 'code' && n.props.children === 'https://my-mac.ts.net:8642#ABCDE-FGHJK'))
+  globalThis.__mintData = undefined
+  probePairingView.set('enter')
+  globalThis.__mutations.length = 0
+  const enter = probePairingPanel({})
+  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { url: ['https://my-mac.ts.net:8642#ABCDE-FGHJK'], code: [] } } })
+  check('a pasted invite needs no separate code', globalThis.__mutations.length === 1 && globalThis.__mutations[0].url === 'https://my-mac.ts.net:8642#ABCDE-FGHJK')
+  globalThis.__mutations.length = 0
+  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { url: ['https://my-mac.ts.net:8642'], code: [] } } })
+  check('an address alone is not sent', globalThis.__mutations.length === 0)
+  probePairingView.set(null)
+  probeInviteLine.set('')
+}
+
+// ---- people list ------------------------------------------------------------------------
+{
+  globalThis.__query = { data: [
+    { id: 'me', display_name: 'Tyler', is_self: true, online: true },
+    { id: 'b', display_name: 'Brooklyn', is_self: false, online: true },
+    { id: 'c', display_name: 'Ash', is_self: false, online: false }
+  ] }
+  probeRenaming.set(false)
+  const picked = []
+  const status = { agent_status: null, peer_status: [{ gateway_id: 'b', phrase: 'writing the code' }] }
+  const list = probePeopleList({ status, onSelect: id => picked.push(id) })
+  const dots = findAll(list, n => n.type === 'StatusDot').map(n => n.props.tone)
+  check('online teammates get a green dot, away ones a muted one', JSON.stringify(dots) === JSON.stringify(['good', 'good', 'muted']), JSON.stringify(dots))
+  check('a working agent shows beside its person', texts(list).includes('agent writing the code'))
+  globalThis.__mutations.length = 0
+  findAll(list, n => n.type === 'button')[1].props.onClick()
+  check('clicking a teammate opens the DM', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ id: 'b' }))
+  findAll(list, n => n.type === 'button')[0].props.onClick()
+  check('clicking yourself starts a rename', probeRenaming.get() === true)
+  const editing = probePeopleList({ status, onSelect () {} })
+  globalThis.__mutations.length = 0
+  find(editing, n => n.type === 'form').props.onSubmit({ preventDefault () {}, currentTarget: { __values: { display_name: ['Ty'] } } })
+  check('saving sends the new name', globalThis.__mutations[0] === 'Ty')
+  probeRenaming.set(false)
+  globalThis.__query = null
+  check('no people, no section', probePeopleList({ status: null, onSelect () {} }) === null)
 }
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')

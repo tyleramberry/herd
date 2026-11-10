@@ -421,7 +421,13 @@ function PlusMenu({ $open, onPick }) {
             onKeyDown: e => e.key === 'Escape' && close(),
             className:
               'absolute right-1 top-6 z-20 flex min-w-32 flex-col gap-0.5 rounded-[3px] border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) p-1 outline-none',
-            children: [item('New channel', 'channel'), item('New message', 'dm')]
+            children: [
+              item('New channel', 'channel'),
+              item('New message', 'dm'),
+              // Adding a teammate is always one click away, not only on the empty first-run page.
+              item('Invite a teammate', 'invite'),
+              item('Join with an invite', 'join')
+            ]
           })
         : null
     ]
@@ -452,9 +458,106 @@ function ChannelButton({ channel, label, selected, onSelect }) {
   })
 }
 
-function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composing, $menu }) {
+// Who is in the room. A green dot means that person's Hermes exchanged messages with this one in the last few
+// seconds. Clicking a teammate opens your DM with them; your own row renames you, without a trip to Settings.
+const renaming = atom(false)
+
+function PeopleList({ status, onSelect }) {
+  const { data } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
+  const people = Array.isArray(data) ? data.filter(p => p && p.id) : []
+  const editing = useValue(renaming)
+  const openDm = useMutation({
+    mutationFn: ({ id }) => api('/dms', { method: 'POST', body: { participant_id: id } }),
+    onSuccess: channel => {
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+      if (channel && channel.id) onSelect(channel.id)
+    }
+  })
+  const rename = useMutation({
+    mutationFn: name => api('/profile', { method: 'POST', body: { display_name: name } }),
+    onSuccess: () => {
+      renaming.set(false)
+      refreshAll()
+    }
+  })
+  const phrases = {}
+  for (const entry of (status && Array.isArray(status.peer_status) ? status.peer_status : [])) {
+    if (entry && entry.gateway_id && entry.phrase) phrases[entry.gateway_id] = entry.phrase
+  }
+  const mine = status && status.agent_status && status.agent_status.phrase
+  if (!people.length) return null
+  return jsxs('div', {
+    className: 'flex flex-col gap-0.5',
+    children: [
+      jsx(SectionHeader, { label: 'People' }),
+      ...people.map(p => {
+        if (p.is_self && editing) {
+          return jsxs(
+            'form',
+            {
+              className: 'flex items-center gap-1 px-1',
+              onSubmit: e => {
+                e.preventDefault()
+                if (!rename.isPending) rename.mutate(String(new FormData(e.currentTarget).get('display_name') || '').trim())
+              },
+              children: [
+                jsx(Input, {
+                  name: 'display_name',
+                  defaultValue: p.display_name,
+                  maxLength: 64,
+                  autoFocus: true,
+                  'aria-label': 'Your name',
+                  className: 'h-7 min-w-0 flex-1 text-xs',
+                  onKeyDown: e => {
+                    if (e.key !== 'Escape') return
+                    e.stopPropagation()
+                    renaming.set(false)
+                  }
+                }),
+                jsx(Button, { type: 'submit', size: 'xs', disabled: rename.isPending, children: 'Save' })
+              ]
+            },
+            p.id
+          )
+        }
+        const phrase = p.is_self ? mine : phrases[p.id]
+        return jsxs(
+          'button',
+          {
+            type: 'button',
+            disabled: !p.is_self && openDm.isPending,
+            title: p.is_self
+              ? 'This is you. Click to change your name.'
+              : (p.online ? p.display_name + ' is online' : p.display_name + ' is away') + '. Click to message.',
+            onClick: () => (p.is_self ? renaming.set(true) : openDm.mutate({ id: p.id })),
+            className: 'flex min-w-0 items-center gap-1.5 rounded-[3px] px-1.5 py-1 text-left text-xs text-(--ui-text-secondary) hover:text-(--ui-accent)',
+            children: [
+              jsx(StatusDot, { tone: p.online ? 'good' : 'muted' }),
+              jsx('span', { className: 'truncate', children: p.display_name }),
+              p.is_self ? jsx('span', { className: 'shrink-0 text-[0.6875rem] text-(--ui-text-quaternary)', children: 'you' }) : null,
+              phrase ? jsx('span', { className: 'truncate text-[0.6875rem] text-(--ui-text-quaternary)', children: 'agent ' + phrase }) : null
+            ]
+          },
+          p.id
+        )
+      }),
+      rename.isError
+        ? jsx('div', { className: 'px-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(rename.error, "Couldn't change your name.") })
+        : null
+    ]
+  })
+}
+
+function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composing, $menu, status }) {
   const mode = useValue($composing)
-  const setMode = value => $composing.set(value)
+  const setMode = value => {
+    if (value === 'invite' || value === 'join') {
+      inviteLine.set('')
+      pairingView.set(value === 'invite' ? 'show' : 'enter')
+      return
+    }
+    $composing.set(value)
+  }
   const done = id => {
     setMode(null)
     if (id) onSelect(id)
@@ -476,7 +579,8 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
       mode === 'dm' ? jsx(NewDmPicker, { onDone: done }) : null,
       ...dms.map(ch =>
         jsx(ChannelButton, { channel: ch, label: dmLabel(ch, selfId), selected: ch.id === selectedId, onSelect }, ch.id)
-      )
+      ),
+      jsx(PeopleList, { status, onSelect })
     ]
   })
 }
@@ -546,7 +650,12 @@ function mentionCandidates(participants, query) {
   const out = []
   ;(Array.isArray(participants) ? participants : []).forEach(p => {
     const handle = mentionHandle(p.display_name)
-    if (p.is_self || !handle) return
+    if (p.is_self) {
+      // Your own agent: tagging it from your own Herd wakes it (the backend's mentions_own_agent).
+      out.push({ key: p.id + ':agent', handle: handle ? handle + '-hermes' : 'hermes', label: 'Your Hermes', agent: true })
+      return
+    }
+    if (!handle) return
     out.push({ key: p.id + ':human', handle, label: p.display_name, agent: false })
     out.push({ key: p.id + ':agent', handle: handle + '-hermes', label: p.display_name + "'s Hermes", agent: true })
   })
@@ -647,12 +756,172 @@ function MentionMenu({ items, index, onPick }) {
   })
 }
 
+// Block-level markdown on top of renderContent's inline subset: fenced code, bullet and numbered lists, quotes
+// and headings, which is what an agent's answer is made of. Still React elements and text only, never HTML.
+const BLOCK_LINE = /^(?:(#{1,3})\s+(.+)|\s*([-*•])\s+(.+)|\s*(\d{1,3})[.)]\s+(.+)|>\s?(.*))$/
+const HAS_BLOCKS = /(^|\n)(```|#{1,3}\s|\s*[-*•]\s|\s*\d{1,3}[.)]\s|>)/
+
+const CODE_BLOCK_STYLE = {
+  margin: '0.25rem 0',
+  padding: '0.5rem',
+  overflowX: 'auto',
+  whiteSpace: 'pre',
+  borderRadius: '4px',
+  background: 'var(--ui-surface-secondary)',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.75rem'
+}
+const LIST_ITEM_STYLE = { display: 'flex', gap: '0.375rem', paddingLeft: '0.25rem' }
+const QUOTE_STYLE = { borderLeft: '2px solid var(--ui-stroke-secondary)', paddingLeft: '0.5rem', color: 'var(--ui-text-secondary)' }
+
+function renderBody(text) {
+  const str = String(text == null ? '' : text)
+  if (!HAS_BLOCKS.test(str)) return renderContent(str) // plain messages render exactly as before
+  const out = []
+  let plain = []
+  let code = null
+  const flush = () => {
+    if (!plain.length) return
+    out.push(jsx('span', { children: renderContent(plain.join('\n')) }, 'p' + out.length))
+    plain = []
+  }
+  // Inline styles, not utility classes: these shapes are new to the app, so no stylesheet is assumed to hold them.
+  const block = (style, children) => {
+    flush()
+    out.push(jsx('div', { style, children }, 'b' + out.length))
+  }
+  const item = (marker, body) => [
+    jsx('span', { style: { flexShrink: 0, color: 'var(--ui-text-tertiary)' }, children: marker }, 'd'),
+    jsx('span', { style: { minWidth: 0 }, children: renderContent(body) }, 't')
+  ]
+  for (const line of str.split('\n')) {
+    if (code) {
+      if (line.trim() === '```') {
+        block(CODE_BLOCK_STYLE, code.join('\n'))
+        code = null
+      } else code.push(line)
+      continue
+    }
+    if (line.trimStart().startsWith('```')) {
+      flush()
+      code = []
+      continue
+    }
+    const m = BLOCK_LINE.exec(line)
+    if (!m) plain.push(line)
+    else if (m[1]) block({ fontWeight: 600 }, renderContent(m[2]))
+    else if (m[3]) block(LIST_ITEM_STYLE, item('•', m[4]))
+    else if (m[5]) block(LIST_ITEM_STYLE, item(m[5] + '.', m[6]))
+    else block(QUOTE_STYLE, renderContent(m[7] || ''))
+  }
+  if (code) block(CODE_BLOCK_STYLE, code.join('\n')) // an unclosed fence still reads as code
+  flush()
+  return out
+}
+
+// Exact local time for a timestamp's tooltip; the visible label stays relative.
+function exactTime(iso) {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
+
+function dayKey(iso) {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate()
+}
+
+function dayLabel(iso, now = new Date()) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+}
+
+// A message that continues the one above it (same author, same day, within five minutes) drops its header.
+const GROUP_WINDOW_MS = 5 * 60 * 1000
+
+function continuesPrevious(prev, m) {
+  if (!prev || !m) return false
+  if (prev.author_name !== m.author_name || prev.author_type !== m.author_type || prev.gateway_id !== m.gateway_id) return false
+  if (m.task_id || dayKey(prev.created_at) !== dayKey(m.created_at)) return false
+  const gap = Date.parse(m.created_at) - Date.parse(prev.created_at)
+  return Number.isFinite(gap) && gap >= 0 && gap < GROUP_WINDOW_MS
+}
+
+const DIVIDER_LINE_STYLE = { height: '1px', flex: 1, background: 'var(--ui-stroke-secondary)' }
+
+function DayDivider({ iso }) {
+  const label = dayLabel(iso)
+  if (!label) return null
+  return jsxs('div', {
+    role: 'separator',
+    'aria-label': label,
+    className: 'flex items-center gap-2 px-3 py-1.5 text-[0.6875rem] font-medium text-(--ui-text-tertiary)',
+    children: [
+      jsx('span', { style: DIVIDER_LINE_STYLE }),
+      jsx('span', { children: label }),
+      jsx('span', { style: DIVIDER_LINE_STYLE })
+    ]
+  })
+}
+
+// Keep the newest message in view, the way a chat does: when a list first appears, when you send, and when a new
+// message lands while you are at (or near) the bottom. Scrolled up to read history, you are left where you are.
+const NEAR_BOTTOM_PX = 240
+const followState = { last: new Map(), nodes: new WeakSet() }
+
+function scrollBox(node) {
+  for (let el = node.parentElement; el; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight + 1) return el
+  }
+  return null
+}
+
+// Ref callback for the marker after the last row of a list. `listKey` names the list, `lastId` its newest row.
+function followNewest(node, listKey, lastId, mine) {
+  if (!node || !lastId) return false
+  const fresh = !followState.nodes.has(node)
+  followState.nodes.add(node)
+  if (scrollTarget.get()) return false // a search jump owns the scroll position
+  const prev = followState.last.get(listKey)
+  followState.last.set(listKey, lastId)
+  if (!fresh && prev === lastId) return false
+  const box = scrollBox(node)
+  const near = !box || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM_PX
+  if (!(fresh || mine || near)) return false
+  node.scrollIntoView({ block: 'end' })
+  return true
+}
+
+function NewestMarker({ listKey, messages, selfId }) {
+  const last = messages.length ? messages[messages.length - 1] : null
+  return jsx('div', {
+    'aria-hidden': 'true',
+    style: { height: '1px' },
+    ref: node => followNewest(node, listKey, last && last.id, Boolean(last && selfId && last.gateway_id === selfId))
+  })
+}
+
+// Rows for a list of messages: a day divider where the date changes, and grouped rows under one header.
+function messageRows(messages, rowProps) {
+  const rows = []
+  let prev = null
+  for (const m of messages) {
+    if (!prev || dayKey(prev.created_at) !== dayKey(m.created_at)) rows.push(jsx(DayDivider, { iso: m.created_at }, 'day:' + m.id))
+    rows.push(jsx(MessageRow, { message: m, grouped: continuesPrevious(prev, m), ...rowProps }, m.id))
+    prev = m
+  }
+  return rows
+}
+
 const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
 // The reaction affordance. It is always in the row: faded in on hover and on keyboard focus (opacity, not
 // display, so the trigger stays tabbable). The trigger opens a picker; arrow keys move between the emoji,
 // Esc closes it and returns focus to the trigger, and leaving the picker closes it too.
-function ReactionPicker({ message, react }) {
+function ReactionPicker({ message, react, onReply }) {
   const openId = useValue(reactionPicker)
   const open = openId === message.id
   const close = () => reactionPicker.set(null)
@@ -688,6 +957,16 @@ function ReactionPicker({ message, react }) {
         onClick: () => reactionPicker.set(open ? null : message.id),
         children: '+'
       }),
+      onReply && !open
+        ? jsx('button', {
+            type: 'button',
+            'aria-label': 'Reply in thread',
+            title: 'Reply in thread',
+            className: 'rounded px-1 text-[0.6875rem] text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
+            onClick: () => onReply(message.id),
+            children: 'Reply'
+          })
+        : null,
       open
         ? jsx('div', {
             role: 'group',
@@ -725,7 +1004,7 @@ function ReactionPicker({ message, react }) {
   })
 }
 
-function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
+function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
   useValue(scrollTarget) // re-render when a search jump is pending, so the ref below sees it
   // Only agent-authored messages carry a badge: humans read as the default, unbadged case (spec §3).
@@ -743,17 +1022,18 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
     }
   })
   return jsxs('div', {
-    className: 'group relative flex flex-col gap-0.5 px-3 py-1.5',
+    className: 'group relative flex flex-col gap-0.5 px-3 ' + (grouped ? 'py-0.5' : 'py-1.5'),
     'data-herd-message-id': message.id,
+    title: grouped ? exactTime(message.created_at) : undefined,
     ref: node => arriveAt(node, message.id),
     children: [
-      jsx(ReactionPicker, { message, react }),
-      jsxs('div', {
+      jsx(ReactionPicker, { message, react, onReply: onOpenThread }),
+      grouped ? null : jsxs('div', {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
           agent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null,
-          jsx('span', { className: 'text-(--ui-text-quaternary)', children: timeLabel(message.created_at) }),
+          jsx('span', { className: 'text-(--ui-text-quaternary)', title: exactTime(message.created_at), children: timeLabel(message.created_at) }),
           message.task_id ? jsx(TaskBadge, { taskId: message.task_id }) : null,
           onOpenThread
             ? jsx('button', {
@@ -765,7 +1045,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
             : null
         ]
       }),
-      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) }),
+      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderBody(message.content) }),
       message.wake_note
         ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: message.wake_note })
         : null,
@@ -878,7 +1158,8 @@ function ThreadBody({ rootId }) {
       replies.length === 0
         ? jsx('div', { className: 'px-3 py-1.5 text-xs text-(--ui-text-tertiary)', children: 'No replies yet.' })
         : null,
-      ...replies.map(m => jsx(MessageRow, { message: m }, m.id))
+      ...messageRows(replies, {}),
+      jsx(NewestMarker, { listKey: 'thread:' + rootId, messages: replies.length ? replies : [data.parent], selfId: null })
     ]
   })
 }
@@ -1186,11 +1467,13 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   } else if (isError) {
     body = jsx(EmptyState, { title: "Couldn't load messages.", description: 'Herd will retry in a moment.' })
   } else if (messages.length === 0) {
-    body = jsx(EmptyState, { title: 'No messages yet.', description: 'Say hi, or ask your agent to post here.' })
+    body = jsx(EmptyState, { title: 'No messages yet.', description: 'Say hi, or type @hermes to ask your own agent here.' })
   } else {
     body = jsx('div', {
       className: 'flex flex-col py-1',
-      children: messages.map(m => jsx(MessageRow, { message: m, channelId: channel.id, onOpenThread: openThread }, m.id))
+      children: messageRows(messages, { channelId: channel.id, onOpenThread: openThread }).concat(
+        jsx(NewestMarker, { listKey: 'channel:' + channel.id, messages, selfId }, 'newest')
+      )
     })
   }
   return jsxs('div', {
@@ -1550,10 +1833,19 @@ function SearchBar() {
 // into Settings: Herd has no way to write Hermes's secret store, so it does not save the key for you.
 const pairingView = atom(null) // null | 'show' | 'enter'
 const pairingResult = atom(null) // { name, url, herd_secret } after a successful enter, until hidden
+// The inviter's own gateway address, typed once and remembered, so a code can go out as one line: address#code.
+const inviteLine = atom('')
+const ADDRESS_KEY = 'gatewayAddress'
+
+function buildInvite(address, code) {
+  const clean = String(address || '').trim().replace(/\/+$/, '')
+  return clean && code ? clean + '#' + code : ''
+}
 
 function PairingPanel() {
   const view = useValue(pairingView)
   const result = useValue(pairingResult)
+  const invite = useValue(inviteLine)
   const mint = useMutation({
     mutationFn: () => api('/pairing-code', { method: 'POST' })
   })
@@ -1584,8 +1876,41 @@ function PairingPanel() {
         minted
           ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Valid for ten minutes and for one use. Your teammate also needs this gateway’s address.' })
           : null,
+        minted
+          ? jsxs('form', {
+              className: 'flex w-full flex-col gap-1.5',
+              onSubmit: e => {
+                e.preventDefault()
+                const address = String(new FormData(e.currentTarget).get('address') || '').trim()
+                if (ctx) ctx.storage.set(ADDRESS_KEY, address)
+                const made = buildInvite(address, minted.code)
+                inviteLine.set(made)
+                if (made) copyText(made)
+              },
+              children: [
+                jsx(Input, {
+                  name: 'address',
+                  defaultValue: ctx ? String(ctx.storage.get(ADDRESS_KEY, '') || '') : '',
+                  placeholder: 'This gateway’s address, e.g. https://my-mac.tailnet-name.ts.net:8642',
+                  'aria-label': 'This gateway’s address',
+                  autoComplete: 'off',
+                  className: 'h-7 text-xs'
+                }),
+                jsx(Button, { type: 'submit', size: 'xs', children: canCopy() ? 'Copy invite' : 'Make invite' }),
+                invite
+                  ? jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: invite })
+                  : null,
+                invite
+                  ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Send this one line to your teammate. They paste it under “Enter a pairing code”.' })
+                  : null
+              ]
+            })
+          : null,
         mint.isError ? jsx('div', { children: errorText(mint.error, "Couldn't make a code.") }) : null,
-        btn(minted ? 'Make a new code' : 'Make a code', () => mint.mutate()),
+        btn(minted ? 'Make a new code' : 'Make a code', () => {
+          inviteLine.set('')
+          mint.mutate()
+        }),
         btn('Close', () => pairingView.set(null))
       ]
     })
@@ -1598,11 +1923,12 @@ function PairingPanel() {
         const form = e.currentTarget
         const url = String(new FormData(form).get('url') || '').trim()
         const code = String(new FormData(form).get('code') || '').trim()
-        if (url && code && !redeem.isPending) redeem.mutate({ url, code })
+        // One pasted invite (address#code) is enough; the address and the code typed separately still work.
+        if (url && (code || url.includes('#') || /\s/.test(url)) && !redeem.isPending) redeem.mutate({ url, code })
       },
       children: [
-        jsx(Input, { name: 'url', placeholder: 'https://teammate.tailnet-name.ts.net:8642', 'aria-label': 'Teammate’s gateway address', autoComplete: 'off', className: 'h-7 text-xs' }),
-        jsx(Input, { name: 'code', placeholder: 'ABCDE-FGHJK', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
+        jsx(Input, { name: 'url', placeholder: 'Paste the invite, or https://teammate.tailnet-name.ts.net:8642', 'aria-label': 'Invite, or teammate’s gateway address', autoComplete: 'off', className: 'h-7 text-xs' }),
+        jsx(Input, { name: 'code', placeholder: 'Code (not needed with an invite)', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
         jsxs('div', {
           className: 'flex items-center gap-1.5',
           children: [
@@ -1628,6 +1954,20 @@ function PairingPanel() {
 
 // One honest line about @mention wake: whether the agent answers in a chat, or exactly what is missing. The
 // one-click target comes from the pane's active session (host.state.activeSessionId), so no slash command.
+function canCopy() {
+  return Boolean(ctx && ctx.os && typeof ctx.os.writeClipboard === 'function')
+}
+
+function copyText(text) {
+  if (!canCopy()) return
+  try {
+    const done = ctx.os.writeClipboard(String(text))
+    if (done && typeof done.catch === 'function') done.catch(() => {})
+  } catch (_err) {
+    // the text is on screen either way
+  }
+}
+
 function WakeBanner({ status }) {
   const activeSession = useValue(host.state.activeSessionId)
   const wake = status.wake
@@ -1661,7 +2001,10 @@ function WakeBanner({ status }) {
   }
   if (wake.blocked_reason === 'injection_not_allowed') {
     return line('bad', wake.blocked_message, [
-      jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
+      jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line }),
+      canCopy()
+        ? jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => copyText(wake.config_line), children: 'Copy' })
+        : null
     ])
   }
   if (wake.blocked_reason) return line('bad', wake.blocked_message)
@@ -1720,6 +2063,8 @@ function HerdView({ compact }) {
   const selfId = status && status.self ? status.self.gateway_id : null
   const hasPeer = Boolean(status && ((status.peers && status.peers.length) || refusedPeers(status).length))
   const incoming = incomingUnlinked(status)
+  const pairingOpen = useValue(pairingView)
+  const pairingDone = useValue(pairingResult)
 
   if (isLoading) {
     return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading Herd…' })
@@ -1742,7 +2087,9 @@ function HerdView({ compact }) {
     className: 'flex h-full min-h-0 flex-col',
     children: [
       statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
-      statusQuery.isSuccess && !hasPeer ? jsx(PairingPanel) : null,
+      statusQuery.isSuccess && (!hasPeer || pairingOpen || pairingDone)
+        ? jsx('div', { className: 'border-b border-(--ui-stroke-secondary) px-3 py-2', children: jsx(PairingPanel) })
+        : null,
       statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
       compact ? null : jsx(SearchBar),
       jsxs('div', {
@@ -1758,7 +2105,8 @@ function HerdView({ compact }) {
             },
             compact,
             $composing,
-            $menu
+            $menu,
+            status
           }),
           selected
             ? jsx(MessageView, { channel: selected, selfId, status, $thread, $selected, compact }, selected.id)
@@ -1810,6 +2158,9 @@ export default {
     composeRequest.set(0)
     pairingView.set(null)
     pairingResult.set(null)
+    inviteLine.set('')
+    renaming.set(false)
+    followState.last.clear()
     emojiTray.page.set(false)
     emojiTray.pane.set(false)
     topicEditing.page.set(null)
