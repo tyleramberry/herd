@@ -27,12 +27,13 @@ export const Textarea = 'Textarea'
 export const PALETTE_AREA = 'palette'
 export const KEYBINDS_AREA = 'keybinds'
 export const SearchField = 'SearchField'
+export const WorkspacePageHeaderControl = 'WorkspacePageHeaderControl'
 export const STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
 export const PANES_AREA = 'panes'
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'nav'
 export const atom = value => ({ value, set (next) { this.value = next }, get () { return this.value } })
-export const host = { state: { activeSessionId: atom(null) }, navigate (path) { globalThis.__navigations.push(path) } }
+export const host = { state: { activeSessionId: atom(null) }, navigate (path) { globalThis.__navigations.push(path) }, openWorkspace (id, opts) { globalThis.__workspaces.push({ id, opts }); return () => { globalThis.__closed.push(id) } } }
 export const pluginSettingsHref = id => '/settings/plugins/' + id
 export const queryClient = { invalidateQueries () {} }
 export const relativeTime = ms => String(ms)
@@ -52,12 +53,14 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
 globalThis.__notified = []
 globalThis.__drafts = {}
+globalThis.__workspaces = []
+globalThis.__closed = []
 // Node's FormData only takes real form elements; the plugin only needs getAll/get on a form-like object.
 globalThis.FormData = class { constructor (f) { this.f = f } getAll (n) { return (this.f.__values && this.f.__values[n]) || [] } get (n) { return this.getAll(n)[0] ?? null } }
 globalThis.__query = null
@@ -70,7 +73,8 @@ const {
   probeNotifyIncoming: notifyIncoming, probeUnreadCount: UnreadCount, probeChannelButton: ChannelButton,
   probeWorkLine: WorkLine, probeRenderContent, probeComposer, probeTopicLine,
   probeNewChannelForm, probeInsertAtCaret, probePickedMembers,
-  probeEmojiTray, probeTopicEditing, probeComposeRequest
+  probeEmojiTray, probeTopicEditing, probeComposeRequest,
+  probeOpenThreadWorkspace, probeCloseThreadWorkspace, probeThreadTabs, probeThreadWorkspace, probeThreadPanel
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
@@ -503,6 +507,72 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('creating with nobody ticked sends no member list', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ name: 'everyone', members: [] }))
   check('picked members are capped at four', probePickedMembers({ __values: { member: ['a', 'b', 'c', 'd', 'e'] } }).length === 4)
 }
+
+// ---- threads as a workspace page (Track 4) --------------------------------------------
+{
+  const chan = { id: 'general', name: 'general', is_dm: false }
+  globalThis.__workspaces.length = 0
+  globalThis.__closed.length = 0
+  probeThreadTabs.clear()
+  check('a thread opens as a workspace tab', probeOpenThreadWorkspace(chan, 'root1') === true)
+  const tab = globalThis.__workspaces.at(-1)
+  check('the tab is keyed by the thread', tab && tab.id === 'herd-thread:root1')
+  check('the tab is titled with its channel', tab && tab.opts.title === 'Thread · #general')
+  check('the tab renders the thread workspace', tab && tab.opts.render().type === probeThreadWorkspace)
+  check('one open tab per thread', probeThreadTabs.size === 1)
+
+  probeOpenThreadWorkspace(chan, 'root1')
+  check('opening it again re-fronts the same tab', globalThis.__workspaces.at(-1).id === 'herd-thread:root1' && probeThreadTabs.size === 1)
+
+  probeCloseThreadWorkspace('root1')
+  check('closing the thread closes its tab', globalThis.__closed.includes('herd-thread:root1'))
+  check('and forgets it', probeThreadTabs.size === 0)
+  probeCloseThreadWorkspace('root1')
+  check('closing twice is harmless', globalThis.__closed.filter(id => id === 'herd-thread:root1').length === 1)
+
+  // rapid open and close: no leaked tabs, every close lands
+  globalThis.__closed.length = 0
+  for (let i = 0; i < 20; i++) {
+    probeOpenThreadWorkspace(chan, 'root2')
+    probeCloseThreadWorkspace('root2')
+  }
+  check('rapid open and close leaves no tab behind', probeThreadTabs.size === 0)
+  check('and every close landed once', globalThis.__closed.length === 20, String(globalThis.__closed.length))
+  for (let i = 0; i < 5; i++) probeOpenThreadWorkspace(chan, 'root3')
+  check('repeated opens never stack tabs', probeThreadTabs.size === 1)
+  probeCloseThreadWorkspace('root3')
+
+  // Esc closes the tab, unless a composer already used the key
+  probeOpenThreadWorkspace(chan, 'root4')
+  const ws = probeThreadWorkspace({ channel: chan, rootId: 'root4' })
+  ws.props.onKeyDown({ key: 'Escape', defaultPrevented: true, preventDefault () {} })
+  check('Esc a composer handled leaves the tab open', probeThreadTabs.has('root4'))
+  ws.props.onKeyDown({ key: 'Escape', defaultPrevented: false, preventDefault () {} })
+  check('Esc closes the thread tab', !probeThreadTabs.has('root4') && globalThis.__closed.includes('herd-thread:root4'))
+  probeThreadTabs.clear()
+
+  // The route's thread panel keeps its own Esc, and offers the action only when the host can open tabs.
+  thread.page.set('root5')
+  const panel = probeThreadPanel({ channel: chan, rootId: 'root5', selfId: 'me', $thread: thread.page })
+  panel.props.onKeyDown({ key: 'Escape', defaultPrevented: false, preventDefault () {} })
+  check('the thread panel still closes on Esc', thread.page.get() === null)
+  const withAction = nodes(probeThreadPanel({ channel: chan, rootId: 'root5', selfId: 'me', $thread: thread.page }))
+  const openBtn = withAction.find(n => n.type === 'Button' && n.props.children === 'Open as page')
+  check('the panel offers Open as page when tabs are available', Boolean(openBtn))
+  globalThis.__workspaces.length = 0
+  openBtn.props.onClick()
+  check('Open as page docks the thread', globalThis.__workspaces.at(-1) && globalThis.__workspaces.at(-1).id === 'herd-thread:root5')
+  probeCloseThreadWorkspace('root5')
+
+  const savedOpen = sdkHost.openWorkspace
+  sdkHost.openWorkspace = undefined
+  check('without tabs the open action is absent', !nodes(probeThreadPanel({ channel: chan, rootId: 'root5', selfId: 'me', $thread: thread.page }))
+    .find(n => n.type === 'Button' && n.props.children === 'Open as page'))
+  check('and opening a tab quietly does nothing', probeOpenThreadWorkspace(chan, 'root6') === false && probeThreadTabs.size === 0)
+  sdkHost.openWorkspace = savedOpen
+  thread.page.set(null)
+}
+
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')
 process.exit(failures.length ? 1 : 0)

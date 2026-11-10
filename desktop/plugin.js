@@ -16,6 +16,7 @@ import {
   SearchField,
   StatusDot,
   Textarea,
+  WorkspacePageHeaderControl,
   atom,
   host,
   pluginSettingsHref,
@@ -902,12 +903,89 @@ function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
               jsx('span', { className: 'truncate text-sm font-medium', children: 'Thread' })
             ]
           }),
-          jsx(PeerLine, { status })
+          jsxs('div', {
+            className: 'flex shrink-0 items-center gap-2',
+            children: [
+              canOpenWorkspace()
+                ? jsx(Button, {
+                    type: 'button',
+                    size: 'xs',
+                    variant: 'ghost',
+                    title: 'Open this thread as a page',
+                    onClick: () => openThreadWorkspace(channel, rootId),
+                    children: 'Open as page'
+                  })
+                : null,
+              jsx(PeerLine, { status })
+            ]
+          })
         ]
       }),
       jsx(WorkLine, { status }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
       jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
+    ]
+  })
+}
+
+// Threads as a workspace page (Track 4). "Open as page" docks the thread as a main-area tab beside the chat; the
+// 340px pane (or the route's thread panel) stays as the peek. Opening the same thread again fronts its tab.
+const threadTabs = new Map() // root message id -> the close function of its open tab
+
+function canOpenWorkspace() {
+  return typeof host.openWorkspace === 'function'
+}
+
+function openThreadWorkspace(channel, rootId) {
+  if (!canOpenWorkspace() || !rootId) return false
+  const close = host.openWorkspace('herd-thread:' + rootId, {
+    title: 'Thread · ' + (channel.is_dm ? channel.name : '#' + channel.name),
+    minWidth: '22rem',
+    render: () => jsx(ThreadWorkspace, { channel, rootId }),
+    onClose: () => threadTabs.delete(rootId)
+  })
+  threadTabs.set(rootId, close)
+  return true
+}
+
+function closeThreadWorkspace(rootId) {
+  const close = threadTabs.get(rootId)
+  threadTabs.delete(rootId)
+  if (close) close()
+}
+
+function ThreadWorkspace({ channel, rootId }) {
+  return jsxs('div', {
+    className: 'flex h-full min-h-0 min-w-0 flex-col',
+    onKeyDown: e => {
+      // Esc closes the tab, as it closes the thread panel. A composer that used the key (the @-menu) keeps it.
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault()
+      closeThreadWorkspace(rootId)
+    },
+    children: [
+      jsxs('div', {
+        className: 'flex items-center justify-between gap-3 border-b border-(--ui-stroke-secondary) px-3 py-2',
+        children: [
+          jsx('span', { className: 'truncate text-sm font-medium', children: threadTitle(channel, null) }),
+          jsx(WorkspacePageHeaderControl, {
+            id: 'herd-thread-channel',
+            children: jsx(Button, {
+              type: 'button',
+              size: 'xs',
+              variant: 'ghost',
+              onClick: () => {
+                selection.page.set(channel.id)
+                thread.page.set(rootId)
+                host.navigate(ROUTE_PATH)
+              },
+              children: 'Open in Herd'
+            })
+          })
+        ]
+      }),
+      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
+      jsx(Composer, { channel, compact: false, placeholderName: 'this thread', threadParentId: rootId })
     ]
   })
 }
@@ -939,14 +1017,29 @@ function ThreadPanel({ channel, rootId, selfId, $thread }) {
               jsx('span', { className: 'truncate text-xs text-(--ui-text-tertiary)', children: threadTitle(channel, selfId) })
             ]
           }),
-          jsx(Button, {
-            type: 'button',
-            size: 'xs',
-            variant: 'ghost',
-            'aria-label': 'Close thread',
-            title: 'Close thread (Esc)',
-            onClick: close,
-            children: jsx(Codicon, { name: 'close', size: '0.8rem' })
+          jsxs('div', {
+            className: 'flex shrink-0 items-center gap-1',
+            children: [
+              canOpenWorkspace()
+                ? jsx(Button, {
+                    type: 'button',
+                    size: 'xs',
+                    variant: 'ghost',
+                    title: 'Open this thread as a page',
+                    onClick: () => openThreadWorkspace(channel, rootId),
+                    children: 'Open as page'
+                  })
+                : null,
+              jsx(Button, {
+                type: 'button',
+                size: 'xs',
+                variant: 'ghost',
+                'aria-label': 'Close thread',
+                title: 'Close thread (Esc)',
+                onClick: close,
+                children: jsx(Codicon, { name: 'close', size: '0.8rem' })
+              })
+            ]
           })
         ]
       }),
@@ -1637,6 +1730,7 @@ export default {
     emojiTray.pane.set(false)
     topicEditing.page.set(null)
     topicEditing.pane.set(null)
+    threadTabs.clear()
     ctx.onDispose(() => {
       rest = null
       ctx = null
