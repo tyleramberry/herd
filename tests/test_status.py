@@ -222,8 +222,8 @@ class DesktopSourceTest(unittest.TestCase):
 
     def test_work_line_renders_backend_phrase_only(self):
         self.assertIn("status.agent_status", SOURCE)
-        self.assertIn("if (!work || !work.phrase) return null", SOURCE)
-        self.assertIn("children: work.phrase", SOURCE)
+        self.assertIn("if (!lines.length) return null", SOURCE)  # nothing to show: no placeholder line
+        self.assertIn("lines.push({ text: work.phrase", SOURCE)  # this gateway's own phrase, verbatim
         self.assertIn("jsx(WorkLine, { status })", SOURCE)
 
     def test_no_hardcoded_phrase_in_pane(self):
@@ -240,9 +240,9 @@ class DesktopSourceTest(unittest.TestCase):
     def test_one_new_event_and_no_new_timer(self):
         events = re.findall(r"ctx\.onEvent\('plugin\.herd\.([a-z_.]+)'", SOURCE)
         # Four pre-existing handlers (message.created, reactions.changed, channels.changed,
-        # settings.changed) + exactly one new one.
+        # settings.changed), status.changed (S-15) and incoming.messages (Track 2, notifications).
         self.assertEqual(sorted(events), sorted(["message.created", "reactions.changed", "channels.changed",
-                                                 "settings.changed", "status.changed"]))
+                                                 "settings.changed", "status.changed", "incoming.messages"]))
         self.assertEqual(SOURCE.count("ctx.setInterval("), 2)
 
 

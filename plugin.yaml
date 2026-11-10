@@ -95,6 +95,11 @@ config_schema:
     env: HERD_ALLOW_CLEARTEXT
     label: Send the peer key in cleartext (unsafe)
     description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."
+  notify_messages:
+    type: bool
+    default: false
+    label: Notify me about new messages
+    description: Raise a desktop notification when a teammate's message arrives and Hermes is in the background. Shows the sender, the channel and a short preview. Throttled. Off by default.
   mention_wake:
     type: bool
     default: true

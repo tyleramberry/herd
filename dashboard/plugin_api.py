@@ -100,6 +100,12 @@ def post_channel(body: dict[str, Any]):
     return _call(store.create_channel, body.get("name"), body.get("topic", ""), members=body.get("members"))
 
 
+@router.post("/channels/{channel_id}/read")
+def post_read(channel_id: str):
+    """Mark a channel read on this gateway (the pane calls it when the channel is on screen)."""
+    return _call(store.mark_read, channel_id)
+
+
 @router.post("/channels/{channel_id}/share")
 def post_share(channel_id: str, body: dict[str, Any]):
     """Promote a DM into a new shared channel (copies its history)."""

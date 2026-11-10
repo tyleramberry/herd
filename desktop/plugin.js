@@ -10,6 +10,7 @@ import {
   PANES_AREA,
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
+  STATUSBAR_AREAS,
   ScrollArea,
   StatusDot,
   Textarea,
@@ -177,6 +178,60 @@ function peerLine(peer) {
   })
 }
 
+// Desktop notifications for teammates' messages. The backend announces only rows new to this gateway, and only
+// when the owner turned notify on. Here: one notification per channel per burst, a cooldown per channel, and a
+// cap across channels. The host raises it only while Hermes is in the background (ctx.os.notify).
+const NOTIFY_WINDOW_MS = 60000
+const NOTIFY_MAX_PER_WINDOW = 4
+const NOTIFY_CHANNEL_COOLDOWN_MS = 30000
+const notifyState = { sent: [], lastByChannel: {} }
+
+function notifyIncoming(payload, now = Date.now()) {
+  const items = payload && Array.isArray(payload.items) ? payload.items : []
+  if (!ctx || !ctx.os || typeof ctx.os.notify !== 'function') return 0
+  const groups = new Map()
+  for (const item of items) {
+    if (!item || !item.channel_id) continue
+    if (!groups.has(item.channel_id)) groups.set(item.channel_id, [])
+    groups.get(item.channel_id).push(item)
+  }
+  notifyState.sent = notifyState.sent.filter(t => now - t < NOTIFY_WINDOW_MS)
+  let fired = 0
+  for (const [channelId, group] of groups) {
+    const last = notifyState.lastByChannel[channelId]
+    if (last !== undefined && now - last < NOTIFY_CHANNEL_COOLDOWN_MS) continue
+    if (notifyState.sent.length >= NOTIFY_MAX_PER_WINDOW) break
+    const first = group[0]
+    const place = first.is_dm ? first.channel_name : '#' + first.channel_name
+    const more = group.length - 1
+    ctx.os.notify({
+      title: first.mention ? 'Mentioned in ' + place : place,
+      body: first.author_name + ': ' + first.preview + (more > 0 ? ' (+' + more + ' more)' : ''),
+      activate: ROUTE_PATH
+    })
+    notifyState.sent.push(now)
+    notifyState.lastByChannel[channelId] = now
+    fired += 1
+  }
+  return fired
+}
+
+// The unread total for the status bar. Reads the same channels query as the page, so it never disagrees with it.
+function UnreadCount() {
+  const { data } = useQuery({
+    queryKey: KEYS.channels,
+    queryFn: () => api('/channels'),
+    refetchInterval: REFRESH_MS
+  })
+  const total = Array.isArray(data) ? data.reduce((n, c) => n + ((c && c.unread) || 0), 0) : 0
+  if (!total) return null
+  return jsx('span', {
+    className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+    title: 'Unread messages in Herd',
+    children: 'Herd · ' + total + ' unread'
+  })
+}
+
 function refusedLine(entry) {
   const who = entry.name || entry.url
   return jsxs('div', {
@@ -339,10 +394,16 @@ function ChannelButton({ channel, label, selected, onSelect }) {
       (selected ? 'font-medium text-(--ui-accent)' : 'text-(--ui-text-secondary) hover:text-(--ui-accent)'),
     children: [
       jsx('span', { className: 'truncate', children: label }),
-      jsx('span', {
-        className: 'text-[0.6875rem] text-(--ui-text-quaternary)',
-        children: channel.message_count ? String(channel.message_count) : ''
-      })
+      channel.unread && !selected
+        ? jsx('span', {
+            className: 'shrink-0 text-[0.6875rem] font-semibold text-(--ui-accent)',
+            'aria-label': channel.unread + ' unread',
+            children: String(channel.unread)
+          })
+        : jsx('span', {
+            className: 'text-[0.6875rem] text-(--ui-text-quaternary)',
+            children: channel.message_count ? String(channel.message_count) : ''
+          })
     ]
   })
 }
@@ -846,14 +907,39 @@ function TaskBadge({ taskId }) {
 
 // One plain-English phrase from the backend's fixed vocabulary, shown exactly as sent.
 // No status from the backend means nothing is rendered: the pane never guesses or defaults.
+// What each agent is doing: this gateway's own phrase first, then every teammate's (their last sync's phrase).
 function WorkLine({ status }) {
   const work = status && status.agent_status
-  if (!work || !work.phrase) return null
-  return jsxs('div', {
-    className:
-      'flex items-center gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-1 text-[0.6875rem] text-(--ui-text-tertiary)',
-    title: work.agent ? work.agent + ': ' + work.phrase : work.phrase,
-    children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: work.phrase })]
+  const peers = status && Array.isArray(status.peer_status) ? status.peer_status : []
+  const lines = []
+  if (work && work.phrase) lines.push({ text: work.phrase, title: work.agent ? work.agent + ': ' + work.phrase : work.phrase })
+  for (const peer of peers) {
+    if (!peer || !peer.phrase) continue
+    const who = peer.name || 'Teammate'
+    lines.push({ text: who + "'s agent: " + peer.phrase, title: (peer.agent ? peer.agent + ' on ' : '') + who + ': ' + peer.phrase })
+  }
+  if (!lines.length) return null
+  if (lines.length === 1) {
+    return jsxs('div', {
+      className:
+        'flex items-center gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+      title: lines[0].title,
+      children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: lines[0].text })]
+    })
+  }
+  return jsx('div', {
+    className: 'flex flex-col border-b border-(--ui-stroke-secondary)',
+    children: lines.map((line, i) =>
+      jsxs(
+        'div',
+        {
+          className: 'flex items-center gap-1.5 px-3 py-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+          title: line.title,
+          children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: line.text })]
+        },
+        i
+      )
+    )
   })
 }
 
@@ -863,7 +949,14 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   const isSharing = useValue($sharing) && channel.is_dm
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
-    queryFn: () => api('/channels/' + encodeURIComponent(channel.id) + '/messages')
+    queryFn: () =>
+      api('/channels/' + encodeURIComponent(channel.id) + '/messages').then(rows => {
+        // The channel is on screen, so it is read: move this gateway's cursor, then refresh the unread counts.
+        api('/channels/' + encodeURIComponent(channel.id) + '/read', { method: 'POST' })
+          .then(() => queryClient.invalidateQueries({ queryKey: KEYS.channels }))
+          .catch(() => {})
+        return rows
+      })
   })
   const messages = Array.isArray(data) ? data : []
   const title = threadTitle(channel, selfId)
@@ -1344,6 +1437,8 @@ export default {
     reactionPicker.set(null)
     searchQuery.set('')
     jumpNote.set(null)
+    notifyState.sent = []
+    notifyState.lastByChannel = {}
     ctx.onDispose(() => {
       rest = null
       ctx = null
@@ -1360,6 +1455,12 @@ export default {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
         data: { path: ROUTE_PATH, label: 'Herd', codicon: 'comment-discussion' }
+      },
+      {
+        id: 'unread',
+        area: STATUSBAR_AREAS.right,
+        order: 70,
+        render: () => jsx(UnreadCount, {})
       },
       {
         id: 'search',
@@ -1393,6 +1494,9 @@ export default {
     ctx.onEvent('plugin.herd.reactions.changed', event => {
       const payload = (event && event.payload) || {}
       if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
+    })
+    ctx.onEvent('plugin.herd.incoming.messages', event => {
+      notifyIncoming(event && event.payload)
     })
     ctx.onEvent('plugin.herd.channels.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })

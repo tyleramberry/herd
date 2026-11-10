@@ -208,6 +208,12 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
     DELETE FROM messages_fts WHERE rowid = old.seq;
 END;
+-- Read state (Track 2): the highest messages.seq this gateway has seen in each channel. Local only and never
+-- synced: what one person has read is not the mesh's business. Unread = rows after the cursor not written here.
+CREATE TABLE IF NOT EXISTS read_cursors (
+    channel_id TEXT PRIMARY KEY,
+    seq INTEGER NOT NULL DEFAULT 0
+);
 """
 
 _init_lock = threading.Lock()
@@ -217,7 +223,7 @@ _initialized: set[str] = set()
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
 _REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips",
-                    "messages_fts")
+                    "messages_fts", "read_cursors")
 _REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
                           "promoted_from", "task_id")
 
@@ -274,8 +280,12 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
     with _init_lock:
         if key in _initialized and _schema_usable(conn):
             return
+        had_cursors = _has_table(conn, "read_cursors")
         conn.executescript(_SCHEMA)
         _backfill_search_index(conn)
+        if not had_cursors:
+            conn.execute("INSERT OR IGNORE INTO read_cursors(channel_id, seq) "
+                         "SELECT channel_id, MAX(seq) FROM messages GROUP BY channel_id")
         # CREATE TABLE IF NOT EXISTS never adds columns to an existing table: migrate older DBs.
         if "thread_parent_id" not in {r[1] for r in conn.execute("PRAGMA table_info(messages)")}:
             conn.execute("ALTER TABLE messages ADD COLUMN thread_parent_id TEXT")
@@ -300,6 +310,10 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         )
         conn.commit()
         _initialized.add(key)
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (name,)).fetchone() is not None
 
 
 def _backfill_search_index(conn: sqlite3.Connection) -> None:
@@ -461,6 +475,38 @@ def normalize_channel_name(name: Any) -> str:
     return re.sub(r"\s+", "-", raw)
 
 
+def _unread_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """channel id -> messages this gateway has not read: rows after its cursor that were not written here.
+
+    A message is counted once (its seq is assigned on insert, so a replayed batch adds nothing), and a late arrival
+    with an older created_at still counts, because its seq is newer than the cursor. Own posts never count."""
+    me = conn.execute("SELECT value FROM meta WHERE key='gateway_id'").fetchone()[0]
+    rows = conn.execute(
+        "SELECT m.channel_id, COUNT(*) AS n FROM messages m "
+        "LEFT JOIN read_cursors r ON r.channel_id = m.channel_id "
+        "WHERE m.seq > COALESCE(r.seq, 0) AND m.gateway_id != ? GROUP BY m.channel_id", (me,)).fetchall()
+    return {r["channel_id"]: int(r["n"]) for r in rows}
+
+
+def unread_total() -> int:
+    with connect() as conn:
+        return sum(_unread_counts(conn).values())
+
+
+def mark_read(channel_ref: str) -> dict:
+    """Move this gateway's read cursor for a channel to its newest message. Never moves it backwards."""
+    channel = resolve_channel(channel_ref)
+    if not channel:
+        raise HerdError(404, f"No channel or DM named '{str(channel_ref)[:64]}'.")
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO read_cursors(channel_id, seq) "
+            "VALUES (?, (SELECT COALESCE(MAX(seq), 0) FROM messages WHERE channel_id = ?)) "
+            "ON CONFLICT(channel_id) DO UPDATE SET seq = MAX(seq, excluded.seq)",
+            (channel["id"], channel["id"]))
+    return {"channel_id": channel["id"], "unread": 0}
+
+
 def list_channels() -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
@@ -468,7 +514,13 @@ def list_channels() -> list[dict]:
             "FROM channels c LEFT JOIN messages m ON m.channel_id = c.id "
             "GROUP BY c.id ORDER BY c.is_dm, c.name COLLATE NOCASE"
         ).fetchall()
-    return [_channel_row(r) for r in rows]
+        unread = _unread_counts(conn)
+    out = []
+    for r in rows:
+        ch = _channel_row(r)
+        ch["unread"] = unread.get(ch["id"], 0)
+        out.append(ch)
+    return out
 
 
 def get_channel(channel_id: str) -> Optional[dict]:
@@ -1098,6 +1150,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     touched: set[str] = set()
     rtouched: set[str] = set()
     wakes: list[dict] = []
+    fresh: list[dict] = []  # rows new to this gateway that a teammate wrote: the basis of incoming.messages
     with connect() as conn:
         local_gid = _local_gateway_id(conn)
         dropped = 0
@@ -1151,6 +1204,8 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 inserted += 1
                 touched.add(m["channel_id"])
                 wakes.append(m)
+                if m["gateway_id"] != local_gid and not m.get("promoted_from"):
+                    fresh.append(m)
         for raw in reactions[:BATCH_LIMIT]:
             r = _valid_reaction(raw)
             if not r:
@@ -1186,6 +1241,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
         stats["dropped"] = dropped
     if not suppress_wakes:
         _maybe_wake(wakes)
+        _announce_incoming(fresh)
     for channel_id in touched:
         _notify("message.created", {"channel_id": channel_id})
     for channel_id in rtouched:
@@ -1277,6 +1333,7 @@ def handle_peer_sync(body: Any) -> dict:
         with connect() as conn:
             _prime_peer_wake(conn, sender_gid)
     _record_incoming(sender)
+    _record_peer_status(sender, body.get("status"))
     try:
         after_seq = max(0, int(body.get("after_seq") or 0))
     except (TypeError, ValueError):
@@ -1472,6 +1529,36 @@ def wake_text(m: dict, channel: dict, my_gateway_id: str = "") -> str:
         f"(herd_read_channel with the same channel gives context first). Your usual approvals apply to anything "
         f"you do to carry out the request."
     )
+
+
+NOTIFY_MAX_ITEMS = 5
+
+
+def notify_enabled() -> bool:
+    """Native notifications for teammates' messages: off unless the owner turns on "Notify me about new messages"."""
+    value = settings().get("notify_messages", False)
+    return value is True or str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _announce_incoming(fresh: list[dict]) -> None:
+    """Tell the desktop about teammates' new messages so it can raise an OS notification. Sends author, place and a
+    short preview; never the full text, never a row that arrived as history (the caller skips first contact)."""
+    if not fresh or not notify_enabled():
+        return
+    try:
+        me = identity()["display_name"]
+        items = []
+        for m in fresh[:NOTIFY_MAX_ITEMS]:
+            channel = get_channel(m["channel_id"])
+            items.append({
+                "id": m["id"], "channel_id": m["channel_id"],
+                "channel_name": (channel or {}).get("name", ""), "is_dm": bool((channel or {}).get("is_dm")),
+                "author_name": m["author_name"], "mention": mentions_me(m["content"], me),
+                "preview": " ".join(str(m["content"]).split())[:120],
+            })
+        _notify("incoming.messages", {"items": items, "count": len(fresh)})
+    except Exception:  # noqa: BLE001 — a failed notification must never break sync
+        logger.debug("herd: could not announce incoming messages", exc_info=True)
 
 
 def _record_wake_skip(message_id: str, code: str) -> None:
@@ -1821,7 +1908,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
                                     "messages": sent_messages, "after_seq": st["pull_seq"],
                                     "reactions": sent_reactions, "after_rseq": st["pull_rseq"],
-                                    "first_contact": first_contact})
+                                    "first_contact": first_contact, "status": status_for_peers()})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             pulled += ingest(resp, suppress_wakes=first_contact)
             if identified:
@@ -1938,6 +2025,51 @@ def set_status(phrase: Any) -> dict:
     return {"phrase": text, "at": _now(), "agent": me["display_name"], "ttl_s": STATUS_TTL_S}
 
 
+# A teammate's phrase as their gateway last sent it (Track 2). In memory only, like this gateway's own phrase,
+# and only for its own gateway: a peer never relays another gateway's status. Expires with the same TTL.
+_peer_status: dict[str, dict] = {}
+
+
+def status_for_peers() -> Optional[dict]:
+    """The phrase this gateway's agent sends in each sync request: the phrase and the agent's name, nothing else."""
+    entry = agent_status()
+    if not entry:
+        return None
+    return {"phrase": entry["phrase"], "agent": str(entry.get("agent") or "")[:64]}
+
+
+def _record_peer_status(sender: dict, raw: Any) -> None:
+    """Keep the phrase a peer sent for itself. A malformed or missing one clears that peer's entry."""
+    gid = str(sender.get("gateway_id") or "").strip()[:64]
+    if not gid:
+        return
+    phrase = str(raw.get("phrase") or "").strip().casefold() if isinstance(raw, dict) else ""
+    with _status_lock:
+        if phrase not in STATUS_PHRASES:
+            _peer_status.pop(gid, None)
+            return
+        _peer_status[gid] = {
+            "phrase": phrase,
+            "agent": _clean_name(raw.get("agent"), "")[:64],
+            "name": _clean_name(sender.get("display_name"), "teammate")[:64],
+            "at": time.time(),
+        }
+
+
+def peer_status_list(now: Optional[float] = None) -> list[dict]:
+    """Teammates' phrases still inside the TTL, newest first. Never raises."""
+    now_f = time.time() if now is None else float(now)
+    with _status_lock:
+        entries = [(gid, dict(e)) for gid, e in _peer_status.items()]
+    out = []
+    for gid, e in entries:
+        age = now_f - float(e.get("at", 0.0))
+        if 0 <= age < STATUS_TTL_S:
+            out.append({"gateway_id": gid, "name": e["name"], "agent": e["agent"], "phrase": e["phrase"],
+                        "age_s": round(age, 3)})
+    return sorted(out, key=lambda e: (e["age_s"], e["gateway_id"]))
+
+
 def _as_finite_float(value: Any) -> Optional[float]:
     """The value as a finite float, or None when it is not a real, finite number.
 
@@ -2001,4 +2133,5 @@ def status() -> dict:
     refused = refused_peers()
     return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
             "agent_status": agent_status(), "mention_wake": wake_status(), "wake": wake_block(),
+            "peer_status": peer_status_list(), "notify": notify_enabled(),
             "herd_secret_set": herd_secret_set()}

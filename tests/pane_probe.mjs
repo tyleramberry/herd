@@ -25,6 +25,7 @@ export const ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot'
 export const Textarea = 'Textarea'
 export const PALETTE_AREA = 'palette'
+export const STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
 export const PANES_AREA = 'panes'
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'nav'
@@ -49,22 +50,30 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
+globalThis.__notified = []
 globalThis.__query = null
 const { host: sdkHost } = await import(pathToFileURL(join(work, 'sdk.mjs')).href)
 const {
   probeMessageRow: MessageRow, probeWakeBanner: WakeBanner, probeReactionPicker: ReactionPicker,
   probePickerAtom: pickerAtom, probeSearchBar: SearchBar, probeSnippetParts: snippetParts,
   probeOpenHit: openHit, probeArriveAt: arriveAt, probeSearchQuery: searchQuery, probeScrollTarget: scrollTarget,
-  probeSelection: selection, probeThread: thread, probeJumpNote: jumpNote, probePlugin: plugin
+  probeSelection: selection, probeThread: thread, probeJumpNote: jumpNote, probePlugin: plugin,
+  probeNotifyIncoming: notifyIncoming, probeUnreadCount: UnreadCount, probeChannelButton: ChannelButton,
+  probeWorkLine: WorkLine
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
 // Register the plugin once, as the host does, so the timers have their context (ctx.setTimeout).
-const fakeCtx = { items: [], registerMany: list => fakeCtx.items.push(...list), onEvent () {}, setInterval () {}, setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms), onDispose () {} }
+const fakeCtx = {
+  items: [], handlers: {}, registerMany: list => fakeCtx.items.push(...list),
+  onEvent: (name, fn) => { fakeCtx.handlers[name] = fn }, setInterval () {},
+  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms), onDispose () {},
+  os: { notify: input => globalThis.__notified.push(input) }
+}
 plugin.register(fakeCtx)
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${ok || !detail ? '' : ` -> ${detail}`}`)
@@ -302,6 +311,64 @@ const flat = root => nodes(root).filter(n => typeof n.type === 'string')
   check('running it opens the Herd page', globalThis.__navigations.at(-1) === '/herd')
   check('running it starts with an empty search', searchQuery.get() === '')
 }
+
+// ---- presence, unread and notifications (Track 2) ------------------------------------
+const item = (channel, author, preview, extra = {}) => ({
+  id: preview, channel_id: channel, channel_name: channel === 'c-dm' ? 'Tyler & Riley' : channel,
+  is_dm: channel === 'c-dm', author_name: author, mention: false, preview, ...extra
+})
+{
+  globalThis.__notified.length = 0
+  const first = notifyIncoming({ count: 2, items: [item('general', 'riley', 'build is green'), item('general', 'riley', 'and tests')] }, 1000)
+  check('one notification per channel burst', first === 1 && globalThis.__notified.length === 1, String(first))
+  check('the notification names the channel', globalThis.__notified[0].title === '#general', JSON.stringify(globalThis.__notified[0]))
+  check('the body names the author and counts the rest', globalThis.__notified[0].body === 'riley: build is green (+1 more)', globalThis.__notified[0].body)
+  check('the notification opens Herd when clicked', globalThis.__notified[0].activate === '/herd')
+
+  check('the same channel within 30s is quiet', notifyIncoming({ count: 1, items: [item('general', 'riley', 'again')] }, 2000) === 0)
+  const burst = ['c2', 'c3', 'c4', 'c5', 'c6', 'c7'].map(c => item(c, 'riley', 'hi ' + c))
+  check('a burst across channels is capped at four a minute', notifyIncoming({ count: 6, items: burst }, 3000) === 3)
+  check('the cap resets after the window', notifyIncoming({ count: 1, items: [item('c9', 'riley', 'later')] }, 70000) === 1)
+  globalThis.__notified.length = 0
+  const mention = notifyIncoming({ count: 1, items: [item('c10', 'riley', 'you there?', { mention: true })] }, 200000)
+  check('a mention says so in the title', mention === 1 && globalThis.__notified[0].title === 'Mentioned in #c10')
+  check('a DM names the people, not a hash', notifyIncoming({ count: 1, items: [item('c-dm', 'riley', 'hey')] }, 300000) === 1
+    && globalThis.__notified.at(-1).title === 'Tyler & Riley')
+
+  const saved = fakeCtx.os
+  fakeCtx.os = undefined
+  check('no OS door means no notification and no error', notifyIncoming({ count: 1, items: [item('c11', 'r', 'x')] }, 400000) === 0)
+  fakeCtx.os = saved
+
+  globalThis.__notified.length = 0
+  fakeCtx.handlers['plugin.herd.incoming.messages']({ payload: { count: 1, items: [item('c12', 'riley', 'routed')] } })
+  check('the incoming event reaches the notifier', globalThis.__notified.length === 1 && globalThis.__notified[0].body.includes('routed'))
+}
+{
+  globalThis.__query = { data: [{ unread: 2 }, { unread: 3 }, { unread: 0 }] }
+  const bar = UnreadCount({})
+  check('the status bar totals unread messages', texts(bar).includes('Herd · 5 unread'), JSON.stringify(texts(bar)))
+  globalThis.__query = { data: [{ unread: 0 }] }
+  check('the status bar is empty when nothing is unread', UnreadCount({}) === null)
+  globalThis.__query = null
+}
+{
+  const unread = ChannelButton({ channel: { id: 'general', name: 'general', unread: 4, message_count: 9 }, label: '#general', selected: false, onSelect () {} })
+  const badge = findAll(unread, n => n.props['aria-label'] === '4 unread')
+  check('an unread channel shows its count', badge.length === 1 && texts(badge[0]).includes('4'))
+  const open = ChannelButton({ channel: { id: 'general', name: 'general', unread: 4, message_count: 9 }, label: '#general', selected: true, onSelect () {} })
+  check('the open channel shows no unread count', findAll(open, n => n.props['aria-label'] !== undefined).length === 0)
+}
+{
+  const both = WorkLine({ status: { agent_status: { phrase: 'writing the code', agent: 'tyler' },
+    peer_status: [{ name: 'Riley', agent: 'riley', phrase: 'reviewing' }] } })
+  const all = texts(both).join(' | ')
+  check("a teammate's phrase sits under this agent's", all.includes('writing the code') && all.includes("Riley's agent: reviewing"), all)
+  const peerOnly = WorkLine({ status: { agent_status: null, peer_status: [{ name: 'Riley', phrase: 'reviewing' }] } })
+  check('a teammate alone still shows their phrase', texts(peerOnly).join(' ').includes("Riley's agent: reviewing"))
+  check('no phrases means no work line', WorkLine({ status: { agent_status: null, peer_status: [] } }) === null)
+}
+
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')
 process.exit(failures.length ? 1 : 0)

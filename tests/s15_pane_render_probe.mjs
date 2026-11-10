@@ -30,6 +30,7 @@ export const ScrollArea = 'ScrollArea'
 export const StatusDot = 'StatusDot'
 export const Textarea = 'Textarea'
 export const PALETTE_AREA = 'palette'
+export const STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
 export const PANES_AREA = 'panes'
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'nav'
