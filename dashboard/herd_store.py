@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import hmac
+import http.client
 import logging
 import ipaddress
 import json
@@ -794,7 +795,7 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
         if members and _local_gateway_id(conn) not in _member_ids(members):
             return  # a member-listed channel that does not include this gateway is not ours to hold
         created = str(ch.get("created_at") or _now())[:40]
-        topic = str(ch.get("topic") or "")[:200]
+        topic = _one_line(ch.get("topic"))[:200]
         their_at = str(ch.get("topic_at") or created)[:40]
         if not _valid_stamp(their_at):
             their_at = created
@@ -1286,8 +1287,8 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     if isinstance(stats, dict):
         stats["accepted"] = inserted
         stats["dropped"] = dropped
+    _maybe_wake(wakes, history=suppress_wakes)
     if not suppress_wakes:
-        _maybe_wake(wakes)
         _announce_incoming(fresh)
     for channel_id in touched:
         _notify("message.created", {"channel_id": channel_id})
@@ -1411,6 +1412,8 @@ WAKE_REASONS = {
     "rate_limited": "Not handed to the agent: too many @mentions in one minute (limit 6). Read it in the channel.",
     "no_channel": "Not handed to the agent: its channel is missing here, so there is nowhere to reply.",
     "wake_error": "Not handed to the agent: Herd's wake handler isn't running in this gateway.",
+    "agent_author": "Not handed to the agent: another agent wrote it, and agents never wake each other.",
+    "history": "Not handed to the agent: it arrived as history when this teammate first linked.",
 }
 INJECTION_CONFIG_LINE = "allow_gateway_injection: true"
 
@@ -1627,7 +1630,7 @@ def wake_skips_for(message_ids: list[str]) -> dict[str, str]:
     return {r["message_id"]: r["reason"] for r in rows}
 
 
-def _maybe_wake(messages: list[dict]) -> None:
+def _maybe_wake(messages: list[dict], history: bool = False) -> None:
     """Hand each newly arrived human message that @mentions this gateway's agent to its chat.
 
     Guards: only HUMAN-authored messages (an agent's post never wakes anything, so two agents cannot loop);
@@ -1641,13 +1644,19 @@ def _maybe_wake(messages: list[dict]) -> None:
         me_info = identity()
         me, me_id = me_info["display_name"], me_info["gateway_id"]
         for m in messages:
-            if m["author_type"] != "human" or m["gateway_id"] == me_id:
+            if m["gateway_id"] == me_id:
                 continue
             if m.get("promoted_from"):  # a copy of an old DM message, not something new (S-13)
                 continue
             if not mentions_me(m["content"], me):
                 continue
-            _wake_one(m, me_id)
+            # A mention that will not wake the agent still gets a reason, so it is never dropped silently.
+            if history:  # a teammate's first pass: history, not news
+                _record_wake_skip(m["id"], "history")
+            elif m["author_type"] != "human":  # agents never wake each other, so two agents cannot loop
+                _record_wake_skip(m["id"], "agent_author")
+            else:
+                _wake_one(m, me_id)
     except Exception:  # noqa: BLE001 — a failed wake must never break sync
         logger.debug("herd: mention wake failed", exc_info=True)
 
@@ -1799,16 +1808,25 @@ def handle_pair_request(body: Any) -> dict:
             problem = (429, PAIR_LOCKED)
         else:
             row = conn.execute("SELECT digest, expires_at, used_at FROM pairing_codes").fetchone()
-            matches = bool(row) and bool(digest) and not row["used_at"] and now < float(row["expires_at"]) \
+            known = bool(row) and bool(digest) and not row["used_at"] and now < float(row["expires_at"]) \
                 and hmac.compare_digest(digest, row["digest"])
-            if not matches:
+            if not known:
                 _pair_failure(conn)
                 problem = (403, PAIR_REFUSED)
             elif not secret:  # checked before the code is spent: a setup gap does not burn it
                 problem = (409, "This gateway has no Herd secret to share yet. Set one in Settings, then ask for a new code.")
             else:
-                conn.execute("UPDATE pairing_codes SET used_at = ?, used_by = ?", (_now(), requester_gid))
-                _meta_set(conn, "pair_failures", "0")
+                # The spend is the decision: a conditional UPDATE, so two requests that both read the code
+                # unspent cannot both win. Only the one that changes the row gets the secret.
+                spent = conn.execute(
+                    "UPDATE pairing_codes SET used_at = ?, used_by = ? "
+                    "WHERE digest = ? AND used_at = '' AND expires_at > ?",
+                    (_now(), requester_gid, row["digest"], now)).rowcount
+                if spent == 1:
+                    _meta_set(conn, "pair_failures", "0")
+                else:
+                    _pair_failure(conn)
+                    problem = (403, PAIR_REFUSED)
     if problem is not None:
         raise HerdError(*problem)
     me = identity()
@@ -1875,7 +1893,7 @@ def redeem_pairing(url: str, code: Any) -> dict:
     except urllib.error.HTTPError as exc:
         detail = _http_error_text(exc)
         raise HerdError(502, "The other gateway refused that code" + (f": {detail}" if detail else ".")) from exc
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         raise HerdError(502, "Couldn't reach that gateway. Check the address and that it's running.") from exc
     sender = reply.get("from") if isinstance(reply.get("from"), dict) else {}
     responder_gid = str(sender.get("gateway_id") or "").strip()
@@ -2286,6 +2304,9 @@ def _record_peer_status(sender: dict, raw: Any) -> None:
         return
     phrase = str(raw.get("phrase") or "").strip().casefold() if isinstance(raw, dict) else ""
     with _status_lock:
+        now = time.time()
+        for old in [g for g, e in _peer_status.items() if now - float(e.get("at", 0.0)) >= STATUS_TTL_S]:
+            _peer_status.pop(old, None)
         if phrase not in STATUS_PHRASES:
             _peer_status.pop(gid, None)
             return
