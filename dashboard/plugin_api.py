@@ -72,6 +72,18 @@ def get_search(q: str = Query(default=""), channel: Optional[str] = Query(defaul
     return {"query": str(q or "")[:store.SEARCH_MAX_CHARS], "results": results}
 
 
+@router.post("/pairing-code")
+def post_pairing_code():
+    """A new one-time code for a teammate to pair with this gateway (replaces any live code)."""
+    return _call(store.mint_pairing_code)
+
+
+@router.post("/pair")
+def post_pair(body: dict[str, Any]):
+    """Exchange a teammate's code for their Herd secret. Returns it once, for the owner to paste into Settings."""
+    return _call(store.redeem_pairing, body.get("url"), body.get("code"))
+
+
 @router.post("/wake-target")
 def post_wake_target(body: dict[str, Any]):
     """One-click 'Answer @mentions here' from the pane: the active chat's session key becomes the wake target.

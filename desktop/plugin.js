@@ -1545,6 +1545,87 @@ function SearchBar() {
   })
 }
 
+// Pairing (Track 5): a one-time code instead of a long key. "Show" mints a code on this gateway; "Enter" exchanges a
+// teammate's code for their Herd secret. The secret is kept only in this atom and shown once, for the owner to paste
+// into Settings: Herd has no way to write Hermes's secret store, so it does not save the key for you.
+const pairingView = atom(null) // null | 'show' | 'enter'
+const pairingResult = atom(null) // { name, url, herd_secret } after a successful enter, until hidden
+
+function PairingPanel() {
+  const view = useValue(pairingView)
+  const result = useValue(pairingResult)
+  const mint = useMutation({
+    mutationFn: () => api('/pairing-code', { method: 'POST' })
+  })
+  const redeem = useMutation({
+    mutationFn: ({ url, code }) => api('/pair', { method: 'POST', body: { url, code } }),
+    onSuccess: r => pairingResult.set(r)
+  })
+  const btn = (label, onClick) => jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick, children: label })
+  if (result) {
+    return jsxs('div', {
+      className: 'flex flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
+      children: [
+        jsx('div', { children: 'Paired with ' + result.name + '. Copy this key once, then paste it into Settings → Plugins → Herd → Teammate’s Herd secret, with the gateway address ' + result.url + '.' }),
+        jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: result.herd_secret }),
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Herd can’t save this for you yet. Hide it once you have pasted it.' }),
+        btn('Hide key', () => pairingResult.set(null))
+      ]
+    })
+  }
+  if (view === 'show') {
+    const minted = mint.data
+    return jsxs('div', {
+      className: 'flex flex-col items-center gap-1.5 text-center text-xs text-(--ui-text-secondary)',
+      children: [
+        minted
+          ? jsx('code', { className: 'font-mono text-base tracking-wider', children: minted.code })
+          : jsx('div', { className: 'text-(--ui-text-tertiary)', children: mint.isPending ? 'Making a code…' : 'Make a code for your teammate.' }),
+        minted
+          ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Valid for ten minutes and for one use. Your teammate also needs this gateway’s address.' })
+          : null,
+        mint.isError ? jsx('div', { children: errorText(mint.error, "Couldn't make a code.") }) : null,
+        btn(minted ? 'Make a new code' : 'Make a code', () => mint.mutate()),
+        btn('Close', () => pairingView.set(null))
+      ]
+    })
+  }
+  if (view === 'enter') {
+    return jsxs('form', {
+      className: 'flex w-full flex-col gap-1.5',
+      onSubmit: e => {
+        e.preventDefault()
+        const form = e.currentTarget
+        const url = String(new FormData(form).get('url') || '').trim()
+        const code = String(new FormData(form).get('code') || '').trim()
+        if (url && code && !redeem.isPending) redeem.mutate({ url, code })
+      },
+      children: [
+        jsx(Input, { name: 'url', placeholder: 'https://teammate.tailnet-name.ts.net:8642', 'aria-label': 'Teammate’s gateway address', autoComplete: 'off', className: 'h-7 text-xs' }),
+        jsx(Input, { name: 'code', placeholder: 'ABCDE-FGHJK', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
+        jsxs('div', {
+          className: 'flex items-center gap-1.5',
+          children: [
+            jsx(Button, { type: 'submit', size: 'xs', disabled: redeem.isPending, children: redeem.isPending ? 'Pairing…' : 'Pair' }),
+            btn('Cancel', () => pairingView.set(null))
+          ]
+        }),
+        redeem.isError ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(redeem.error, "Couldn't pair.") }) : null
+      ]
+    })
+  }
+  return jsxs('div', {
+    className: 'flex flex-wrap items-center justify-center gap-2',
+    children: [
+      btn('Show a pairing code', () => {
+        mint.reset && mint.reset()
+        pairingView.set('show')
+      }),
+      btn('Enter a pairing code', () => pairingView.set('enter'))
+    ]
+  })
+}
+
 // One honest line about @mention wake: whether the agent answers in a chat, or exactly what is missing. The
 // one-click target comes from the pane's active session (host.state.activeSessionId), so no slash command.
 function WakeBanner({ status }) {
@@ -1661,6 +1742,7 @@ function HerdView({ compact }) {
     className: 'flex h-full min-h-0 flex-col',
     children: [
       statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
+      statusQuery.isSuccess && !hasPeer ? jsx(PairingPanel) : null,
       statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
       compact ? null : jsx(SearchBar),
       jsxs('div', {
@@ -1726,6 +1808,8 @@ export default {
     notifyState.sent = []
     notifyState.lastByChannel = {}
     composeRequest.set(0)
+    pairingView.set(null)
+    pairingResult.set(null)
     emojiTray.page.set(false)
     emojiTray.pane.set(false)
     topicEditing.page.set(null)
@@ -1734,6 +1818,7 @@ export default {
     ctx.onDispose(() => {
       rest = null
       ctx = null
+      pairingResult.set(null) // a pairing key never outlives the panel that showed it
     })
 
     ctx.registerMany([

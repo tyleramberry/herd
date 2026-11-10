@@ -49,6 +49,16 @@ Within a few seconds the pane header shows **Connected to brooklyn**, and each o
 
 > **Already linked before this change?** A *Teammate's Herd secret* saved by an older Herd still holds their old `API_SERVER_KEY`, which their gateway no longer accepts on `/herd/v1/*`. Each side sets a new *This gateway's Herd secret*, tells the other that value only, and the link recovers — the error line names which side is still missing one.
 
+## Or pair with a short code
+
+Instead of reading a long secret aloud, the one who already has Herd can make a code:
+
+1. **On the machine that holds the secret** (with Herd set up and a Herd secret saved), open the Herd pane with no teammate linked yet and press **Show a pairing code**. You get a 10-character code (like `ABCDE-FGHJK`) that is valid for ten minutes and for one use.
+2. **On your teammate's machine**, press **Enter a pairing code**, type the gateway address (for example `https://brooklyn-mac.tailnet-name.ts.net:8642`) and the code, then **Pair**. Herd fetches the Herd secret and shows it once.
+3. Paste that key into **Settings → Plugins → Herd → Teammate's Herd secret**, with the name and address as in the section above. Herd cannot save it for you yet: Hermes's secret store has no write door for plugins.
+
+Five wrong codes pause pairing for ten minutes and kill the live code. A new code replaces the old one. Pairing refuses a plain `http://` address to another machine, the same as the manual route. **Only give a code to someone you would give the Herd secret to:** a correct code gets that secret in the reply.
+
 ## More than two of you (up to five gateways)
 
 Each teammate you link is one more gateway. You can link up to four teammates, so the mesh is five gateways at most.
@@ -91,6 +101,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - **Network calls:** only to the teammate gateway URLs you enter (up to four), at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. The peer client ignores ambient `http_proxy`/`HTTP_PROXY` (it builds its opener with an explicitly empty proxy map), so the peer key is never handed to a proxy. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
 - **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require **this gateway's Herd secret** (`HERD_SECRET`, Herd's own credential, read through Hermes's secret store and compared in constant time). With no Herd secret set, both routes refuse every request (fail closed). Your gateway's `API_SERVER_KEY` is **not** accepted on `/herd/v1/*`, and the credential you hand a teammate is Herd-scoped — it is no longer your gateway API key, so it cannot reach the rest of your API server. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
+- **Pairing codes:** a code is kept on your gateway only as a keyed digest, in herd.db. The exchange is `POST <url>/herd/v1/pair` on the teammate's gateway, which needs no Herd secret, only a live code: it returns your teammate's Herd secret to a correct code, once. Wrong, used and expired codes get one reply. The key the pairing shows is held in the pane's memory until you hide it and is never written to storage.
 - **Stored credentials:** one `config_schema` secret per teammate — `HERD_PEER_KEY`, then `HERD_PEER_KEY_2` to `_4`, each sent only to its own teammate's gateway — and this gateway's own Herd secret (`HERD_SECRET`, required from them) — saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the task title of a Kanban card an agent linked to its answer (next bullet).
 - **Read state:** which channels you have read (a cursor per channel, `read_cursors` in herd.db) stays on this gateway. It is never synced. Opening a channel in the pane marks it read.

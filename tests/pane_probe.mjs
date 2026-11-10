@@ -37,7 +37,7 @@ export const host = { state: { activeSessionId: atom(null) }, navigate (path) { 
 export const pluginSettingsHref = id => '/settings/plugins/' + id
 export const queryClient = { invalidateQueries () {} }
 export const relativeTime = ms => String(ms)
-export const useMutation = () => ({ isPending: false, mutate: v => { globalThis.__mutations.push(v) } })
+export const useMutation = () => ({ isPending: false, data: globalThis.__mintData, mutate: v => { globalThis.__mutations.push(v) }, reset () {} })
 export const useQuery = () => globalThis.__query || {}
 export const useValue = $a => $a.get()
 `)
@@ -53,13 +53,14 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, PairingPanel as probePairingPanel, pairingView as probePairingView, pairingResult as probePairingResult, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
 globalThis.__notified = []
 globalThis.__drafts = {}
 globalThis.__workspaces = []
+globalThis.__mintData = undefined
 globalThis.__closed = []
 // Node's FormData only takes real form elements; the plugin only needs getAll/get on a form-like object.
 globalThis.FormData = class { constructor (f) { this.f = f } getAll (n) { return (this.f.__values && this.f.__values[n]) || [] } get (n) { return this.getAll(n)[0] ?? null } }
@@ -74,7 +75,8 @@ const {
   probeWorkLine: WorkLine, probeRenderContent, probeComposer, probeTopicLine,
   probeNewChannelForm, probeInsertAtCaret, probePickedMembers,
   probeEmojiTray, probeTopicEditing, probeComposeRequest,
-  probeOpenThreadWorkspace, probeCloseThreadWorkspace, probeThreadTabs, probeThreadWorkspace, probeThreadPanel
+  probeOpenThreadWorkspace, probeCloseThreadWorkspace, probeThreadTabs, probeThreadWorkspace, probeThreadPanel,
+  probePairingPanel, probePairingView, probePairingResult
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
@@ -573,6 +575,42 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   thread.page.set(null)
 }
 
+
+// ---- pairing (Track 5) ---------------------------------------------------------------
+{
+  probePairingView.set(null)
+  probePairingResult.set(null)
+  globalThis.__mintData = undefined
+  const start = nodes(probePairingPanel({}))
+  check('pairing offers to show a code', Boolean(start.find(n => n.type === 'Button' && n.props.children === 'Show a pairing code')))
+  check('pairing offers to enter a code', Boolean(start.find(n => n.type === 'Button' && n.props.children === 'Enter a pairing code')))
+  start.find(n => n.type === 'Button' && n.props.children === 'Enter a pairing code').props.onClick()
+  check('entering opens the form', probePairingView.get() === 'enter')
+  const form = probePairingPanel({})
+  const fields = nodes(form).filter(n => n.type === 'Input').map(n => n.props.name)
+  check('the form asks for the address and the code', fields.includes('url') && fields.includes('code'), JSON.stringify(fields))
+  globalThis.__mutations.length = 0
+  form.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { url: ['https://brooklyn-mac.tailnet.ts.net:8642'], code: ['ABCDE-FGHJK'] } } })
+  check('pairing sends the address and the code', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ url: 'https://brooklyn-mac.tailnet.ts.net:8642', code: 'ABCDE-FGHJK' }),
+    JSON.stringify(globalThis.__mutations))
+
+  probePairingView.set('show')
+  globalThis.__mintData = { code: 'ABCDE-FGHJK', expires_in_s: 600 }
+  const shown = nodes(probePairingPanel({}))
+  check('a minted code is shown', shown.some(n => n.type === 'code' && n.props.children === 'ABCDE-FGHJK'))
+  check('the code says it is single use and short-lived', texts(probePairingPanel({})).join(' ').includes('one use'))
+  globalThis.__mintData = undefined
+
+  probePairingView.set(null)
+  probePairingResult.set({ name: 'brooklyn', url: 'https://brooklyn-mac.tailnet.ts.net:8642', herd_secret: ['SECRET', 'VALUE', '0123456789'].join('-') })
+  const done = probePairingPanel({})
+  check('a finished pairing names the teammate', texts(done).join(' ').includes('Paired with brooklyn'))
+  check('the key is shown once, in a code element', nodes(done).some(n => n.type === 'code' && n.props.children === 'SECRET-VALUE-0123456789'))
+  check('the key is never written to plugin storage', !Object.values(globalThis.__drafts).some(v => String(v).includes('SECRET-VALUE')))
+  find(done, n => n.type === 'Button' && n.props.children === 'Hide key').props.onClick()
+  check('hiding the key clears it', probePairingResult.get() === null)
+  check('and it is gone from the pane', !nodes(probePairingPanel({})).some(n => n.type === 'code'))
+}
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')
 process.exit(failures.length ? 1 : 0)
