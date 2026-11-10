@@ -93,6 +93,23 @@ def _wire_api_server(app, adapter) -> None:
             return web.json_response({"error": "Herd sync failed on this gateway."}, status=500)
         return web.json_response(result)
 
+    async def herd_pair(request: "web.Request") -> "web.Response":
+        # No Herd secret here: the one-time pairing code is the credential for this exchange. Wrong, used and expired
+        # codes all get one reply, and five wrong tries pause pairing (see herd_store.handle_pair_request).
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            return web.json_response({"error": "Body must be JSON."}, status=400)
+        store = _store()
+        try:
+            result = await asyncio.to_thread(store.handle_pair_request, body)
+        except store.HerdError as exc:
+            return web.json_response({"error": exc.message}, status=exc.status)
+        except Exception:  # noqa: BLE001 — never leak a stack trace to the network
+            logger.exception("herd: pairing failed")
+            return web.json_response({"error": "Herd pairing failed on this gateway."}, status=500)
+        return web.json_response(result)
+
     async def herd_ping(request: "web.Request") -> "web.Response":
         denied = _denied(request)
         if denied is not None:
@@ -102,6 +119,7 @@ def _wire_api_server(app, adapter) -> None:
         return web.json_response({"ok": True, "from": me, "v": store.PROTOCOL_VERSION})
 
     app.router.add_post(_store().PEER_SYNC_PATH, herd_sync)
+    app.router.add_post(_store().PAIR_PATH, herd_pair)
     app.router.add_get("/herd/v1/ping", herd_ping)
 
     async def _start_sync_loop(_app) -> None:

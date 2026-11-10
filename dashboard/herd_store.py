@@ -22,12 +22,14 @@ Fan-out model (see README "How sync works"):
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import hmac
 import logging
 import ipaddress
 import json
 import math
 import re
+import secrets
 import socket
 import sqlite3
 import threading
@@ -211,6 +213,12 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
 END;
 -- Read state (Track 2): the highest messages.seq this gateway has seen in each channel. Local only and never
 -- synced: what one person has read is not the mesh's business. Unread = rows after the cursor not written here.
+CREATE TABLE IF NOT EXISTS pairing_codes (
+    digest TEXT PRIMARY KEY,
+    expires_at REAL NOT NULL,
+    used_at TEXT NOT NULL DEFAULT '',
+    used_by TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS read_cursors (
     channel_id TEXT PRIMARY KEY,
     seq INTEGER NOT NULL DEFAULT 0
@@ -224,7 +232,7 @@ _initialized: set[str] = set()
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
 _REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips",
-                    "messages_fts", "read_cursors")
+                    "messages_fts", "read_cursors", "pairing_codes")
 _REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
                           "promoted_from", "task_id")
 
@@ -1686,6 +1694,200 @@ def _wake_one(m: dict, me_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Peer protocol (client side)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Pairing code (Track 5). A short, single-use code lets a teammate fetch this gateway's Herd secret without
+# anyone reading out a long key. The code is the credential for the one exchange; the reply is proven with it.
+# ---------------------------------------------------------------------------
+
+PAIR_PATH = "/herd/v1/pair"
+PAIR_PROTOCOL = "herd-pair-v1"
+PAIR_TTL_S = 600.0
+PAIR_CODE_LEN = 10
+PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32: no I, L, O or U
+PAIR_MAX_FAILURES = 5
+PAIR_LOCKOUT_S = 600.0
+PAIR_REFUSED = "That pairing code isn't valid, has expired or was already used."
+PAIR_LOCKED = "Too many wrong codes. Pairing is paused for a few minutes; ask for a fresh code then."
+# Test seam: the requester's transport (``fn(url, body) -> dict``). Production posts with _OPEN_PEER.
+PAIR_TRANSPORT: Optional[Callable[[str, dict], dict]] = None
+
+
+def _normalize_code(raw: Any) -> str:
+    """Crockford normalization: case-insensitive, dashes and spaces ignored, I and L read as 1, O as 0."""
+    text = "".join(ch for ch in str(raw or "").upper() if ch.isalnum())
+    return text.translate(str.maketrans({"I": "1", "L": "1", "O": "0"}))
+
+
+def _format_code(code: str) -> str:
+    return code[:5] + "-" + code[5:]
+
+
+def _pair_digest(code: str) -> str:
+    """The stored form of a code: a keyed digest, so the database never holds the code itself."""
+    with connect() as conn:
+        key = conn.execute("SELECT value FROM meta WHERE key='pair_key'").fetchone()
+        if key is None:
+            key_value = secrets.token_hex(32)
+            conn.execute("INSERT INTO meta(key, value) VALUES ('pair_key', ?)", (key_value,))
+        else:
+            key_value = key[0]
+    return hmac.new(bytes.fromhex(key_value), code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _meta_get(conn: sqlite3.Connection, key: str, default: str) -> str:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def _meta_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (key, value))
+
+
+def mint_pairing_code() -> dict:
+    """A new single-use code for this gateway's Herd secret. Replaces any code still live."""
+    if not herd_secret_set():
+        raise HerdError(409, "Set this gateway's Herd secret (HERD_SECRET) first; a code can't share a secret that isn't set.")
+    code = "".join(secrets.choice(PAIR_CODE_ALPHABET) for _ in range(PAIR_CODE_LEN))
+    digest = _pair_digest(code)
+    expires = time.time() + PAIR_TTL_S
+    with connect() as conn:
+        conn.execute("DELETE FROM pairing_codes")
+        conn.execute("INSERT INTO pairing_codes(digest, expires_at, used_at, used_by) VALUES (?, ?, '', '')",
+                     (digest, expires))
+    return {"code": _format_code(code), "expires_in_s": int(PAIR_TTL_S)}
+
+
+def _pair_failure(conn: sqlite3.Connection) -> None:
+    failures = int(_meta_get(conn, "pair_failures", "0")) + 1
+    if failures >= PAIR_MAX_FAILURES:
+        _meta_set(conn, "pair_locked_until", str(time.time() + PAIR_LOCKOUT_S))
+        _meta_set(conn, "pair_failures", "0")
+        conn.execute("DELETE FROM pairing_codes")  # the live code dies with the lockout
+    else:
+        _meta_set(conn, "pair_failures", str(failures))
+
+
+def handle_pair_request(body: Any) -> dict:
+    """Server side of ``POST /herd/v1/pair``: exchange a live code for this gateway's Herd secret, once.
+
+    The code is checked first and only then consumed. A wrong, expired, used or unknown code gets the same reply.
+    The reply's MAC is keyed by the code over the requester's nonce and both gateway ids and the secret's digest, so
+    the requester can prove the reply came from a gateway that holds this code. Never raises anything but HerdError.
+    """
+    if not isinstance(body, dict):
+        raise HerdError(422, "Body must be a JSON object.")
+    requester = body.get("requester") if isinstance(body.get("requester"), dict) else {}
+    requester_gid = str(requester.get("gateway_id") or "").strip()
+    nonce = str(body.get("nonce") or "").strip().lower()
+    if not _MEMBER_ID_RE.match(requester_gid) or not re.fullmatch(r"[0-9a-f]{32,128}", nonce):
+        raise HerdError(422, "This pairing request is malformed.")
+    code = _normalize_code(body.get("code"))
+    digest = _pair_digest(code) if len(code) == PAIR_CODE_LEN else ""
+    now = time.time()
+    # The outcome is decided inside the transaction and raised after it: an exception inside `connect()` would roll
+    # back the failure count, and the lockout would never engage.
+    problem: Optional[tuple[int, str]] = None
+    with connect() as conn:
+        local_gid = _local_gateway_id(conn)
+        secret = herd_secret() or ""
+        if requester_gid == local_gid:
+            problem = (422, "That's this gateway's own code.")
+        elif now < float(_meta_get(conn, "pair_locked_until", "0") or 0):
+            problem = (429, PAIR_LOCKED)
+        else:
+            row = conn.execute("SELECT digest, expires_at, used_at FROM pairing_codes").fetchone()
+            matches = bool(row) and bool(digest) and not row["used_at"] and now < float(row["expires_at"]) \
+                and hmac.compare_digest(digest, row["digest"])
+            if not matches:
+                _pair_failure(conn)
+                problem = (403, PAIR_REFUSED)
+            elif not secret:  # checked before the code is spent: a setup gap does not burn it
+                problem = (409, "This gateway has no Herd secret to share yet. Set one in Settings, then ask for a new code.")
+            else:
+                conn.execute("UPDATE pairing_codes SET used_at = ?, used_by = ?", (_now(), requester_gid))
+                _meta_set(conn, "pair_failures", "0")
+    if problem is not None:
+        raise HerdError(*problem)
+    me = identity()
+    proof = _pair_proof(code, nonce, requester_gid, local_gid, secret)
+    return {"v": PROTOCOL_VERSION, "pair": PAIR_PROTOCOL,
+            "from": {"gateway_id": me["gateway_id"], "display_name": me["display_name"]},
+            "herd_secret": secret, "mac": proof}
+
+
+def _pair_proof(code: str, nonce: str, requester_gid: str, responder_gid: str, secret: str) -> str:
+    secret_digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    message = f"{PAIR_PROTOCOL}|{nonce}|{requester_gid}|{responder_gid}|{secret_digest}".encode("utf-8")
+    return hmac.new(code.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _http_pair(url: str, body: dict) -> dict:
+    refusal = _peer_url_refusal(url)
+    if refusal:  # refused before a request exists: the code is never sent in the clear to another machine
+        raise HerdError(422, refusal)
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url + PAIR_PATH, data=data, method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "hermes-herd/0.1"})
+    with _OPEN_PEER(req, timeout=SYNC_TIMEOUT_S) as resp:
+        parsed = json.loads(resp.read().decode("utf-8", "replace"))
+    if not isinstance(parsed, dict):
+        raise HerdError(502, "The other gateway's answer isn't a pairing reply. Nothing was saved.")
+    return parsed
+
+
+def _http_error_text(exc: urllib.error.HTTPError) -> str:
+    """The ``error`` message a Herd route put in its JSON body, or "". Never raises."""
+    try:
+        raw = exc.read(2048)
+        body = json.loads(raw.decode("utf-8", "replace")) if raw else {}
+        err = body.get("error") if isinstance(body, dict) else None
+        text = err.get("message") if isinstance(err, dict) else err
+        return str(text)[:200] if isinstance(text, str) else ""
+    except Exception:  # noqa: BLE001 — an unreadable error body is simply no detail
+        return ""
+
+
+def redeem_pairing(url: str, code: Any) -> dict:
+    """Requester side: exchange a teammate's code for their Herd secret, and verify the reply before trusting it.
+
+    Returns ``{name, gateway_id, url, herd_secret}``. Saves nothing: Hermes's secret store is written by its own
+    settings form, so the caller shows the secret once for the owner to paste. Refuses (HerdError 502) any reply that
+    is not proven by the code, which covers a downgrade (no MAC), a reply to a different request, and a stranger
+    holding another secret.
+    """
+    address = str(url or "").strip().rstrip("/")
+    refusal = _peer_url_refusal(address)
+    if refusal:
+        raise HerdError(422, refusal)
+    code_n = _normalize_code(code)
+    if len(code_n) != PAIR_CODE_LEN:
+        raise HerdError(422, "Pairing codes are 10 characters, like ABCDE-FGHJK.")
+    me = identity()
+    nonce = secrets.token_hex(16)
+    body = {"v": PROTOCOL_VERSION, "code": code_n, "nonce": nonce,
+            "requester": {"gateway_id": me["gateway_id"], "display_name": me["display_name"]}}
+    send = PAIR_TRANSPORT or _http_pair
+    try:
+        reply = send(address, body)
+    except urllib.error.HTTPError as exc:
+        detail = _http_error_text(exc)
+        raise HerdError(502, "The other gateway refused that code" + (f": {detail}" if detail else ".")) from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise HerdError(502, "Couldn't reach that gateway. Check the address and that it's running.") from exc
+    sender = reply.get("from") if isinstance(reply.get("from"), dict) else {}
+    responder_gid = str(sender.get("gateway_id") or "").strip()
+    secret = str(reply.get("herd_secret") or "")
+    mac = str(reply.get("mac") or "")
+    if reply.get("pair") != PAIR_PROTOCOL or not _MEMBER_ID_RE.match(responder_gid) or not secret or not mac:
+        raise HerdError(502, "The other gateway's answer isn't a verified pairing reply. Nothing was saved.")
+    expected = _pair_proof(code_n, nonce, me["gateway_id"], responder_gid, secret)
+    if not hmac.compare_digest(expected, mac):
+        raise HerdError(502, "The other gateway's answer didn't prove the code. Nothing was saved.")
+    return {"name": _clean_name(sender.get("display_name"), "teammate"), "gateway_id": responder_gid,
+            "url": address, "herd_secret": secret}
 
 
 # ---------------------------------------------------------------------------
