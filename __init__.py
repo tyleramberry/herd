@@ -134,7 +134,7 @@ def _listen_command(raw_args: str, session_key: str = "", **_kw) -> str:
         return "Herd will no longer pass @mentions to an agent."
     if not session_key:
         return "Run /herd-listen inside the chat you want your agent to answer Herd mentions in."
-    store.set_mention_target(session_key)
+    store.set_mention_target(session_key, "this chat")
     on = "on" if store.wake_enabled() else "OFF (turn on \"Let my agent answer @mentions\" in Settings > Plugins > Herd)"
     return ("Done. @mentions of you in Herd will be handed to this chat. "
             f"Mention wake is {on}. It also needs allow_gateway_injection: true for herd in config.yaml.")

@@ -49,6 +49,8 @@ const thread = { page: atom(null), pane: atom(null) } // the open thread's root 
 // (or ghost) one another's dropdown. null | { start, query, index }.
 const sharing = { page: atom(false), pane: atom(false) } // is the DM's 'Share to a channel' form open (S-13)
 const mentionState = { page: atom(null), pane: atom(null) }
+// Which message's reaction picker is open (its id), or null. One picker at a time, shared by page and pane.
+const reactionPicker = atom(null)
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -515,6 +517,82 @@ function MentionMenu({ items, index, onPick }) {
 
 const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
 
+// The reaction affordance. It is always in the row: faded in on hover and on keyboard focus (opacity, not
+// display, so the trigger stays tabbable). The trigger opens a picker; arrow keys move between the emoji,
+// Esc closes it and returns focus to the trigger, and leaving the picker closes it too.
+function ReactionPicker({ message, react }) {
+  const openId = useValue(reactionPicker)
+  const open = openId === message.id
+  const close = () => reactionPicker.set(null)
+  const move = (e, delta) => {
+    const items = Array.from(e.currentTarget.parentElement.querySelectorAll('[data-herd-emoji]'))
+    items[(items.indexOf(e.currentTarget) + delta + items.length) % items.length].focus()
+  }
+  return jsxs('div', {
+    className:
+      'absolute -top-3 right-3 z-10 flex items-center gap-0.5 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-surface-primary) px-1 py-0.5 ' +
+      (open
+        ? 'opacity-100'
+        : 'pointer-events-none opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100'),
+    onBlur: e => {
+      if (open && !e.currentTarget.contains(e.relatedTarget)) close()
+    },
+    onKeyDown: e => {
+      if (e.key !== 'Escape' || !open) return
+      e.stopPropagation() // Esc closes the picker, not the thread panel behind it
+      close()
+      e.currentTarget.querySelector('[data-herd-react-trigger]').focus()
+    },
+    children: [
+      jsx('button', {
+        type: 'button',
+        'data-herd-react-trigger': '',
+        'aria-label': 'Add reaction',
+        'aria-haspopup': 'true',
+        'aria-expanded': String(open),
+        title: 'Add reaction',
+        disabled: react.isPending,
+        className: 'rounded px-1 text-sm text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
+        onClick: () => reactionPicker.set(open ? null : message.id),
+        children: '+'
+      }),
+      open
+        ? jsx('div', {
+            role: 'group',
+            'aria-label': 'Pick a reaction',
+            className: 'flex gap-0.5',
+            children: REACTION_EMOJIS.map((emoji, i) =>
+              jsx(
+                'button',
+                {
+                  type: 'button',
+                  'data-herd-emoji': '',
+                  autoFocus: i === 0,
+                  title: 'React ' + emoji,
+                  'aria-label': 'React ' + emoji,
+                  disabled: react.isPending,
+                  className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
+                  onClick: () => {
+                    close()
+                    react.mutate(emoji)
+                  },
+                  onKeyDown: e => {
+                    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(e, 1)
+                    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(e, -1)
+                    else return
+                    e.preventDefault()
+                  },
+                  children: emoji
+                },
+                emoji
+              )
+            )
+          })
+        : null
+    ]
+  })
+}
+
 function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
   // Only agent-authored messages carry a badge: humans read as the default, unbadged case (spec §3).
@@ -534,24 +612,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
   return jsxs('div', {
     className: 'group relative flex flex-col gap-0.5 px-3 py-1.5',
     children: [
-      jsx('div', {
-        className:
-          'absolute -top-3 right-3 hidden gap-0.5 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-surface-primary) px-1 py-0.5 group-hover:flex',
-        children: REACTION_EMOJIS.map(emoji =>
-          jsx(
-            'button',
-            {
-              type: 'button',
-              title: 'React ' + emoji,
-              disabled: react.isPending,
-              className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
-              onClick: () => react.mutate(emoji),
-              children: emoji
-            },
-            emoji
-          )
-        )
-      }),
+      jsx(ReactionPicker, { message, react }),
       jsxs('div', {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
@@ -570,6 +631,9 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread }) {
         ]
       }),
       jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderContent(message.content) }),
+      message.wake_note
+        ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: message.wake_note })
+        : null,
       reactions.length
         ? jsx('div', {
             className: 'mt-0.5 flex flex-wrap gap-1',
@@ -954,6 +1018,56 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
 // Page / pane
 // ---------------------------------------------------------------------------
 
+// One honest line about @mention wake: whether the agent answers in a chat, or exactly what is missing. The
+// one-click target comes from the pane's active session (host.state.activeSessionId), so no slash command.
+function WakeBanner({ status }) {
+  const activeSession = useValue(host.state.activeSessionId)
+  const wake = status.wake
+  const setTarget = useMutation({
+    mutationFn: sessionKey =>
+      api('/wake-target', { method: 'POST', body: { session_key: sessionKey, label: 'this chat' } }),
+    onSuccess: refreshAll
+  })
+  const line = (tone, text, extra) =>
+    jsxs('div', {
+      className:
+        'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--ui-stroke-secondary) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+      children: [jsx(StatusDot, { tone }), jsx('span', { className: 'min-w-0', children: text })].concat(extra || [])
+    })
+  if (!wake.enabled) {
+    return line('muted', 'Your agent doesn’t answer @mentions. Turn on “Let my agent answer @mentions” in Settings.', [
+      jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Settings' })
+    ])
+  }
+  if (wake.blocked_reason === 'no_target') {
+    return line('muted', 'Your agent isn’t answering @mentions yet.', [
+      jsx(Button, {
+        type: 'button',
+        size: 'xs',
+        disabled: !activeSession || setTarget.isPending,
+        title: activeSession ? 'Answer @mentions in the chat you have open' : 'Open the chat your agent should answer in first',
+        onClick: () => setTarget.mutate(activeSession),
+        children: 'Answer @mentions here'
+      })
+    ])
+  }
+  if (wake.blocked_reason === 'injection_not_allowed') {
+    return line('bad', wake.blocked_message, [
+      jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
+    ])
+  }
+  if (wake.blocked_reason) return line('bad', wake.blocked_message)
+  return line('good', 'Your agent answers @mentions in ' + wake.target_label + '.', [
+    jsx(Button, {
+      type: 'button',
+      size: 'xs',
+      disabled: setTarget.isPending,
+      onClick: () => setTarget.mutate(''),
+      children: 'Stop'
+    })
+  ])
+}
+
 function NoTeammate({ incoming }) {
   const who = incoming ? incoming.name || 'A teammate' : ''
   return jsxs('div', {
@@ -1020,6 +1134,7 @@ function HerdView({ compact }) {
     className: 'flex h-full min-h-0 flex-col',
     children: [
       statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
+      statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
         children: [
@@ -1076,6 +1191,7 @@ export default {
     sharing.pane.set(false)
     mentionState.page.set(null)
     mentionState.pane.set(null)
+    reactionPicker.set(null)
     ctx.onDispose(() => {
       rest = null
     })

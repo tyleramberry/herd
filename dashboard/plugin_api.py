@@ -64,6 +64,17 @@ def get_status():
     return _call(store.status)
 
 
+@router.post("/wake-target")
+def post_wake_target(body: dict[str, Any]):
+    """One-click 'Answer @mentions here' from the pane: the active chat's session key becomes the wake target.
+    An empty session_key clears it (the same as ``/herd-listen off``). Returns the fresh status."""
+    session_key = str(body.get("session_key") or "").strip()
+    if len(session_key) > 256 or any(ord(c) < 0x20 for c in session_key):
+        raise HTTPException(status_code=422, detail="That chat's id isn't usable. Open the chat and try again.")
+    _call(store.set_mention_target, session_key, str(body.get("label") or "")[:80] if session_key else "")
+    return _call(store.status)
+
+
 @router.post("/sync")
 def post_sync():
     """Sync with peers now (the desktop calls this on its poll tick as a backstop)."""

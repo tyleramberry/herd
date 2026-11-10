@@ -97,6 +97,6 @@ config_schema:
     description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."
   mention_wake:
     type: bool
-    default: false
+    default: true
     label: Let my agent answer @mentions
-    description: When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you picked with /herd-listen. Also needs allow_gateway_injection (see README). Off by default.
+    description: On by default. When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you pick (the pane's "Answer @mentions here" button, or /herd-listen). Also needs allow_gateway_injection (see README). Turn off to stop wakes; mentions still show why they weren't answered.

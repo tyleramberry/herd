@@ -14,7 +14,7 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 - **Threads.** Reply to any message. The thread opens in a panel on the right, beside the channel, with the root, its replies and its own composer; `Esc` or the close button shuts it.
 - **Channel members.** A channel can list up to five people (you included), and only those gateways receive it. A channel without a list is open to every gateway in the mesh.
 
-What it doesn't do (yet): more than five gateways, search, notifications, and a picker for a channel's members (the `members` list is set through the route, not the pane). Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than five gateways, search, notifications, and a picker for a channel's members (the `members` list is set through the route, not the pane). Agents answer @mentions once you point them at a chat (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 
@@ -56,13 +56,14 @@ Each teammate you link is one more gateway. You can link up to four teammates, s
 
 Every teammate has its own status line in the pane (connected, can't reach, or needs a secret), so one that is offline never hides the others.
 
-## Let your agent answer @mentions (optional, off by default)
+## Let your agent answer @mentions
 
-When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Herd can hand that message to your agent as a normal chat turn, so it runs under your usual approvals. Three opt-ins are needed, because this lets another person's message start an agent turn on your machine:
+Wake is on by default. When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Herd hands that message to your agent as a normal chat turn, so it runs under your usual approvals. Two things must be in place, because this lets another person's message start an agent turn on your machine:
 
 1. In `~/.hermes/config.yaml`, allow Herd to start turns: under `plugins: entries: herd:` set `allow_gateway_injection: true`.
-2. In **Settings → Plugins → Herd**, switch on **Let my agent answer @mentions**.
-3. In the chat where you want your agent to answer, type `/herd-listen`. (`/herd-listen off` stops it.) That chat must already contain a message from you.
+2. Choose the chat that answers. In the Herd pane, open the chat your agent should answer in and click **Answer @mentions here**; or type `/herd-listen` in that chat. (`/herd-listen off`, or **Stop** in the pane, clears it.)
+
+The pane's banner says either *Your agent answers @mentions in this chat* or exactly what is missing. A mention that doesn't reach the agent is never dropped silently: it stays in the channel with a short note saying why (no chat set, wake turned off in Settings, injection not allowed, too many in a minute), and `herd_read_channel` reports the same note.
 
 Guards: only messages from people trigger it, never from agents (so two agents can't loop); each message wakes at most once; at most 6 wakes a minute. The agent receives an assignment: who asked and in which channel or DM, what they asked (quoted verbatim, marked as coming from another person), and the exact `herd_post` call, with a channel ref that always resolves (`general`, or `dm:<id>` for a DM), to report back. It cannot approve its own tool use.
 
@@ -90,7 +91,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the task title of a Kanban card an agent linked to its answer (next bullet).
 - **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The new channel's member list is the DM's two people, so only their gateways receive the copies. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command.
 - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it.
-- **Agent turns:** only if you opt in to @mention wake (above): a teammate's mention is passed to your chosen chat through Hermes's `inject_message`, which needs your `allow_gateway_injection` permission.
+- **Agent turns:** only when a teammate mentions you and a chat is set (above): the mention is passed to your chosen chat through Hermes's `inject_message`, which needs your `allow_gateway_injection` permission.
 - **Agent status:** an agent may set one short phrase (herd_set_status, e.g. "writing the code") that the pane shows beside its work. It lives in the gateway process's memory only — never written to herd.db, never sent to your teammate's gateway — and it disappears after five minutes or when the gateway restarts.
 - **Shell commands:** none.
 

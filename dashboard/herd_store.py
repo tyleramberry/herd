@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextvars
 import hmac
+import logging
 import ipaddress
 import json
 import math
@@ -40,6 +41,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
+
+logger = logging.getLogger(__name__)
 
 PLUGIN_ID = "herd"
 DEFAULT_CHANNEL = "general"
@@ -184,6 +187,13 @@ CREATE TABLE IF NOT EXISTS reactions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji, active);
+-- A mention that did not reach the agent, and why (a WAKE_REASONS code). Local only, never synced:
+-- it describes this gateway's own wake attempt, so a mention is never dropped without a record.
+CREATE TABLE IF NOT EXISTS wake_skips (
+    message_id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    at TEXT NOT NULL
+);
 """
 
 _init_lock = threading.Lock()
@@ -192,7 +202,7 @@ _initialized: set[str] = set()
 # What a usable Herd DB must have. Checked per connect so a database replaced under a live
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
-_REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions")
+_REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips")
 _REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
                           "promoted_from", "task_id")
 
@@ -689,6 +699,7 @@ _MESSAGE_SELECT = (
     " AS reply_count"
     ", (SELECT MAX(r.created_at) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
     " AS last_reply_at"
+    ", (SELECT w.reason FROM wake_skips w WHERE w.message_id = m.id) AS wake_skip"
 )
 
 
@@ -818,7 +829,14 @@ def list_thread(parent_id: str) -> dict:
         replies = conn.execute(
             f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.thread_parent_id = ? AND m.channel_id = ? "
             "ORDER BY m.created_at, m.id", (root_id, parent["channel_id"])).fetchall()
-    return {"parent": parent, "replies": [dict(r) for r in replies]}
+    return {"parent": _with_wake_notes([parent])[0], "replies": _with_wake_notes([dict(r) for r in replies])}
+
+
+def _with_wake_notes(rows: list[dict]) -> list[dict]:
+    """Attach ``wake_note``: the words for why a mention did not reach the agent ("" when it did, or isn't one)."""
+    for r in rows:
+        r["wake_note"] = WAKE_REASONS.get(r.get("wake_skip") or "", "")
+    return rows
 
 
 def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: int = 200) -> list[dict]:
@@ -842,7 +860,7 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
                 "ORDER BY created_at, id",
                 (channel["id"], limit)).fetchall()
         reactions = _reaction_map(conn, channel["id"])
-    out = [dict(r) for r in rows]
+    out = _with_wake_notes([dict(r) for r in rows])
     for m in out:
         m["reactions"] = reactions.get(m["id"], [])
     return out
@@ -1201,6 +1219,50 @@ def handle_peer_sync(body: Any) -> dict:
 _wake_times: list[float] = []
 _wake_blocked: dict = {"reason": None, "at": None}  # most recent refused injection
 
+# Why a mention did not reach the agent. The code is stored in wake_skips; the text is what the pane and
+# herd_read_channel show. Every skip path below records one of these: a mention is never dropped silently.
+WAKE_REASONS = {
+    "wake_off": "Agent doesn't answer @mentions yet: turn on \"Let my agent answer @mentions\" in Settings > Plugins > Herd.",
+    "no_target": "Agent doesn't answer @mentions yet: no chat is set. Use \"Answer @mentions here\" in the Herd pane, or type /herd-listen in the chat.",
+    "injection_not_allowed": "Agent doesn't answer @mentions yet: gateway injection is off. Add allow_gateway_injection: true under plugins: entries: herd in config.yaml, then restart the gateway.",
+    "host_refused": "The gateway refused to start the agent's turn. Check allow_gateway_injection, and that the chat is still open.",
+    "rate_limited": "Not handed to the agent: too many @mentions in one minute (limit 6). Read it in the channel.",
+    "no_channel": "Not handed to the agent: its channel is missing here, so there is nowhere to reply.",
+    "wake_error": "Not handed to the agent: Herd's wake handler isn't running in this gateway.",
+}
+INJECTION_CONFIG_LINE = "allow_gateway_injection: true"
+
+
+def gateway_injection_allowed() -> Optional[bool]:
+    """``plugins.entries.herd.allow_gateway_injection`` from config.yaml. ``None`` when the config can't be read
+    (then the host's own refusal decides, and is recorded as ``host_refused``). Never raises."""
+    if SETTINGS_OVERRIDE is not None:  # tests drive the wake path through their own handler, not the real config
+        return None
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        cfg = load_config_readonly() or {}
+        entry = ((cfg.get("plugins") or {}).get("entries") or {}).get(PLUGIN_ID) or {}
+        return bool(entry.get("allow_gateway_injection")) if isinstance(entry, dict) else False
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def wake_blocked_code() -> str:
+    """The first reason mentions would not reach the agent right now, or ``""`` when they would. Never raises."""
+    try:
+        if not wake_enabled():
+            return "wake_off"
+        if not mention_target():
+            return "no_target"
+        if gateway_injection_allowed() is False:
+            return "injection_not_allowed"
+        if _wake_blocked.get("reason"):
+            return "host_refused"
+    except Exception:  # noqa: BLE001
+        return "wake_error"
+    return ""
+
 
 def wake_status() -> dict:
     """Mention-wake health for ``status()``. Never raises."""
@@ -1215,6 +1277,26 @@ def wake_status() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return out
+
+
+def wake_block() -> dict:
+    """The pane's wake banner state: {enabled, target_set, target_label, blocked_reason, blocked_message,
+    blocked_at, config_line}. ``blocked_reason`` is ``""`` when the agent answers mentions in ``target_label``.
+    Never raises."""
+    try:
+        code = wake_blocked_code()
+        return {
+            "enabled": bool(wake_enabled()),
+            "target_set": bool(mention_target()),
+            "target_label": mention_label() if mention_target() else "",
+            "blocked_reason": code,
+            "blocked_message": WAKE_REASONS.get(code, ""),
+            "blocked_at": _wake_blocked.get("at") if code == "host_refused" else None,
+            "config_line": INJECTION_CONFIG_LINE if code == "injection_not_allowed" else "",
+        }
+    except Exception:  # noqa: BLE001
+        return {"enabled": False, "target_set": False, "target_label": "", "blocked_reason": "wake_error",
+                "blocked_message": WAKE_REASONS["wake_error"], "blocked_at": None, "config_line": ""}
 
 
 def mention_handles(display_name: str) -> set[str]:
@@ -1234,17 +1316,34 @@ def mention_target() -> str:
     return row[0] if row else ""
 
 
-def set_mention_target(session_key: str) -> None:
+def mention_label() -> str:
+    """Human name of the chat that answers mentions (for the pane banner). Falls back to a generic phrase."""
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key='mention_label'").fetchone()
+    return (row[0] if row and row[0] else "your active chat")
+
+
+def _one_line(text: Any) -> str:
+    """Display text as one plain line: control characters and runs of whitespace become single spaces."""
+    return re.sub(r"\s+", " ", _PROMPT_CTRL_RE.sub(" ", str(text if text is not None else ""))).strip()
+
+
+def set_mention_target(session_key: str, label: str = "") -> None:
     with connect() as conn:
         if session_key:
             conn.execute("INSERT INTO meta(key, value) VALUES ('mention_session', ?) "
                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (session_key,))
+            conn.execute("INSERT INTO meta(key, value) VALUES ('mention_label', ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (_one_line(label)[:80],))
         else:
-            conn.execute("DELETE FROM meta WHERE key='mention_session'")
+            conn.execute("DELETE FROM meta WHERE key IN ('mention_session', 'mention_label')")
 
 
 def wake_enabled() -> bool:
-    value = settings().get("mention_wake")
+    """On unless the owner has explicitly turned it off (Track 0: default-on, opt-out)."""
+    value = settings().get("mention_wake", True)
+    if value is None or str(value).strip() == "":
+        return True
     return value is True or str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -1297,19 +1396,36 @@ def wake_text(m: dict, channel: dict, my_gateway_id: str = "") -> str:
     )
 
 
+def _record_wake_skip(message_id: str, code: str) -> None:
+    """Keep the reason a mention did not reach the agent (one row per message; a retry overwrites it)."""
+    with connect() as conn:
+        conn.execute("INSERT INTO wake_skips(message_id, reason, at) VALUES (?, ?, ?) "
+                     "ON CONFLICT(message_id) DO UPDATE SET reason = excluded.reason, at = excluded.at",
+                     (message_id, code, _now()))
+
+
+def wake_skips_for(message_ids: list[str]) -> dict[str, str]:
+    """message_id -> WAKE_REASONS code, for the given messages. Empty input costs no query."""
+    if not message_ids:
+        return {}
+    with connect() as conn:
+        marks = ",".join("?" * len(message_ids))
+        rows = conn.execute(f"SELECT message_id, reason FROM wake_skips WHERE message_id IN ({marks})",
+                            list(message_ids)).fetchall()
+    return {r["message_id"]: r["reason"] for r in rows}
+
+
 def _maybe_wake(messages: list[dict]) -> None:
     """Hand each newly arrived human message that @mentions this gateway's agent to its chat.
 
-    Guards: opt-in setting; only HUMAN-authored messages (an agent's post never wakes anything, so two
-    agents cannot loop); only rows newly inserted (one wake per message id); a per-minute cap; and the
-    turn is a normal injected user turn, so the owner's approvals apply (catalog rule 12).
+    Guards: only HUMAN-authored messages (an agent's post never wakes anything, so two agents cannot loop);
+    only rows newly inserted (one wake per message id); a per-minute cap; and the turn is a normal injected
+    user turn, so the owner's approvals apply (catalog rule 12). Every mention that is NOT handed over gets a
+    reason in ``wake_skips`` (shown in the pane and in herd_read_channel); nothing is dropped silently.
     """
-    if not messages or WAKE_HANDLER is None or not wake_enabled():
+    if not messages:
         return
     try:
-        target = mention_target()
-        if not target:
-            return
         me_info = identity()
         me, me_id = me_info["display_name"], me_info["gateway_id"]
         for m in messages:
@@ -1319,22 +1435,48 @@ def _maybe_wake(messages: list[dict]) -> None:
                 continue
             if not mentions_me(m["content"], me):
                 continue
+            _wake_one(m, me_id)
+    except Exception:  # noqa: BLE001 — a failed wake must never break sync
+        logger.debug("herd: mention wake failed", exc_info=True)
+
+
+def _wake_one(m: dict, me_id: str) -> None:
+    """Deliver one mention to the chosen chat, or record why it wasn't."""
+    code = ""
+    try:
+        if not wake_enabled():
+            code = "wake_off"
+        elif not mention_target():
+            code = "no_target"
+        elif WAKE_HANDLER is None:
+            code = "wake_error"
+        elif gateway_injection_allowed() is False:
+            code = "injection_not_allowed"
+        else:
             now = time.time()
             _wake_times[:] = [t for t in _wake_times if now - t < 60]
             if len(_wake_times) >= WAKE_MAX_PER_MINUTE:
-                return
-            channel = get_channel(m["channel_id"])
-            if not channel:  # no stored channel means no callable ref: suppress rather than send a dead one
-                continue
-            if WAKE_HANDLER(target, wake_text(m, channel, me_id)) is False:
-                # The host refused the injection: don't spend the cap, and make it visible.
-                _wake_blocked["reason"] = ("host refused the injection (is allow_gateway_injection set, "
-                                           "and is the chat still open?)")
-                _wake_blocked["at"] = _now()
-                continue
-            _wake_times.append(now)
-    except Exception:  # noqa: BLE001 — a failed wake must never break sync
-        pass
+                code = "rate_limited"
+            else:
+                channel = get_channel(m["channel_id"])
+                if not channel:  # no stored channel means no callable ref: record it rather than send a dead one
+                    code = "no_channel"
+                elif WAKE_HANDLER(mention_target(), wake_text(m, channel, me_id)) is False:
+                    # The host refused the injection: don't spend the cap, and make it visible.
+                    _wake_blocked["reason"] = WAKE_REASONS["host_refused"]
+                    _wake_blocked["at"] = _now()
+                    code = "host_refused"
+                else:
+                    _wake_times.append(now)
+                    _wake_blocked["reason"] = None
+                    return
+    except Exception:  # noqa: BLE001
+        logger.debug("herd: mention wake failed", exc_info=True)
+        code = "wake_error"
+    try:
+        _record_wake_skip(m["id"], code)
+    except Exception:  # noqa: BLE001 — recording must never break sync either
+        logger.debug("herd: could not record a skipped mention", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1780,5 +1922,5 @@ def status() -> dict:
         })
     refused = refused_peers()
     return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
-            "agent_status": agent_status(), "mention_wake": wake_status(),
+            "agent_status": agent_status(), "mention_wake": wake_status(), "wake": wake_block(),
             "herd_secret_set": herd_secret_set()}

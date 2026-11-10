@@ -38,9 +38,12 @@ def herd_list_channels(args: dict, **kwargs: Any) -> str:
 
 
 def _brief_message(m: dict) -> dict:
-    return {"id": m["id"], "author": m["author_name"], "author_type": m["author_type"],
-            "from_machine": m["gateway_name"], "at": m["created_at"], "text": m["content"],
-            "replies": m.get("reply_count", 0), "task_id": m.get("task_id")}
+    out = {"id": m["id"], "author": m["author_name"], "author_type": m["author_type"],
+           "from_machine": m["gateway_name"], "at": m["created_at"], "text": m["content"],
+           "replies": m.get("reply_count", 0), "task_id": m.get("task_id")}
+    if m.get("wake_skip"):  # a mention this gateway did not hand to the agent: say why, never drop it silently
+        out["mention_not_delivered"] = _store().WAKE_REASONS.get(m["wake_skip"], "Not handed to the agent.")
+    return out
 
 
 def herd_post(args: dict, **kwargs: Any) -> str:
