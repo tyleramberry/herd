@@ -78,7 +78,7 @@ def get_channels():
 
 @router.post("/channels")
 def post_channel(body: dict[str, Any]):
-    return _call(store.create_channel, body.get("name"), body.get("topic", ""))
+    return _call(store.create_channel, body.get("name"), body.get("topic", ""), members=body.get("members"))
 
 
 @router.post("/channels/{channel_id}/share")

@@ -35,6 +35,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,20 @@ BATCH_LIMIT = 200
 SYNC_TIMEOUT_S = 10
 SECRET_ENV = "HERD_PEER_KEY"  # the PEER's Herd secret: what we present to their /herd/v1/*
 LOCAL_SECRET_ENV = "HERD_SECRET"  # THIS gateway's Herd secret: what a peer must present to ours
+# Mesh limits (spec §1): this gateway plus up to four teammates is five gateways; a channel holds up to
+# five people (gateways) plus any number of their agents.
+MAX_PEERS = 4
+MAX_HUMANS = 5
+# One declared secret slot per teammate (plugin.yaml config_schema). Slot 1 is the original single-peer
+# secret, so an upgraded install keeps the key it already stored. A teammate's key is only ever read from
+# its own slot, so one teammate's key is never offered to another.
+PEER_KEY_ENVS = (SECRET_ENV, "HERD_PEER_KEY_2", "HERD_PEER_KEY_3", "HERD_PEER_KEY_4")
+_PEER_SLOTS = (  # (name field, url field, key slot) — the numbered Settings fields for each teammate
+    ("peer_name", "peer_url", PEER_KEY_ENVS[0]),
+    ("peer_name_2", "peer_url_2", PEER_KEY_ENVS[1]),
+    ("peer_name_3", "peer_url_3", PEER_KEY_ENVS[2]),
+    ("peer_name_4", "peer_url_4", PEER_KEY_ENVS[3]),
+)
 # The 401 message our peer routes send when no local Herd secret is set. ``_describe_error`` looks
 # for this exact text in a peer's 401 body to tell "they have no secret" from "our secret is wrong".
 NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
@@ -99,6 +114,24 @@ class HerdError(Exception):
 # Storage
 # ---------------------------------------------------------------------------
 
+# One row per teammate, keyed by the teammate's name (spec §1.2). The URL is recorded so a changed address
+# resets that teammate's cursors instead of trusting cursors that belonged to another gateway.
+_PEER_STATE_COLS = ("push_seq", "pull_seq", "push_rseq", "pull_rseq", "remote_gateway_id", "remote_name",
+                    "last_attempt", "last_ok", "last_error")
+_PEER_STATE_DDL = """CREATE TABLE IF NOT EXISTS peer_state (
+    name TEXT PRIMARY KEY,
+    url TEXT NOT NULL DEFAULT '',
+    push_seq INTEGER NOT NULL DEFAULT 0,
+    pull_seq INTEGER NOT NULL DEFAULT 0,
+    push_rseq INTEGER NOT NULL DEFAULT 0,
+    pull_rseq INTEGER NOT NULL DEFAULT 0,
+    remote_gateway_id TEXT NOT NULL DEFAULT '',
+    remote_name TEXT NOT NULL DEFAULT '',
+    last_attempt TEXT NOT NULL DEFAULT '',
+    last_ok TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT ''
+);"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -133,19 +166,7 @@ CREATE TABLE IF NOT EXISTS participants (
     is_self INTEGER NOT NULL DEFAULT 0,
     last_seen TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS peer_state (
-    url TEXT PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    push_seq INTEGER NOT NULL DEFAULT 0,
-    pull_seq INTEGER NOT NULL DEFAULT 0,
-    push_rseq INTEGER NOT NULL DEFAULT 0,
-    pull_rseq INTEGER NOT NULL DEFAULT 0,
-    remote_gateway_id TEXT NOT NULL DEFAULT '',
-    remote_name TEXT NOT NULL DEFAULT '',
-    last_attempt TEXT NOT NULL DEFAULT '',
-    last_ok TEXT NOT NULL DEFAULT '',
-    last_error TEXT NOT NULL DEFAULT ''
-);
+""" + _PEER_STATE_DDL + """
 CREATE TABLE IF NOT EXISTS incoming_peers (
     gateway_id TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -242,6 +263,7 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         for col in ("push_rseq", "pull_rseq"):
             if col not in have:
                 conn.execute(f"ALTER TABLE peer_state ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+        _rekey_peer_state(conn)
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
             "VALUES (?, ?, '', 0, '[]', ?)",
@@ -254,11 +276,33 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         _initialized.add(key)
 
 
+def _rekey_peer_state(conn: sqlite3.Connection) -> None:
+    """Move a URL-keyed ``peer_state`` (the single-peer layout) to one row per teammate name.
+
+    The old rows keep their cursors. A row with no name yet is named after its URL, which is what the
+    old code used as its identity. Runs once: a table whose ``url`` column is not the primary key is
+    already the new layout.
+    """
+    pk = {r[1]: r[5] for r in conn.execute("PRAGMA table_info(peer_state)")}
+    if not pk or pk.get("url", 0) == 0:
+        return
+    conn.execute("ALTER TABLE peer_state RENAME TO peer_state_url_keyed")
+    conn.execute(_PEER_STATE_DDL)
+    conn.execute(
+        "INSERT OR IGNORE INTO peer_state(name, url, " + ", ".join(_PEER_STATE_COLS) + ") "
+        "SELECT CASE WHEN name = '' THEN url ELSE name END, url, " + ", ".join(_PEER_STATE_COLS) +
+        " FROM peer_state_url_keyed ORDER BY rowid")
+    conn.execute("DROP TABLE peer_state_url_keyed")
+
+
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
+    # IMMEDIATE: a write takes the write lock before its first statement, so a read-then-write never
+    # upgrades a stale snapshot (SQLITE_BUSY_SNAPSHOT, which ignores the busy timeout). Peer syncs now run
+    # in parallel threads (sync_all), so that race is reachable.
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False, isolation_level="IMMEDIATE")
     conn.row_factory = sqlite3.Row
     try:
         try:
@@ -414,14 +458,33 @@ def resolve_channel(ref: Any) -> Optional[dict]:
     return None
 
 
-def create_channel(name: Any, topic: Any = "") -> dict:
+def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
+    """Create a public channel. ``members`` (optional) lists the gateway ids allowed to see it, this gateway
+    included; at most five people. Left out, the channel is open to every gateway in the mesh."""
     clean = normalize_channel_name(name)
     if not clean:
         raise HerdError(422, "Channel name is required.")
     if not _CHANNEL_NAME_RE.match(clean):
         raise HerdError(422, "Use lowercase letters, numbers, - or _ (max 48 characters).")
+    member_list: list[dict] = []
+    if members is not None:
+        if not isinstance(members, list):
+            raise HerdError(422, "members must be a list of people.")
+        me = identity()
+        member_list = _clean_members([me["gateway_id"], *members])
+        if member_list is None:
+            raise HerdError(422, f"A channel holds up to {MAX_HUMANS} people, including you, by their Herd id.")
+        with connect() as conn:
+            known = {r["id"]: r["display_name"] for r in conn.execute("SELECT id, display_name FROM participants")}
+        for m in member_list:
+            if m["id"] == me["gateway_id"]:
+                m["name"] = me["display_name"]
+            elif m["id"] in known:
+                m["name"] = known[m["id"]]
+            else:
+                raise HerdError(422, "That person isn't connected yet.")
     channel = {"id": clean, "name": clean, "topic": str(topic or "")[:200], "is_dm": 0,
-               "members": "[]", "created_at": _now()}
+               "members": json.dumps(member_list), "created_at": _now()}
     with connect() as conn:
         try:
             conn.execute(
@@ -430,13 +493,13 @@ def create_channel(name: Any, topic: Any = "") -> dict:
         except sqlite3.IntegrityError as exc:
             raise HerdError(409, f"#{clean} already exists.") from exc
     request_sync()
-    return {**channel, "is_dm": False, "members": [], "message_count": 0, "last_message_at": None}
+    return {**channel, "is_dm": False, "members": member_list, "message_count": 0, "last_message_at": None}
 
 
 def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
     """Promote a DM into a new shared channel (S-13).
 
-    Creates an ordinary channel called ``name`` and copies the DM's top-level and reply messages
+    Creates a channel called ``name``, whose member list is the DM's two people, and copies the DM's top-level and reply messages
     into it, oldest first, so the people (and agents) who join read the same history. The DM, its
     messages and its sync cursors are untouched. Copies get fresh ids, keep the source author,
     time and ``promoted_from`` (the DM id), and are stamped with this gateway as the sender so the
@@ -451,8 +514,11 @@ def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
             "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
     if not src:
         raise HerdError(422, "This conversation has no messages to share yet.")
-    channel = create_channel(name, topic)  # same name rules; 409 if it exists
     me = identity()["gateway_id"]
+    # The copy goes only to the two people who were in the DM (spec §1.6): a DM's history never reaches a
+    # teammate who was not in it. Anyone else needs a channel created with its own member list.
+    others = [m["id"] for m in dm["members"] if m.get("id") and m["id"] != me]
+    channel = create_channel(name, topic, members=others)  # same name rules; 409 if it exists
     ids = {r["id"]: f"p{i:06d}{uuid.uuid4().hex[:24]}" for i, r in enumerate(src)}
     with connect() as conn:
         for r in src:
@@ -496,6 +562,42 @@ def _dm_export_allowed(channel_id: Any, viewer_gateway: str) -> bool:
     return viewer in dm_member_ids(cid)
 
 
+def _member_ids(members: Any) -> set[str]:
+    """The gateway ids in a stored member list (``[{id, name}]``); anything else reads as no members."""
+    if not isinstance(members, list):
+        return set()
+    return {str(m.get("id") or "") for m in members if isinstance(m, dict) and m.get("id")}
+
+
+def _channel_visible(channel: dict, viewer_gateway: str) -> bool:
+    """May this stored channel be sent to ``viewer_gateway``? DMs: members only. Member-listed channels: members
+    only. Open channels: everyone. An unidentified viewer is in no member list (fail closed)."""
+    cid = str(channel.get("id") or "")
+    if cid.startswith("dm:"):
+        return _dm_export_allowed(cid, viewer_gateway)
+    members = _member_ids(channel.get("members"))
+    if not members:
+        return True
+    viewer = str(viewer_gateway or "").strip()[:64]
+    return bool(viewer) and viewer in members
+
+
+def _accepts_from(members_json: Any, gateway_id: str) -> bool:
+    """Whether a row in a channel with this stored member list may come from ``gateway_id``.
+
+    Open channels accept anyone. A member-listed channel accepts only rows whose sender and origin are members,
+    so a relayed row from a non-member, or a row a non-member wrote, is refused on arrival (spec §1.6).
+    """
+    try:
+        members = json.loads(members_json or "[]")
+    except (TypeError, ValueError):
+        return False
+    ids = _member_ids(members)
+    if not ids:
+        return True
+    return bool(gateway_id) and gateway_id in ids
+
+
 def open_dm(participant_id: str) -> dict:
     """Get or create the DM between this gateway's human and a peer gateway's human."""
     me = identity()
@@ -519,6 +621,29 @@ def open_dm(participant_id: str) -> dict:
     return _channel_row(row)
 
 
+def _clean_members(value: Any) -> Optional[list[dict]]:
+    """A member list from a peer or a caller, as ``[{id, name}]``: plain ids, no repeats, at most five people.
+
+    ``None`` means malformed or over the limit, and the caller refuses the row. ``[]`` means open to the mesh.
+    """
+    if value is None or value == []:
+        return []
+    if not isinstance(value, list):
+        return None
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in value:
+        raw_id, raw_name = (item.get("id"), item.get("name")) if isinstance(item, dict) else (item, "")
+        mid = str(raw_id) if raw_id is not None else ""
+        if not _MEMBER_ID_RE.match(mid):
+            return None
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append({"id": mid, "name": _clean_name(raw_name, mid)})
+    return out if len(out) <= MAX_HUMANS else None
+
+
 def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
     """Accept a channel from a peer. Validated: never trust peer input to shape our rows."""
     cid = str(ch.get("id") or "")
@@ -539,10 +664,16 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
     else:
         if cid != normalize_channel_name(cid) or not _CHANNEL_NAME_RE.match(cid):
             return
+        members = _clean_members(ch.get("members"))
+        if members is None:
+            return  # malformed, or more than five people: refused, never repaired
+        if members and _local_gateway_id(conn) not in _member_ids(members):
+            return  # a member-listed channel that does not include this gateway is not ours to hold
         conn.execute(
             "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) "
-            "VALUES (?, ?, ?, 0, '[]', ?)",
-            (cid, cid, str(ch.get("topic") or "")[:200], str(ch.get("created_at") or _now())[:40]))
+            "VALUES (?, ?, ?, 0, ?, ?)",
+            (cid, cid, str(ch.get("topic") or "")[:200], json.dumps(members),
+             str(ch.get("created_at") or _now())[:40]))
 
 
 # ---------------------------------------------------------------------------
@@ -829,24 +960,26 @@ def _local_gateway_id(conn: sqlite3.Connection) -> str:
 
 
 def _bound_gateway_id(claimed: Any, sender_gid: str, local_gid: str) -> Optional[str]:
-    """The gateway id a synced row may be stored under (S-21).
+    """The gateway id a synced row is stored under (S-21, widened for relays in spec §1.3).
 
-    Returns the id to store — the authenticated sender's — or ``None`` when the row must be dropped:
-    a row may never claim THIS gateway's id, and a peer may only sync rows that claim its own id.
-    An *absent* claim is not a wrong one: it binds to the sender. A real peer's export always sets
-    the field; a hand-built batch may omit it, and the row then belongs to whoever authenticated.
+    A row keeps its ORIGIN id. A linked gateway relays rows written on the other gateways of the mesh, so a
+    row may name a gateway other than the one that sent it. Refused (``None``, counted as dropped): a row
+    claiming THIS gateway's id, since nothing is ever stored as us, and a claim that is not a plain identifier.
+    An *absent* claim is not a wrong one: it binds to the sender, as a hand-built batch relies on.
     """
     claimed = str(claimed or "").strip()[:64]
     if claimed and local_gid and claimed == local_gid:
         return None
-    if claimed and sender_gid and claimed != sender_gid:
+    if claimed and not _MEMBER_ID_RE.match(claimed):
         return None
-    return sender_gid or claimed
+    return claimed or sender_gid
 
 
-def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str) -> str:
-    """``gateway_name`` follows the authenticated sender, not the row (S-21)."""
-    return sender_name if sender_gid else row_name
+def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str, origin_gid: str) -> str:
+    """``gateway_name`` follows the sender for its own rows; a relayed row keeps the name its origin declared."""
+    if not sender_gid or origin_gid == sender_gid:
+        return sender_name
+    return row_name
 
 
 def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = None) -> int:
@@ -855,8 +988,9 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     ``suppress_wakes``: store everything but never wake the agent (a peer's first exchange is history).
 
     ``stats``: optional dict filled with ``{"accepted": <inserted>, "dropped": <refused>}``. A row is
-    refused when the gateway id it claims is not the authenticated sender's (S-21) — the batch is
-    untrusted input, so a synced row's identity comes from ``batch["from"]``, never from the row.
+    refused when it claims THIS gateway's id, or a malformed one (S-21). Otherwise it keeps the origin id it
+    claims, which is how a relayed row arrives (spec §1.3). A row with no claim binds to the sender. The batch is
+    untrusted input: the sender comes from ``batch["from"]``, and no row can be stored as this gateway.
     """
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
     sender_gid = str(sender.get("gateway_id") or "").strip()[:64]
@@ -886,8 +1020,12 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 dropped += 1
                 continue
             m["gateway_id"] = gid
-            m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid)
-            if not conn.execute("SELECT 1 FROM channels WHERE id = ?", (m["channel_id"],)).fetchone():
+            m["gateway_name"] = _bound_gateway_name(m["gateway_name"], sender_name, sender_gid, gid)
+            channel_row = conn.execute("SELECT members FROM channels WHERE id = ?", (m["channel_id"],)).fetchone()
+            if channel_row is None:
+                continue
+            if not (_accepts_from(channel_row["members"], sender_gid) and _accepts_from(channel_row["members"], gid)):
+                dropped += 1  # sent by, or relayed from, someone who is not a member of this channel
                 continue
             tid = m.get("thread_parent_id")
             if tid:
@@ -926,8 +1064,13 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 dropped += 1
                 continue
             r["gateway_id"] = rgid
-            msg = conn.execute("SELECT channel_id FROM messages WHERE id = ?", (r["message_id"],)).fetchone()
+            msg = conn.execute(
+                "SELECT m.channel_id, c.members FROM messages m LEFT JOIN channels c ON c.id = m.channel_id "
+                "WHERE m.id = ?", (r["message_id"],)).fetchone()
             if not msg:
+                continue
+            if not (_accepts_from(msg["members"], sender_gid) and _accepts_from(msg["members"], rgid)):
+                dropped += 1
                 continue
             r["channel_id"] = msg["channel_id"]
             r["id"] = f"{r['message_id']}|{r['emoji']}|{r['gateway_id']}"[:200]
@@ -962,27 +1105,33 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
 
     ``viewer_gateway`` is the requesting gateway's id, as the call site authenticated it (never read
     from a row). A DM — its channel, its messages, and reactions on it — is only returned to a member
-    of that DM; public channels go to every caller. An empty ``viewer_gateway`` gets no DMs at all.
+    of that DM. A channel with a member list is only returned to its members (spec §1.6). Open channels
+    (no member list) go to every caller. An empty ``viewer_gateway`` gets no DMs and no restricted channels.
     """
     with connect() as conn:
         examined = conn.execute(
             f"SELECT {_MESSAGE_COLS} FROM messages WHERE seq > ? ORDER BY seq LIMIT ?",
             (int(after_seq), int(limit))).fetchall()
         channels = [_channel_row(r) for r in conn.execute("SELECT * FROM channels").fetchall()]
-        channels = [c for c in channels if _dm_export_allowed(c["id"], viewer_gateway)]
+        known = {c["id"] for c in channels}
+        visible = {c["id"] for c in channels if _channel_visible(c, viewer_gateway)}
+        channels = [c for c in channels if c["id"] in visible]
         rexamined = conn.execute(
             "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
             "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
     # The cursor moves past excluded rows too (the peer already has its own messages), and past rows
     # in a DM the viewer is not a member of (it may never have them): the filter runs after the
     # LIMIT-bounded SELECT, so a filtered row is examined once and never re-pulled.
+    def visible_here(channel_id: str) -> bool:
+        if channel_id in known:
+            return channel_id in visible
+        return _dm_export_allowed(channel_id, viewer_gateway)  # a row whose channel we never stored
+
     rows = [dict(r) for r in examined
-            if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
-            and _dm_export_allowed(r["channel_id"], viewer_gateway)]
+            if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
     next_seq = examined[-1]["seq"] if examined else int(after_seq)
     rrows = [dict(r) for r in rexamined
-             if (not exclude_gateway or r["gateway_id"] != exclude_gateway)
-             and _dm_export_allowed(r["channel_id"], viewer_gateway)]
+             if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
     next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
     return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit,
             "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit}
@@ -1025,7 +1174,9 @@ def handle_peer_sync(body: Any) -> dict:
         with connect() as conn:
             first_contact = not _peer_wake_primed(conn, sender_gid)
     counts: dict = {}
-    accepted = ingest(body, suppress_wakes=first_contact, stats=counts)
+    # The peer says its first pass is history (it may be spread over more than one request); we also treat
+    # our own first request from a peer as history, so an older peer that never sends the flag is covered.
+    accepted = ingest(body, suppress_wakes=first_contact or body.get("first_contact") is True, stats=counts)
     if first_contact:
         with connect() as conn:
             _prime_peer_wake(conn, sender_gid)
@@ -1248,47 +1399,94 @@ def _peer_url_refusal(url: str) -> str:
     return CLEARTEXT_REFUSED
 
 
-def _peer_candidates() -> list[dict]:
-    """The configured peer(s) exactly as typed, before the cleartext policy is applied.
+def _peer_entries() -> list[dict]:
+    """Every configured teammate as ``{name, url, key_env}``, in order, before any policy check.
 
-    Non-http(s) URLs keep the historical behaviour: silently ignored (never a peer, never a status
-    entry). Returned as a list so the sync loop stays shape-stable; v1 links two gateways (N-1).
+    Two places name teammates, and both are read here:
+
+    * the numbered Settings fields ``peer_name``/``peer_url`` (teammate 1, the original single peer)
+      and ``peer_name_2``…``peer_name_4``/``peer_url_2``…``peer_url_4`` — what the Settings form edits;
+    * a ``peers`` list in config.yaml, ``[{name, url, key_env}]``, for anything the form does not show.
+
+    No rewrite of an existing single-peer config is needed: its URL and name are simply teammate 1.
     """
     cfg = settings()
-    url = str(cfg.get("peer_url") or "").strip().rstrip("/")
-    if not url or not url.lower().startswith(("http://", "https://")):
-        return []
-    return [{"name": _clean_name(cfg.get("peer_name"), "peer"), "url": url, "key": _secret(SECRET_ENV)}]
-
-
-def configured_peers() -> list[dict]:
-    """The peers Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
-
-    A peer whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
-    built for it (see ``refused_peers()`` for the visible, actionable reason). The key is a declared
-    ``config_schema`` secret read only through ``agent.secret_scope.get_secret`` (catalog rule 11).
-    Returned as a list so the sync loop stays shape-stable; v1 links exactly two gateways (N-1).
-    """
     out: list[dict] = []
-    seen: set[str] = set()
-    for p in _peer_candidates():
-        if _peer_url_refusal(p["url"]) or p["url"] in seen:
-            continue
-        seen.add(p["url"])
-        out.append(p)
+    for i, (name_field, url_field, key_env) in enumerate(_PEER_SLOTS):
+        url = str(cfg.get(url_field) or "").strip().rstrip("/")
+        if url:
+            out.append({"name": _clean_name(cfg.get(name_field), "peer" if i == 0 else f"peer-{i + 1}"),
+                        "url": url, "key_env": key_env})
+    listed = cfg.get("peers")
+    for item in listed if isinstance(listed, list) else []:
+        if isinstance(item, dict):
+            out.append({"name": _clean_name(item.get("name"), "peer"),
+                        "url": str(item.get("url") or "").strip().rstrip("/"),
+                        "key_env": str(item.get("key_env") or "").strip()})
     return out
 
 
+def _peer_table() -> list[dict]:
+    """``_peer_entries()`` with the structural rules applied; each entry gets ``reason`` ('' = usable).
+
+    A non-http(s) URL is dropped silently, as it always was (never a peer, never a status entry).
+    Refused with a reason, never repaired: a teammate whose key slot is unknown or already used, a URL or
+    name listed twice (peer state is keyed by name), and any teammate past the fourth.
+    """
+    table: list[dict] = []
+    names: set[str] = set()
+    urls: set[str] = set()
+    slots: set[str] = set()
+    for e in _peer_entries():
+        if not e["url"].lower().startswith(("http://", "https://")):
+            continue
+        accepted = sum(1 for t in table if not t["reason"])
+        reason = ""
+        if e["key_env"] not in PEER_KEY_ENVS:
+            reason = "Give this teammate one Herd secret slot: " + ", ".join(PEER_KEY_ENVS) + "."
+        elif e["key_env"] in slots:
+            reason = "Another teammate already uses this Herd secret slot."
+        elif e["url"] in urls:
+            reason = "This gateway URL is already listed for another teammate."
+        elif e["name"] in names:
+            reason = "Another teammate already has this name. Give each teammate a different name."
+        elif accepted >= MAX_PEERS:
+            reason = f"Herd links at most {MAX_PEERS} teammates (a mesh of {MAX_PEERS + 1} gateways)."
+        if not reason:
+            names.add(e["name"])
+            urls.add(e["url"])
+            slots.add(e["key_env"])
+        table.append({**e, "reason": reason})
+    return table
+
+
+def _peer_candidates() -> list[dict]:
+    """The usable teammates, each with its own key: ``{name, url, key}``. Before the cleartext policy."""
+    return [{"name": t["name"], "url": t["url"], "key": _secret(t["key_env"])}
+            for t in _peer_table() if not t["reason"]]
+
+
+def configured_peers() -> list[dict]:
+    """The teammates Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
+
+    A teammate whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
+    built for it (see ``refused_peers()`` for the visible, actionable reason). Keys are declared
+    ``config_schema`` secrets read only through ``agent.secret_scope.get_secret`` (catalog rule 11).
+    """
+    return [p for p in _peer_candidates() if not _peer_url_refusal(p["url"])]
+
+
 def refused_peers() -> list[dict]:
-    """Configured peer URLs Herd will not talk to, with the reason — for ``status()``/the pane.
+    """Configured teammates Herd will not talk to, with the reason — for ``status()``/the pane.
 
     Carries no secret: ``has_key`` is a boolean, never the key itself.
     """
     out = []
-    for p in _peer_candidates():
-        reason = _peer_url_refusal(p["url"])
+    for t in _peer_table():
+        reason = t["reason"] or _peer_url_refusal(t["url"])
         if reason:
-            out.append({"name": p["name"], "url": p["url"], "reason": reason, "has_key": bool(p["key"])})
+            out.append({"name": t["name"], "url": t["url"], "reason": reason,
+                        "has_key": bool(_secret(t["key_env"]))})
     return out
 
 
@@ -1329,9 +1527,21 @@ def _http_sync(peer: dict, body: dict) -> dict:
 
 
 def _peer_state(conn: sqlite3.Connection, peer: dict) -> sqlite3.Row:
-    conn.execute("INSERT OR IGNORE INTO peer_state(url, name) VALUES (?, ?)", (peer["url"], peer["name"]))
-    conn.execute("UPDATE peer_state SET name = ? WHERE url = ?", (peer["name"], peer["url"]))
-    return conn.execute("SELECT * FROM peer_state WHERE url = ?", (peer["url"],)).fetchone()
+    """This teammate's cursors and link health (one row per name). A changed URL resets the cursors:
+    they described the old address, and a re-sync is idempotent, so starting over is always safe."""
+    row = conn.execute("SELECT * FROM peer_state WHERE name = ?", (peer["name"],)).fetchone()
+    if row is None:
+        # A pre-rename row that never got a name is named after its URL (_rekey_peer_state): this teammate's.
+        legacy = conn.execute("SELECT name FROM peer_state WHERE url = ? AND name = ?",
+                              (peer["url"], peer["url"])).fetchone()
+        if legacy is not None:
+            conn.execute("UPDATE peer_state SET name = ? WHERE name = ?", (peer["name"], legacy["name"]))
+        else:
+            conn.execute("INSERT INTO peer_state(name, url) VALUES (?, ?)", (peer["name"], peer["url"]))
+    elif row["url"] != peer["url"]:
+        conn.execute("UPDATE peer_state SET url = ?, push_seq = 0, pull_seq = 0, push_rseq = 0, pull_rseq = 0, "
+                     "remote_gateway_id = '', remote_name = '' WHERE name = ?", (peer["url"], peer["name"]))
+    return conn.execute("SELECT * FROM peer_state WHERE name = ?", (peer["name"],)).fetchone()
 
 
 def _peer_reports_no_secret(exc: urllib.error.HTTPError) -> bool:
@@ -1367,7 +1577,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
     me = identity()
     with connect() as conn:
         _peer_state(conn, peer)
-        conn.execute("UPDATE peer_state SET last_attempt = ? WHERE url = ?", (_now(), peer["url"]))
+        conn.execute("UPDATE peer_state SET last_attempt = ? WHERE name = ?", (_now(), peer["name"]))
     pushed = pulled = rpushed = 0
     try:
         if not peer.get("key"):
@@ -1379,30 +1589,36 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                 st = _peer_state(conn, peer)
             out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"],
                                after_rseq=st["push_rseq"], viewer_gateway=st["remote_gateway_id"])
+            # Until the peer has told us who it is, send no message or reaction rows. Origin exclusion (no
+            # echo back to the author) needs its gateway id, and without it our own rows, and rows relayed
+            # from a third gateway, would travel back to their author. Channels still go, and the next round
+            # carries the window once the id is known. Cursors hold for this round, so nothing is skipped.
+            identified = bool(st["remote_gateway_id"])
+            sent_messages = out["messages"] if identified else []
+            sent_reactions = out["reactions"] if identified else []
+            # ``first_contact`` marks the whole first pass as history, not only the round that happens to carry
+            # it: the identifying round is empty, so the history arrives a request later.
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
-                                    "messages": out["messages"], "after_seq": st["pull_seq"],
-                                    "reactions": out["reactions"], "after_rseq": st["pull_rseq"]})
+                                    "messages": sent_messages, "after_seq": st["pull_seq"],
+                                    "reactions": sent_reactions, "after_rseq": st["pull_rseq"],
+                                    "first_contact": first_contact})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             pulled += ingest(resp, suppress_wakes=first_contact)
-            # Until we know who the peer is, the export carries no DMs (fail closed). Hold the push
-            # cursors for that round so the next round — peer now identified — re-sends the window
-            # with the DM it is a member of, instead of skipping it forever (ingest is idempotent).
-            identified = bool(st["remote_gateway_id"])
             if identified:
-                pushed += len(out["messages"])
-                rpushed += len(out["reactions"])
+                pushed += len(sent_messages)
+                rpushed += len(sent_reactions)
             next_pull = resp.get("next_seq")
             next_rpull = resp.get("next_rseq")
             with connect() as conn:
                 conn.execute(
                     "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, remote_gateway_id = ?, remote_name = ?, "
-                    "last_ok = ?, last_error = '' WHERE url = ?",
+                    "last_ok = ?, last_error = '' WHERE name = ?",
                     (out["next_seq"] if identified else st["push_seq"],
                      int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
                      out["next_rseq"] if identified else st["push_rseq"],
                      int(next_rpull) if isinstance(next_rpull, int) else st["pull_rseq"],
                      str(remote.get("gateway_id") or st["remote_gateway_id"])[:64],
-                     _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["url"]))
+                     _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["name"]))
             just_identified = not identified and bool(str(remote.get("gateway_id") or "").strip())
             if not just_identified and not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
                 break
@@ -1414,7 +1630,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                    else str(exc) if isinstance(exc, PeerRefusedError)
                    else _describe_error(exc))
         with connect() as conn:
-            conn.execute("UPDATE peer_state SET last_error = ? WHERE url = ?", (message, peer["url"]))
+            conn.execute("UPDATE peer_state SET last_error = ? WHERE name = ?", (message, peer["name"]))
         return {"name": peer["name"], "url": peer["url"], "ok": False, "error": message,
                 "pushed": pushed, "pulled": pulled}
 
@@ -1437,9 +1653,27 @@ def sync_all(wait: bool = False) -> list[dict]:
     elif not _sync_lock.acquire(blocking=False):
         return []
     try:
-        return [sync_peer(p) for p in configured_peers()]
+        peers = configured_peers()
+        # The test transport swaps this process's database and settings overrides for each gateway it
+        # serves, so those tests run one teammate at a time. In production each teammate gets its own
+        # thread: a slow or unreachable teammate waits on its own socket and never delays the others.
+        if TRANSPORT is not None or len(peers) < 2:
+            return [_sync_isolated(p) for p in peers]
+        with ThreadPoolExecutor(max_workers=len(peers), thread_name_prefix="herd-peer") as pool:
+            # A thread starts with an empty context; copy the caller's so the profile's secret scope applies.
+            futures = [pool.submit(contextvars.copy_context().run, _sync_isolated, p) for p in peers]
+            return [f.result() for f in futures]
     finally:
         _sync_lock.release()
+
+
+def _sync_isolated(peer: dict) -> dict:
+    """``sync_peer`` with a last-resort guard, so an unexpected failure is one teammate's result."""
+    try:
+        return sync_peer(peer)
+    except Exception:  # noqa: BLE001 — the other teammates' passes must still run and report
+        return {"name": peer["name"], "url": peer["url"], "ok": False, "error": "Sync failed.",
+                "pushed": 0, "pulled": 0}
 
 
 _pending = threading.Event()
@@ -1529,15 +1763,15 @@ def status() -> dict:
     me = identity()
     peers = configured_peers()
     with connect() as conn:
-        states = {r["url"]: dict(r) for r in conn.execute("SELECT * FROM peer_state").fetchall()}
+        states = {r["name"]: dict(r) for r in conn.execute("SELECT * FROM peer_state").fetchall()}
         inc_rows = [dict(r) for r in conn.execute(
             "SELECT * FROM incoming_peers ORDER BY last_seen DESC").fetchall()]
-    linked_ids = {states.get(p["url"], {}).get("remote_gateway_id") or "" for p in peers} - {""}
+    linked_ids = {states.get(p["name"], {}).get("remote_gateway_id") or "" for p in peers} - {""}
     incoming = [{"gateway_id": r["gateway_id"], "name": r["name"], "last_seen": r["last_seen"],
                  "syncs": r["syncs"], "linked_back": r["gateway_id"] in linked_ids} for r in inc_rows]
     out = []
     for p in peers:
-        st = states.get(p["url"], {})
+        st = states.get(p["name"], {})
         out.append({
             "name": p["name"], "url": p["url"], "has_key": bool(p["key"]),
             "remote_name": st.get("remote_name") or "", "last_ok": st.get("last_ok") or "",

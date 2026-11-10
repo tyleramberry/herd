@@ -91,8 +91,8 @@ for (const phrase of ['reading the code', 'writing the code', 'reviewing', 'done
   check(`title for "${phrase}"`, node.props.title, `tyler's Hermes: ${phrase}`)
 }
 
-// 3. The speaker badge comes from author_type for every message, never from the author name
-//    (TC-11.6).
+// 3. Only agent-authored messages carry a badge, decided by author_type and never by the author name
+//    (TC-11.6). Humans are the unbadged default (spec §3).
 const badgeLabel = message => {
   const row = MessageRow({ message, channelId: 'general' })
   const header = row.props.children[1]
@@ -101,11 +101,11 @@ const badgeLabel = message => {
 }
 const msg = extra => Object.assign(
   { id: 'm1', content: 'hi', created_at: '2026-11-06T00:00:00.000+00:00', reactions: [] }, extra)
-check('human post -> human badge', badgeLabel(msg({ author_type: 'human', author_name: 'Tyler' })), 'human')
+check('human post -> no badge', badgeLabel(msg({ author_type: 'human', author_name: 'Tyler' })), null)
 check('agent post -> agent badge', badgeLabel(msg({ author_type: 'agent', author_name: "Tyler's Hermes" })),
   'agent')
 check('peer agent post -> agent badge', badgeLabel(msg({ author_type: 'agent', author_name: 'Riley' })), 'agent')
-check('name is never the badge', badgeLabel(msg({ author_type: 'human', author_name: "Tyler's Hermes" })), 'human')
+check('name is never the badge', badgeLabel(msg({ author_type: 'human', author_name: "Tyler's Hermes" })), null)
 
 // 4. The peer line: a refused cleartext peer says why, and never reads as "no teammate connected"
 //    (S-19). The positive control below is the plain connected/unconfigured behaviour, unchanged.
@@ -146,6 +146,16 @@ check('peer with no stored secret asks for the Herd secret (not the gateway API 
   peerLine({ peers: [{ name: 'riley', connected: false, has_key: false, last_attempt: '' }],
              herd_secret_set: true }),
   ["Add riley's Herd secret to connect"])
+
+// 6. One line per teammate (spec §1.5): a dead teammate never hides a live one, and a refusal still shows.
+check('two teammates: one line each, in order',
+  peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true },
+                     { name: 'ash', connected: false, has_key: true, last_attempt: '2026-11-08T00:00:00Z' }] }),
+  ['Connected to riley', "Can't reach ash. Messages will send when they're back."])
+check('a refused teammate is listed beside a connected one',
+  peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
+             refused: [{ name: 'kai', url: 'http://kai.local:8642', reason: 'Refused for test.' }] }),
+  ['Connected to riley', 'Refused kai — Refused for test.'])
 
 console.log(failures.length ? `\nPROBE FAIL (${failures.length}): ${failures.join(', ')}` : '\nPROBE OK')
 process.exit(failures.length ? 1 : 0)

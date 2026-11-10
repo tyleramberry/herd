@@ -1,19 +1,20 @@
 # Herd — multiplayer Hermes
 
-Channels and DMs where you, a teammate, and both of your Hermes agents work together across two machines.
+Channels and DMs where you, up to four teammates, and each of your Hermes agents work together across up to five machines.
 
 Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 
 ## What it does
 
 - **Channels.** Create a channel, read its history, post. Everyone starts in `#general`.
-- **Connect a teammate.** Point your Herd at your teammate's Hermes gateway once; messages then flow both ways.
-- **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`), and tell you in one short phrase what it is doing (`herd_set_status`: reading the code / writing the code / reviewing / done / idle). Every message carries a `human` or `agent` badge.
+- **Connect teammates.** Point your Herd at each teammate's Hermes gateway once (up to four); messages flow to all of them, and anything a teammate passes on reaches the rest of the mesh.
+- **Agents post and read.** Your Hermes agent can list channels, read a channel, and post to it (`herd_list_channels`, `herd_read_channel`, `herd_post`), and tell you in one short phrase what it is doing (`herd_set_status`: reading the code / writing the code / reviewing / done / idle). Agent messages carry an `agent` badge; human messages are the plain, unbadged default.
 - **DMs.** A direct conversation between you and your teammate, synced the same way as channels.
-- **Share a DM to a channel.** In a DM, **Share to a channel** creates a new channel and copies the conversation into it, in order, so more of your agents and teammates can join with the history. The DM itself is untouched. Copies keep their original author and time, reactions are not copied, and copied messages never wake an agent.
-- **Threads.** Reply to any message; the channel stays clean while the conversation continues in the thread.
+- **Share a DM to a channel.** In a DM, **Share to a channel** creates a new channel for the two people in that DM and copies the conversation into it, in order. Nobody else in the mesh receives it: a channel's member list is set when it is created, and the pane has no picker for it yet. The DM itself is untouched. Copies keep their original author and time, reactions are not copied, and copied messages never wake an agent.
+- **Threads.** Reply to any message. The thread opens in a panel on the right, beside the channel, with the root, its replies and its own composer; `Esc` or the close button shuts it.
+- **Channel members.** A channel can list up to five people (you included), and only those gateways receive it. A channel without a list is open to every gateway in the mesh.
 
-What it doesn't do (yet): more than two gateways, search, notifications. Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
+What it doesn't do (yet): more than five gateways, search, notifications, and a picker for a channel's members (the `members` list is set through the route, not the pane). Agents answer @mentions only if you opt in (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
 ## Install
 
@@ -44,6 +45,17 @@ Within a few seconds the pane header shows **Connected to brooklyn**, and each o
 
 > **Already linked before this change?** A *Teammate's Herd secret* saved by an older Herd still holds their old `API_SERVER_KEY`, which their gateway no longer accepts on `/herd/v1/*`. Each side sets a new *This gateway's Herd secret*, tells the other that value only, and the link recovers — the error line names which side is still missing one.
 
+## More than two of you (up to five gateways)
+
+Each teammate you link is one more gateway. You can link up to four teammates, so the mesh is five gateways at most.
+
+- Fill in **Teammate 2's name**, **gateway URL** and **Herd secret** (and 3 and 4 the same way) under **Settings → Plugins → Herd**. Each teammate has its own secret slot (`HERD_PEER_KEY`, then `HERD_PEER_KEY_2`, `_3`, `_4`), so one teammate's secret is never offered to another.
+- Or give the whole list in the Settings field **Teammates (advanced)**, or in `~/.hermes/config.yaml` under `plugins: entries: herd: settings:` as `peers: [{name: ash, url: "https://ash.tailnet-name.ts.net:8642", key_env: HERD_PEER_KEY_2}]`. Each entry names the secret slot its key lives in; a list entry without one is refused, never guessed.
+- Names must be different, and so must URLs. A duplicate, or a fifth teammate, is refused and the pane says why.
+- Teammate 1 is the original single peer. A config that already linked one teammate keeps working unchanged, and its secret stays where it was.
+
+Every teammate has its own status line in the pane (connected, can't reach, or needs a secret), so one that is offline never hides the others.
+
 ## Let your agent answer @mentions (optional, off by default)
 
 When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Herd can hand that message to your agent as a normal chat turn, so it runs under your usual approvals. Three opt-ins are needed, because this lets another person's message start an agent turn on your machine:
@@ -57,7 +69,7 @@ Guards: only messages from people trigger it, never from agents (so two agents c
 ## How sync works
 
 - Every message has a globally unique id and is stored in a local SQLite file. Inserts ignore duplicates, so a message delivered twice is still one message.
-- The connected side (Tyler) sends one request to Brooklyn's gateway (`POST /herd/v1/sync` on Brooklyn's API server, authenticated with Brooklyn's Herd secret, which Tyler stored as *Teammate's Herd secret*) every 3 seconds and right after each new post. That request pushes Tyler's new messages and pulls Brooklyn's back, so linking one side is enough for both directions.
+- Each gateway sends one request to every teammate it is linked to (`POST /herd/v1/sync` on that teammate's API server, authenticated with that teammate's Herd secret, which you stored for them) every 3 seconds and right after each new post. Each request pushes the rows that teammate does not have yet and pulls theirs back, so linking one side is enough for both directions. A row that arrives from one teammate is passed on to the others, and never sent back to the gateway that wrote it, so a message reaches every gateway once. Teammates are synced in parallel: a slow or unreachable one waits on its own connection and does not delay the others.
 
 Once the first sync lands, the other side's Herd shows "{name} is connected" in the header and "{name} connected to you — add them back" in the empty state. Adding them back is optional for messaging (the linked side does the polling), but it shows link health on both sides.
 - Each side keeps cursors per peer and only advances them when a sync succeeds. If the teammate is offline, messages wait and send when they're back.
@@ -66,17 +78,17 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - A DM channel is only accepted from a peer when its two member ids are plain identifiers (lowercase letters, digits, `-`, `_`, at most 64 characters, so no trailing newline or other whitespace); anything else is refused rather than repaired, because the id is shared with the peer.
 - A DM is only synced to the two gateways that are in it: a sync request never returns another pair's DM — not its channel, its messages, or its reactions — and a request that carries no gateway id gets no DMs at all. Public channels are unaffected. In the normal two-gateway link nothing changes: the only DM you hold is the one with your teammate.
 - Reactions (👍 ❤️ 👁️ 🎉) ride the same sync round with their own cursor (`after_rseq`). Each reaction is one row keyed `(message, emoji, gateway)`, so toggles from either side converge, and removing a reaction is a tombstone row that syncs like any other change.
-- A synced row's identity is bound to the sender the batch declares (`from`), never to what the row itself claims: the gateway id and display name stored on an incoming message or reaction are the declared sender's. A row claiming your gateway's id, or any id other than the declared sender's, is dropped instead of stored, and the sync response reports how many were (`accepted: N, dropped: M`). The shared Herd secret authenticates the link between the two gateways, not the individual caller, so a peer that holds it can still declare whichever sender id it likes — a linked teammate's gateway is trusted. What this guards against is a typo, stale or forged row inside a batch, not a cryptographic proof of who is calling.
+- A synced row keeps the gateway id it names (its origin), so a teammate can relay messages written on another gateway in the mesh; the name shown for a relayed row is the one its origin declared. A row that claims your own gateway's id, or a malformed id, is dropped instead of stored, and the sync response reports how many were (`accepted: N, dropped: M`). A row in a channel with a member list is refused unless both its sender and its origin are members. The shared Herd secret authenticates the link to each teammate, not the individual caller, so a linked teammate's gateway is trusted to relay the origins it names. What this guards against is a typo, a stale row, or a forged row that claims to be from this gateway or from a non-member, not a cryptographic proof of who is calling.
 - The desktop refreshes instantly on a backend event and also polls every few seconds as a fallback.
 
 ## What Herd does on your machine (disclosures)
 
-- **Network calls:** only to the one teammate gateway URL you enter, at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. The peer client ignores ambient `http_proxy`/`HTTP_PROXY` (it builds its opener with an explicitly empty proxy map), so the peer key is never handed to a proxy. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
+- **Network calls:** only to the teammate gateway URLs you enter (up to four), at `POST <url>/herd/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. The peer client ignores ambient `http_proxy`/`HTTP_PROXY` (it builds its opener with an explicitly empty proxy map), so the peer key is never handed to a proxy. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
 - **Inbound endpoint:** adds `POST /herd/v1/sync` and `GET /herd/v1/ping` to your Hermes API server. Both require **this gateway's Herd secret** (`HERD_SECRET`, Herd's own credential, read through Hermes's secret store and compared in constant time). With no Herd secret set, both routes refuse every request (fail closed). Your gateway's `API_SERVER_KEY` is **not** accepted on `/herd/v1/*`, and the credential you hand a teammate is Herd-scoped — it is no longer your gateway API key, so it cannot reach the rest of your API server. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
-- **Stored credentials:** two `config_schema` secrets — the teammate's Herd secret (`HERD_PEER_KEY`, sent to their gateway) and this gateway's own Herd secret (`HERD_SECRET`, required from them) — saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
+- **Stored credentials:** one `config_schema` secret per teammate — `HERD_PEER_KEY`, then `HERD_PEER_KEY_2` to `_4`, each sent only to its own teammate's gateway — and this gateway's own Herd secret (`HERD_SECRET`, required from them) — saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the task title of a Kanban card an agent linked to its answer (next bullet).
-- **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command.
+- **Sharing a DM to a channel.** "Share to a channel" on a DM asks this gateway to create a named channel and copy that DM's messages into it. It is a copy: the DM and its history are never modified or deleted. The new channel's member list is the DM's two people, so only their gateways receive the copies. The copies are written to Herd's own SQLite file and reach your teammate's gateway through the same `POST <url>/herd/v1/sync` request already disclosed above, as part of the normal sync payload (Herd sync protocol v2 — copied rows now carry the source DM's id so both gateways converge on the same rows). No new endpoint, no new outbound host, no new credential, no shell command.
 - **Reads outside plugin data:** to label an agent's answer, the Herd pane reads a task's title from the local Kanban database at `~/.hermes/kanban/boards/<slug>/kanban.db` — **read-only**, never written, no schema assumptions; if the file is missing or locked the pane shows the task id only. The id itself is passed explicitly by the agent and travels with the message in the normal sync payload; a peer that predates the field ignores it.
 - **Agent turns:** only if you opt in to @mention wake (above): a teammate's mention is passed to your chosen chat through Hermes's `inject_message`, which needs your `allow_gateway_injection` permission.
 - **Agent status:** an agent may set one short phrase (herd_set_status, e.g. "writing the code") that the pane shows beside its work. It lives in the gateway process's memory only — never written to herd.db, never sent to your teammate's gateway — and it disappears after five minutes or when the gateway restarts.

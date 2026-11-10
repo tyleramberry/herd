@@ -1,6 +1,6 @@
 name: herd
 version: 0.1.0
-description: Channels and DMs shared between two Hermes gateways, for humans and agents.
+description: Channels and DMs shared between up to five Hermes gateways, for humans and agents.
 author: Tyler Amberry
 license: MIT
 homepage: https://github.com/tyleramberry/herd
@@ -39,6 +39,56 @@ config_schema:
     env: HERD_PEER_KEY
     label: Teammate's Herd secret
     description: Your teammate's Herd secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
+  peer_name_2:
+    type: str
+    default: ""
+    label: Teammate 2's name
+    description: Optional. A second teammate (up to four in total, so five gateways). Give each teammate a different name.
+  peer_url_2:
+    type: str
+    default: ""
+    label: Teammate 2's gateway URL
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_2:
+    type: secret
+    env: HERD_PEER_KEY_2
+    label: Teammate 2's Herd secret
+    description: Teammate 2's Herd secret. Stored in Hermes's secret store, read only for teammate 2.
+  peer_name_3:
+    type: str
+    default: ""
+    label: Teammate 3's name
+    description: Optional. Give each teammate a different name.
+  peer_url_3:
+    type: str
+    default: ""
+    label: Teammate 3's gateway URL
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_3:
+    type: secret
+    env: HERD_PEER_KEY_3
+    label: Teammate 3's Herd secret
+    description: Teammate 3's Herd secret. Stored in Hermes's secret store, read only for teammate 3.
+  peer_name_4:
+    type: str
+    default: ""
+    label: Teammate 4's name
+    description: Optional. Give each teammate a different name.
+  peer_url_4:
+    type: str
+    default: ""
+    label: Teammate 4's gateway URL
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_4:
+    type: secret
+    env: HERD_PEER_KEY_4
+    label: Teammate 4's Herd secret
+    description: Teammate 4's Herd secret. Stored in Hermes's secret store, read only for teammate 4.
+  peers:
+    type: list
+    default: []
+    label: Teammates (advanced)
+    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Herd secret slot (HERD_PEER_KEY, HERD_PEER_KEY_2, HERD_PEER_KEY_3 or HERD_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
   allow_cleartext_peer:
     type: bool
     default: false

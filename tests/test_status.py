@@ -210,9 +210,12 @@ class StatusTest(unittest.TestCase):
 
 
 class DesktopSourceTest(unittest.TestCase):
-    def test_badge_from_author_type_for_every_message(self):
-        self.assertIn("message.author_type === 'agent' ? 'agent' : 'human'", SOURCE)
-        self.assertIn("children: badge", SOURCE)
+    def test_only_agent_messages_carry_a_badge(self):
+        # Spec §3: the human badge is gone; the agent badge is decided by author_type alone.
+        self.assertIn("const agent = message.author_type === 'agent'", SOURCE)
+        self.assertIn("agent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null", SOURCE)
+        self.assertNotIn("children: 'human'", SOURCE)
+        self.assertNotIn("'human' ? 'default'", SOURCE)
         for line in SOURCE.splitlines():
             if "jsx(Badge" in line:
                 self.assertNotIn("author_name", line)

@@ -4,7 +4,7 @@
 * The peer endpoints ``POST /herd/v1/sync`` and ``GET /herd/v1/ping`` on this gateway's
   ``api_server``, authenticated with Herd's OWN credential: this gateway's Herd secret
   (``HERD_SECRET``), never the gateway-wide ``API_SERVER_KEY``. Plus a background sync loop that
-  keeps this gateway and its configured peer converged.
+  keeps this gateway and its configured teammates (up to four) converged.
 """
 
 from __future__ import annotations

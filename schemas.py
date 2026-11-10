@@ -4,8 +4,8 @@ HERD_LIST_CHANNELS = {
     "name": "herd_list_channels",
     "description": (
         "List Herd channels and DMs this Hermes can see, with their ids and member names. "
-        "Herd is the shared space where you, your user, a teammate and the teammate's Hermes "
-        "agent talk across two machines."
+        "Herd is the shared space where you, your user, your teammates and their Hermes "
+        "agents talk across up to five machines."
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
