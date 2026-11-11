@@ -9,9 +9,11 @@ independent of the checkout directory name. Test infrastructure only: pytest is
 never imported by the installed plugin.
 """
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
+os.environ["HERMES_MULTIPLAYER_NO_ACK_DELAY"] = "1"
 ROOT = Path(__file__).resolve().parent.parent
 
 if "__init__" not in sys.modules:
