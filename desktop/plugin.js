@@ -1027,7 +1027,19 @@ function DayDivider({ iso }) {
 // Keep the newest message in view, the way a chat does: when a list first appears, when you send, and when a new
 // message lands while you are at (or near) the bottom. Scrolled up to read history, you are left where you are.
 const NEAR_BOTTOM_PX = 240
-const followState = { last: new Map(), nodes: new WeakSet() }
+const followState = { last: new Map(), nodes: new WeakSet(), pinned: new WeakMap() }
+
+// Whether the user was at the bottom BEFORE the new message grew the list. Measuring after render fails for tall
+// messages or bursts (the list is already > NEAR_BOTTOM_PX longer), so track it from scroll events instead.
+function trackPinned(box) {
+  if (followState.pinned.has(box)) return
+  followState.pinned.set(box, true)
+  box.addEventListener(
+    'scroll',
+    () => followState.pinned.set(box, box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM_PX),
+    { passive: true }
+  )
+}
 
 function scrollBox(node) {
   for (let el = node.parentElement; el; el = el.parentElement) {
@@ -1046,9 +1058,12 @@ function followNewest(node, listKey, lastId, mine) {
   followState.last.set(listKey, lastId)
   if (!fresh && prev === lastId) return false
   const box = scrollBox(node)
-  const near = !box || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM_PX
+  if (box) trackPinned(box)
+  const near = !box || followState.pinned.get(box) !== false
   if (!(fresh || mine || near)) return false
   node.scrollIntoView({ block: 'end' })
+  // Layout (images, markdown, reactions) can settle after this commit; re-pin once it has.
+  requestAnimationFrame(() => node.isConnected && node.scrollIntoView({ block: 'end' }))
   return true
 }
 
