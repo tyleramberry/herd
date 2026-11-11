@@ -130,7 +130,7 @@ const message = (extra = {}) => ({
 pickerAtom.set(null)
 {
   const row = MessageRow({ message: message() })
-  const trigger = find(row, n => n.props['data-herd-react-trigger'] !== undefined)
+  const trigger = find(row, n => n.props['data-multiplayer-react-trigger'] !== undefined)
   check('no-reaction message still has an add-reaction trigger', Boolean(trigger))
   check('trigger is a labelled button', trigger && trigger.type === 'button' && trigger.props['aria-label'] === 'Add reaction')
   check('picker closed by default', !find(row, n => n.props.role === 'group'))
@@ -141,11 +141,11 @@ pickerAtom.set(null)
 
   const opened = ReactionPicker({ message: message(), react: { isPending: false, mutate: v => globalThis.__mutations.push(v) } })
   const group = find(opened, n => n.props.role === 'group')
-  const emoji = group ? findAll(group, n => n.props['data-herd-emoji'] !== undefined) : []
+  const emoji = group ? findAll(group, n => n.props['data-multiplayer-emoji'] !== undefined) : []
   check('picker lists the four quick reactions and More', emoji.length === 5 && emoji[4].props.children === 'More', String(emoji.length))
   check('first emoji takes focus on open', emoji[0] && emoji[0].props.autoFocus === true)
   check('trigger reports aria-expanded=true once open',
-    find(opened, n => n.props['data-herd-react-trigger'] !== undefined).props['aria-expanded'] === 'true')
+    find(opened, n => n.props['data-multiplayer-react-trigger'] !== undefined).props['aria-expanded'] === 'true')
 
   // Clicking an emoji sends exactly that reaction and closes the picker.
   globalThis.__mutations.length = 0
@@ -168,7 +168,7 @@ pickerAtom.set(null)
   // Arrow keys move focus between the emoji (wrapping) and never pick one.
   pickerAtom.set('m1')
   const withPicker = ReactionPicker({ message: message(), react: { isPending: false, mutate () {} } })
-  const picks = findAll(withPicker, n => n.props['data-herd-emoji'] !== undefined)
+  const picks = findAll(withPicker, n => n.props['data-multiplayer-emoji'] !== undefined)
   const focusLog = []
   const items = picks.map(p => ({ label: p.props.children, focus () { focusLog.push(this.label) } }))
   const press = (idx, key) => {
@@ -319,18 +319,18 @@ const flat = root => nodes(root).filter(n => typeof n.type === 'string')
   arriveAt(node, 'h2')
   check('it does not scroll again on the next render', scrolled.length === 1)
   const row = MessageRow({ message: message({ id: 'rowid' }) })
-  check('message rows carry their id for the jump', row.props['data-herd-message-id'] === 'rowid')
+  check('message rows carry their id for the jump', row.props['data-multiplayer-message-id'] === 'rowid')
   check('message rows get the scroll ref', typeof row.props.ref === 'function')
 }
 {
   // The palette entry is registered and opens the Hermes Multiplayer page with an empty search.
   const items = fakeCtx.items
   const entry = items.find(i => i.area === 'palette')
-  check('a ⌘K palette entry is registered', Boolean(entry) && entry.data.id === 'herd.search')
+  check('a ⌘K palette entry is registered', Boolean(entry) && entry.data.id === 'hermes-multiplayer.search')
   check('the palette entry is labelled', entry && entry.data.label === 'Search Hermes Multiplayer messages')
   searchQuery.set('leftover')
   entry.data.run()
-  check('running it opens the Hermes Multiplayer page', globalThis.__navigations.at(-1) === '/herd')
+  check('running it opens the Hermes Multiplayer page', globalThis.__navigations.at(-1) === '/hermes-multiplayer')
   check('running it starts with an empty search', searchQuery.get() === '')
 }
 
@@ -345,7 +345,7 @@ const item = (channel, author, preview, extra = {}) => ({
   check('one notification per channel burst', first === 1 && globalThis.__notified.length === 1, String(first))
   check('the notification names the channel', globalThis.__notified[0].title === '#general', JSON.stringify(globalThis.__notified[0]))
   check('the body names the author and counts the rest', globalThis.__notified[0].body === 'riley: build is green (+1 more)', globalThis.__notified[0].body)
-  check('the notification opens Hermes Multiplayer when clicked', globalThis.__notified[0].activate === '/herd')
+  check('the notification opens Hermes Multiplayer when clicked', globalThis.__notified[0].activate === '/hermes-multiplayer')
 
   check('the same channel within 30s is quiet', notifyIncoming({ count: 1, items: [item('general', 'riley', 'again')] }, 2000) === 0)
   const burst = ['c2', 'c3', 'c4', 'c5', 'c6', 'c7'].map(c => item(c, 'riley', 'hi ' + c))
@@ -482,17 +482,17 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
 }
 {
   const keybinds = fakeCtx.items.filter(i => i.area === 'keybinds')
-  const open = keybinds.find(i => i.data.id === 'herd.open')
-  const fresh = keybinds.find(i => i.data.id === 'herd.newMessage')
-  check('open-Herd keybind is registered', Boolean(open) && open.data.defaults[0] === 'mod+alt+h')
+  const open = keybinds.find(i => i.data.id === 'hermes-multiplayer.open')
+  const fresh = keybinds.find(i => i.data.id === 'hermes-multiplayer.newMessage')
+  check('open-Hermes-Multiplayer keybind is registered', Boolean(open) && open.data.defaults[0] === 'mod+alt+h')
   check('new-message keybind is registered', Boolean(fresh) && fresh.data.defaults[0] === 'mod+alt+n')
   globalThis.__navigations.length = 0
   fresh.data.run()
-  check('the new-message keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/herd')
+  check('the new-message keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/hermes-multiplayer')
   check('and asks for the composer', probeComposeRequest.get() > 0)
   probeComposeRequest.set(0)
   open.data.run()
-  check('the open keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/herd')
+  check('the open keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/hermes-multiplayer')
 }
 {
   // Topic: viewable, editable for a public channel, never shown for a DM.
@@ -536,19 +536,19 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   probeThreadTabs.clear()
   check('a thread opens as a workspace tab', probeOpenThreadWorkspace(chan, 'root1') === true)
   const tab = globalThis.__workspaces.at(-1)
-  check('the tab is keyed by the thread', tab && tab.id === 'herd-thread:root1')
+  check('the tab is keyed by the thread', tab && tab.id === 'multiplayer-thread:root1')
   check('the tab is titled with its channel', tab && tab.opts.title === 'Thread · #general')
   check('the tab renders the thread workspace', tab && tab.opts.render().type === probeThreadWorkspace)
   check('one open tab per thread', probeThreadTabs.size === 1)
 
   probeOpenThreadWorkspace(chan, 'root1')
-  check('opening it again re-fronts the same tab', globalThis.__workspaces.at(-1).id === 'herd-thread:root1' && probeThreadTabs.size === 1)
+  check('opening it again re-fronts the same tab', globalThis.__workspaces.at(-1).id === 'multiplayer-thread:root1' && probeThreadTabs.size === 1)
 
   probeCloseThreadWorkspace('root1')
-  check('closing the thread closes its tab', globalThis.__closed.includes('herd-thread:root1'))
+  check('closing the thread closes its tab', globalThis.__closed.includes('multiplayer-thread:root1'))
   check('and forgets it', probeThreadTabs.size === 0)
   probeCloseThreadWorkspace('root1')
-  check('closing twice is harmless', globalThis.__closed.filter(id => id === 'herd-thread:root1').length === 1)
+  check('closing twice is harmless', globalThis.__closed.filter(id => id === 'multiplayer-thread:root1').length === 1)
 
   // rapid open and close: no leaked tabs, every close lands
   globalThis.__closed.length = 0
@@ -568,7 +568,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   ws.props.onKeyDown({ key: 'Escape', defaultPrevented: true, preventDefault () {} })
   check('Esc a composer handled leaves the tab open', probeThreadTabs.has('root4'))
   ws.props.onKeyDown({ key: 'Escape', defaultPrevented: false, preventDefault () {} })
-  check('Esc closes the thread tab', !probeThreadTabs.has('root4') && globalThis.__closed.includes('herd-thread:root4'))
+  check('Esc closes the thread tab', !probeThreadTabs.has('root4') && globalThis.__closed.includes('multiplayer-thread:root4'))
   probeThreadTabs.clear()
 
   // The route's thread panel keeps its own Esc, and offers the action only when the host can open tabs.
@@ -581,7 +581,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('the panel offers Open as page when tabs are available', Boolean(openBtn))
   globalThis.__workspaces.length = 0
   openBtn.props.onClick()
-  check('Open as page docks the thread', globalThis.__workspaces.at(-1) && globalThis.__workspaces.at(-1).id === 'herd-thread:root5')
+  check('Open as page docks the thread', globalThis.__workspaces.at(-1) && globalThis.__workspaces.at(-1).id === 'multiplayer-thread:root5')
   probeCloseThreadWorkspace('root5')
 
   const savedOpen = sdkHost.openWorkspace
@@ -620,7 +620,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   globalThis.__mintData = undefined
 
   probePairingView.set(null)
-  probePairingResult.set({ name: 'brooklyn', url: 'https://brooklyn-mac.tailnet.ts.net:8642', herd_secret: ['SECRET', 'VALUE', '0123456789'].join('-') })
+  probePairingResult.set({ name: 'brooklyn', url: 'https://brooklyn-mac.tailnet.ts.net:8642', multiplayer_secret: ['SECRET', 'VALUE', '0123456789'].join('-') })
   const done = probePairingPanel({})
   check('a finished pairing names the teammate', texts(done).join(' ').includes('Paired with brooklyn'))
   check('the key is shown once, in a code element', nodes(done).some(n => n.type === 'code' && n.props.children === 'SECRET-VALUE-0123456789'))
@@ -808,7 +808,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('a grouped edited message says so too', texts(MessageRow({ message: message({ edited_at: '2026-11-05T00:05:00Z' }), grouped: true })).includes('(edited)'))
   const gone = MessageRow({ message: message({ deleted: 1, content: '', reply_count: 2, gateway_id: 'me' }), selfId: 'me', onOpenThread () {} })
   check('a deleted message with replies keeps its place', texts(gone).includes('This message was deleted.'))
-  check('and can no longer be reacted to or edited', !find(gone, n => n.props['data-herd-react-trigger'] !== undefined) && !labels(gone).includes('Edit'))
+  check('and can no longer be reacted to or edited', !find(gone, n => n.props['data-multiplayer-react-trigger'] !== undefined) && !labels(gone).includes('Edit'))
 }
 
 // ---- more reactions -------------------------------------------------------------------------
@@ -820,7 +820,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   const quick = ReactionPicker({ message: message(), react })
   find(quick, n => n.props.children === 'More').props.onClick()
   check('More opens the full tray', probeReactionMore.get() === true)
-  const tray = findAll(ReactionPicker({ message: message(), react }), n => n.props['data-herd-emoji'] !== undefined)
+  const tray = findAll(ReactionPicker({ message: message(), react }), n => n.props['data-multiplayer-emoji'] !== undefined)
   check('the tray offers many emoji', tray.length >= 20, String(tray.length))
   tray.find(n => n.props.children === '🚀').props.onClick()
   check('picking one reacts with it and closes the tray', sent[0] === '🚀' && pickerAtom.get() === null && probeReactionMore.get() === false)
@@ -835,11 +835,11 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   const full = view({})
   const older = find(full, n => n.type === 'Button' && n.props.children === 'Load older messages')
   check('a channel with more history offers Load older messages', Boolean(older))
-  check('the extra row that proved it is not shown', !find(full, n => n.props['data-herd-message-id'] === 'h0') && Boolean(find(full, n => n.props['data-herd-message-id'] === 'h1')))
+  check('the extra row that proved it is not shown', !find(full, n => n.props['data-multiplayer-message-id'] === 'h0') && Boolean(find(full, n => n.props['data-multiplayer-message-id'] === 'h1')))
   older.props.onClick()
   globalThis.__query = { data: many.concat([message({ id: 'older-a', created_at: '2026-11-04T00:00:00Z' })]).sort((a, b) => a.created_at.localeCompare(b.created_at)) }
   const grown = view({})
-  check('after loading, the older rows are there and the button is gone', Boolean(find(grown, n => n.props['data-herd-message-id'] === 'older-a')) && !find(grown, n => n.type === 'Button' && n.props.children === 'Load older messages'))
+  check('after loading, the older rows are there and the button is gone', Boolean(find(grown, n => n.props['data-multiplayer-message-id'] === 'older-a')) && !find(grown, n => n.type === 'Button' && n.props.children === 'Load older messages'))
   let scrolled = null
   check('the reader stays on the message they were at', probeKeepPlace({ scrollIntoView: o => { scrolled = o } }, 'h1') === true && scrolled.block === 'start')
   check('and only once', probeKeepPlace({ scrollIntoView () {} }, 'h1') === false)
@@ -876,7 +876,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
 
 // ---- team room -------------------------------------------------------------------------------
 {
-  const link = 'https://herd-relay.example.workers.dev/r/0123456789abcdef0123#' + 'k'.repeat(43)
+  const link = 'https://hermes-multiplayer-relay.example.workers.dev/r/0123456789abcdef0123#' + 'k'.repeat(43)
   check('a room link is recognised', probeIsRoomLink(link) && probeIsRoomLink('  ' + link + ' '))
   check('a pairing invite is not a room link', !probeIsRoomLink('https://riley.ts.net:8642#ABCDE-FGHJK') && !probeIsRoomLink('hello'))
 

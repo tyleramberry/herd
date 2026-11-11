@@ -29,7 +29,7 @@ import {
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const PLUGIN_ID = 'hermes-multiplayer'
-const ROUTE_PATH = '/herd'
+const ROUTE_PATH = '/hermes-multiplayer'
 const REFRESH_MS = 3000 // re-read local data (events are the fast path; this is the fallback)
 const SYNC_MS = 10000 // ask the backend to sync with the peer (the gateway also syncs on its own)
 
@@ -208,7 +208,7 @@ function PeerLine({ status }) {
   const room = roomLine(status)
   if (room && peers.length === 0 && refusedPeers(status).length === 0) return room
   // Only an explicit false: older/partial status payloads without the key render as before.
-  if (status && status.herd_secret_set === false) {
+  if (status && status.multiplayer_secret_set === false) {
     return jsxs('div', {
       className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
       title: "Teammates can't sync with this gateway until it has a Hermes Multiplayer secret.",
@@ -728,7 +728,7 @@ function ReplySummary({ message, onOpen }) {
 }
 
 // ---------------------------------------------------------------------------
-// @-mentions. Handle rules mirror dashboard/herd_store.py (mention_handles / mentions_me):
+// @-mentions. Handle rules mirror dashboard/multiplayer_store.py (mention_handles / mentions_me):
 // a handle is the display name with runs of non-alphanumerics turned into '-', and
 // `@handle` or `@handle-hermes` wakes that teammate's agent.
 // ---------------------------------------------------------------------------
@@ -1100,7 +1100,7 @@ function ReactionPicker({ message, react, onReply, own }) {
       'button',
       {
         type: 'button',
-        'data-herd-emoji': '',
+        'data-multiplayer-emoji': '',
         autoFocus: first,
         title: 'React ' + emoji,
         'aria-label': 'React ' + emoji,
@@ -1121,7 +1121,7 @@ function ReactionPicker({ message, react, onReply, own }) {
       emoji
     )
   const move = (e, delta) => {
-    const items = Array.from(e.currentTarget.parentElement.querySelectorAll('[data-herd-emoji]'))
+    const items = Array.from(e.currentTarget.parentElement.querySelectorAll('[data-multiplayer-emoji]'))
     items[(items.indexOf(e.currentTarget) + delta + items.length) % items.length].focus()
   }
   return jsxs('div', {
@@ -1137,12 +1137,12 @@ function ReactionPicker({ message, react, onReply, own }) {
       if (e.key !== 'Escape' || !open) return
       e.stopPropagation() // Esc closes the picker, not the thread panel behind it
       close()
-      e.currentTarget.querySelector('[data-herd-react-trigger]').focus()
+      e.currentTarget.querySelector('[data-multiplayer-react-trigger]').focus()
     },
     children: [
       jsx('button', {
         type: 'button',
-        'data-herd-react-trigger': '',
+        'data-multiplayer-react-trigger': '',
         'aria-label': 'Add reaction',
         'aria-haspopup': 'true',
         'aria-expanded': String(open),
@@ -1184,7 +1184,7 @@ function ReactionPicker({ message, react, onReply, own }) {
                   'button',
                   {
                     type: 'button',
-                    'data-herd-emoji': '',
+                    'data-multiplayer-emoji': '',
                     'aria-label': more ? 'Fewer emoji' : 'More emoji',
                     title: more ? 'Fewer emoji' : 'More emoji',
                     className: 'rounded px-1 text-[0.6875rem] text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
@@ -1307,7 +1307,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped, 
   })
   return jsxs('div', {
     className: 'group relative flex flex-col gap-0.5 px-3 ' + (grouped ? 'py-0.5' : 'py-1.5'),
-    'data-herd-message-id': message.id,
+    'data-multiplayer-message-id': message.id,
     title: grouped ? exactTime(message.created_at) : undefined,
     ref: node => {
       arriveAt(node, message.id)
@@ -1525,7 +1525,7 @@ function canOpenWorkspace() {
 
 function openThreadWorkspace(channel, rootId) {
   if (!canOpenWorkspace() || !rootId) return false
-  const close = host.openWorkspace('herd-thread:' + rootId, {
+  const close = host.openWorkspace('multiplayer-thread:' + rootId, {
     title: 'Thread · ' + (isDirect(channel) ? dmLabel(channel, null) : '#' + channel.name),
     minWidth: '22rem',
     render: () => jsx(ThreadWorkspace, { channel, rootId }),
@@ -1556,7 +1556,7 @@ function ThreadWorkspace({ channel, rootId }) {
         children: [
           jsx('span', { className: 'truncate text-sm font-medium', children: threadTitle(channel, null) }),
           jsx(WorkspacePageHeaderControl, {
-            id: 'herd-thread-channel',
+            id: 'multiplayer-thread-channel',
             children: jsx(Button, {
               type: 'button',
               size: 'xs',
@@ -2224,7 +2224,7 @@ function RoomPanel({ status }) {
         jsx(Input, {
           name: 'relay',
           defaultValue: (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : '') || room.relay_default || '',
-          placeholder: 'Relay address, e.g. https://herd-relay.your-name.workers.dev',
+          placeholder: 'Relay address, e.g. https://hermes-multiplayer-relay.your-name.workers.dev',
           'aria-label': 'Relay address',
           autoComplete: 'off',
           autoFocus: true,
@@ -2286,7 +2286,7 @@ function RoomPanel({ status }) {
     ]
   })
 }
-const pairingResult = atom(null) // { name, url, herd_secret } after a successful enter, until hidden
+const pairingResult = atom(null) // { name, url, multiplayer_secret } after a successful enter, until hidden
 // The inviter's own gateway address, typed once and remembered, so a code can go out as one line: address#code.
 const inviteLine = atom('')
 const ADDRESS_KEY = 'gatewayAddress'
@@ -2320,7 +2320,7 @@ function PairingPanel({ status }) {
       className: 'flex flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
       children: [
         jsx('div', { children: 'Paired with ' + result.name + '. Copy this key once, then paste it into Settings → Plugins → Hermes Multiplayer → Teammate’s Hermes Multiplayer secret, with the gateway address ' + result.url + '.' }),
-        jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: result.herd_secret }),
+        jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: result.multiplayer_secret }),
         jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Hermes Multiplayer can’t save this for you yet. Hide it once you have pasted it.' }),
         btn('Hide key', () => pairingResult.set(null))
       ]
@@ -2577,7 +2577,7 @@ function NoTeammate({ incoming }) {
           jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             children:
-              "Settings → Plugins → Hermes Multiplayer → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and Teammate's Hermes Multiplayer secret (the HERD_SECRET they set — not their API key)."
+              "Settings → Plugins → Hermes Multiplayer → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and Teammate's Hermes Multiplayer secret (the HERMES_MULTIPLAYER_SECRET they set — not their API key)."
           })
         ]
       : [
@@ -2590,7 +2590,7 @@ function NoTeammate({ incoming }) {
   })
 }
 
-function HerdView({ compact }) {
+function MultiplayerView({ compact }) {
   const $selected = compact ? selection.pane : selection.page
   const $composing = compact ? composing.pane : composing.page
   const $menu = compact ? plusMenu.pane : plusMenu.page
@@ -2660,12 +2660,12 @@ function HerdView({ compact }) {
   })
 }
 
-function HerdPage() {
-  return jsx(HerdView, { compact: false })
+function MultiplayerPage() {
+  return jsx(MultiplayerView, { compact: false })
 }
 
-function HerdPane() {
-  return jsx(HerdView, { compact: true })
+function MultiplayerPane() {
+  return jsx(MultiplayerView, { compact: true })
 }
 
 // ---------------------------------------------------------------------------
@@ -2729,7 +2729,7 @@ export default {
         id: 'page',
         area: ROUTES_AREA,
         data: { path: ROUTE_PATH },
-        render: () => jsx(HerdPage, {})
+        render: () => jsx(MultiplayerPage, {})
       },
       {
         id: 'nav',
@@ -2740,7 +2740,7 @@ export default {
         id: 'open',
         area: KEYBINDS_AREA,
         data: {
-          id: 'herd.open',
+          id: 'hermes-multiplayer.open',
           category: 'navigation',
           defaults: ['mod+alt+h'],
           label: 'Open Hermes Multiplayer',
@@ -2751,7 +2751,7 @@ export default {
         id: 'new-message',
         area: KEYBINDS_AREA,
         data: {
-          id: 'herd.newMessage',
+          id: 'hermes-multiplayer.newMessage',
           category: 'composer',
           defaults: ['mod+alt+n'],
           label: 'New Hermes Multiplayer message',
@@ -2771,9 +2771,9 @@ export default {
         id: 'search',
         area: PALETTE_AREA,
         data: {
-          id: 'herd.search',
+          id: 'hermes-multiplayer.search',
           label: 'Search Hermes Multiplayer messages',
-          keywords: ['herd', 'search', 'find', 'messages', 'history'],
+          keywords: ['multiplayer', 'team', 'search', 'find', 'messages', 'history'],
           run: () => {
             searchQuery.set('')
             host.navigate(ROUTE_PATH)
@@ -2785,7 +2785,7 @@ export default {
         area: PANES_AREA,
         title: 'Hermes Multiplayer',
         data: { placement: 'right', width: '340px' },
-        render: () => jsx(HerdPane, {})
+        render: () => jsx(MultiplayerPane, {})
       }
     ])
 

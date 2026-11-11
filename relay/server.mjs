@@ -45,7 +45,7 @@ export function createRelay({ dataDir = '', holdMs } = {}) {
 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://relay.local')
-    if (url.pathname === '/' || url.pathname === '/health') return send(res, 200, { ok: true, service: 'herd-relay' })
+    if (url.pathname === '/' || url.pathname === '/health') return send(res, 200, { ok: true, service: 'hermes-multiplayer-relay' })
     const target = route(url.pathname)
     if (!target) return send(res, 404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(req.headers.authorization)
@@ -56,7 +56,7 @@ export function createRelay({ dataDir = '', holdMs } = {}) {
       if (!exists) return send(res, 401, { error: 'Wrong key for this room.' })
       const room = open(target.roomId)
       if (!room.meta('key_hash') || !(await room.authorize(key))) return send(res, 401, { error: 'Wrong key for this room.' })
-      const out = await room.wait(Object.fromEntries(url.searchParams), String(req.headers['x-herd-member'] || ''), holdMs)
+      const out = await room.wait(Object.fromEntries(url.searchParams), String(req.headers['x-multiplayer-member'] || req.headers['x-herd-member'] || ''), holdMs)
       return send(res, out.status, out.body)
     }
     if (req.method !== 'POST') return send(res, 405, { error: 'Use POST.' })
@@ -91,6 +91,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const host = arg('host', '127.0.0.1')
   const hold = arg('hold-ms', '')
   createRelay({ dataDir: arg('data', ''), holdMs: hold ? Number(hold) : undefined }).listen(port, host, function () {
-    console.log(`herd-relay listening on http://${host}:${this.address().port}`)
+    console.log(`hermes-multiplayer-relay listening on http://${host}:${this.address().port}`)
   })
 }

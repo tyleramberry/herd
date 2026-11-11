@@ -1,7 +1,7 @@
 """Up to five gateways: the teammate list, per-teammate state, fan-out, convergence, isolation, membership.
 
 Runs in-process (stdlib only). Each gateway is a separate SQLite file; a transport routes a sync request to the
-gateway whose URL it was sent to, exactly as ``POST <url>/herd/v1/sync`` would. Tests that need the real
+gateway whose URL it was sent to, exactly as ``POST <url>/hermes-multiplayer/v1/sync`` would. Tests that need the real
 urllib path use a local HTTP stand-in instead.
 """
 import json
@@ -27,7 +27,7 @@ URL = {"tyler": "http://127.0.0.1:8640", "riley": "http://127.0.0.1:8641", "ash"
 
 
 def _roundtrip(gw, body):
-    """What ``POST /herd/v1/sync`` does on the receiving gateway, with JSON on both sides of the wire."""
+    """What ``POST /hermes-multiplayer/v1/sync`` does on the receiving gateway, with JSON on both sides of the wire."""
     with gw:
         return json.loads(json.dumps(store.handle_peer_sync(json.loads(json.dumps(body)))))
 
@@ -140,13 +140,13 @@ class TeammateListTest(_Base):
 
     def test_single_peer_config_is_teammate_one_with_its_stored_secret(self):
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "stored-secret"}})
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "stored-secret"}})
         [peer] = store.configured_peers()
         self.assertEqual((peer["name"], peer["url"], peer["key"]), ("riley", URL["riley"], "stored-secret"))
 
     def test_single_peer_config_still_shows_in_status_with_no_keys(self):
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "stored-secret"}})
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "stored-secret"}})
         st = store.status()
         self.assertEqual([p["name"] for p in st["peers"]], ["riley"])
         self.assertTrue(st["peers"][0]["has_key"])
@@ -159,8 +159,8 @@ class TeammateListTest(_Base):
             "peer_name_2": "ash", "peer_url_2": URL["ash"],
             "peer_name_3": "kai", "peer_url_3": URL["kai"],
             "peer_name_4": "noor", "peer_url_4": URL["noor"],
-            "__secrets__": {"HERD_PEER_KEY": "k-riley", "HERD_PEER_KEY_2": "k-ash",
-                            "HERD_PEER_KEY_3": "k-kai", "HERD_PEER_KEY_4": "k-noor"},
+            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-riley", "HERMES_MULTIPLAYER_PEER_KEY_2": "k-ash",
+                            "HERMES_MULTIPLAYER_PEER_KEY_3": "k-kai", "HERMES_MULTIPLAYER_PEER_KEY_4": "k-noor"},
         })
         peers = store.configured_peers()
         self.assertEqual([(p["name"], p["key"]) for p in peers],
@@ -170,8 +170,8 @@ class TeammateListTest(_Base):
     def test_peers_list_in_settings_names_its_own_secret_slot(self):
         self.with_settings({
             "display_name": "tyler",
-            "peers": [{"name": "ash", "url": URL["ash"], "key_env": "HERD_PEER_KEY_2"}],
-            "__secrets__": {"HERD_PEER_KEY_2": "k-ash"},
+            "peers": [{"name": "ash", "url": URL["ash"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_2"}],
+            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY_2": "k-ash"},
         })
         [peer] = store.configured_peers()
         self.assertEqual((peer["name"], peer["key"]), ("ash", "k-ash"))
@@ -180,8 +180,8 @@ class TeammateListTest(_Base):
         self.with_settings({
             "display_name": "tyler",
             "peer_name": "riley", "peer_url": URL["riley"],
-            "peers": [{"name": "ash", "url": URL["ash"], "key_env": "HERD_PEER_KEY_2"}],
-            "__secrets__": {"HERD_PEER_KEY": "k-riley", "HERD_PEER_KEY_2": "k-ash"},
+            "peers": [{"name": "ash", "url": URL["ash"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_2"}],
+            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-riley", "HERMES_MULTIPLAYER_PEER_KEY_2": "k-ash"},
         })
         self.assertEqual([(p["name"], p["key"]) for p in store.configured_peers()],
                          [("riley", "k-riley"), ("ash", "k-ash")])
@@ -189,8 +189,8 @@ class TeammateListTest(_Base):
     def test_a_teammate_never_gets_another_teammates_key(self):
         # Slot 2 holds ash's key. A list entry that names slot 3 must read slot 3 (empty), never slot 2.
         self.with_settings({"display_name": "tyler",
-                            "peers": [{"name": "kai", "url": URL["kai"], "key_env": "HERD_PEER_KEY_3"}],
-                            "__secrets__": {"HERD_PEER_KEY_2": "k-ash"}})
+                            "peers": [{"name": "kai", "url": URL["kai"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_3"}],
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY_2": "k-ash"}})
         [peer] = store.configured_peers()
         self.assertEqual(peer["key"], "")
         self.assertNotIn("k-ash", json.dumps(store.status()))
@@ -198,7 +198,7 @@ class TeammateListTest(_Base):
     def test_list_entry_without_a_slot_is_refused_not_guessed(self):
         self.with_settings({"display_name": "tyler",
                             "peers": [{"name": "kai", "url": URL["kai"]}],
-                            "__secrets__": {"HERD_PEER_KEY": "k-kai"}})
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-kai"}})
         self.assertEqual(store.configured_peers(), [])
         [refused] = store.refused_peers()
         self.assertIn("Hermes Multiplayer secret slot", refused["reason"])
@@ -208,11 +208,11 @@ class TeammateListTest(_Base):
             "display_name": "tyler",
             "peer_name": "riley", "peer_url": URL["riley"],
             "peers": [
-                {"name": "riley", "url": URL["ash"], "key_env": "HERD_PEER_KEY_2"},       # name taken
-                {"name": "ash", "url": URL["riley"], "key_env": "HERD_PEER_KEY_3"},       # url taken
-                {"name": "kai", "url": URL["kai"], "key_env": "HERD_PEER_KEY"},           # slot taken
-                {"name": "noor", "url": URL["noor"], "key_env": "HERD_PEER_KEY_4"},       # usable
-                {"name": "fifth", "url": "http://127.0.0.1:8650", "key_env": "HERD_PEER_KEY_5"},  # no such slot
+                {"name": "riley", "url": URL["ash"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_2"},       # name taken
+                {"name": "ash", "url": URL["riley"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_3"},       # url taken
+                {"name": "kai", "url": URL["kai"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY"},           # slot taken
+                {"name": "noor", "url": URL["noor"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY_4"},       # usable
+                {"name": "fifth", "url": "http://127.0.0.1:8650", "key_env": "HERMES_MULTIPLAYER_PEER_KEY_5"},  # no such slot
             ],
         })
         self.assertEqual([p["name"] for p in store.configured_peers()], ["riley", "noor"])
@@ -225,7 +225,7 @@ class TeammateListTest(_Base):
 
     def test_non_http_entries_are_still_silently_ignored(self):
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": "ftp://example.test",
-                            "__secrets__": {"HERD_PEER_KEY": "k"}})
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k"}})
         self.assertEqual(store.configured_peers(), [])
         self.assertEqual(store.refused_peers(), [])
         self.assertEqual(store.status()["peers"], [])
@@ -251,7 +251,7 @@ class PeerStateMigrationTest(_Base):
         db = Path(self.tmp.name) / "old.db"
         self._old_db(db)
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "k-riley"}}, db="old.db")
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-riley"}}, db="old.db")
         with store.connect() as conn:
             pk = {r[1]: r[5] for r in conn.execute("PRAGMA table_info(peer_state)")}
             row = conn.execute("SELECT name, url, push_seq, pull_seq, remote_gateway_id FROM peer_state").fetchall()
@@ -271,7 +271,7 @@ class PeerStateMigrationTest(_Base):
         conn.commit()
         conn.close()
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "k-riley"}}, db="unnamed.db")
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-riley"}}, db="unnamed.db")
         with store.connect() as conn:
             store._peer_state(conn, {"name": "riley", "url": URL["riley"]})
             rows = conn.execute("SELECT name, push_seq FROM peer_state").fetchall()
@@ -279,7 +279,7 @@ class PeerStateMigrationTest(_Base):
 
     def test_changed_url_resets_that_teammates_cursors_only(self):
         self.with_settings({"display_name": "tyler", "peer_name": "riley", "peer_url": URL["riley"],
-                            "__secrets__": {"HERD_PEER_KEY": "k"}})
+                            "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k"}})
         with store.connect() as conn:
             store._peer_state(conn, {"name": "riley", "url": URL["riley"]})
             conn.execute("UPDATE peer_state SET push_seq = 9, remote_gateway_id = 'gid' WHERE name = 'riley'")
@@ -624,7 +624,7 @@ class ChannelMembershipTest(_MeshHarness):
             three = [self.m.gid(n) for n in ("riley", "ash", "kai")]
             # Five people with a teammate of ours: self plus three known teammates is four, so a fifth
             # known person is needed to test the limit; the unknown ids below are refused before that.
-            with self.assertRaises(store.HerdError) as caught:
+            with self.assertRaises(store.MultiplayerError) as caught:
                 store.create_channel("too-many", members=[*three, "g-five", "g-six"])
             self.assertEqual(caught.exception.status, 422)
             self.assertIsNone(store.get_channel("too-many"))
@@ -637,7 +637,7 @@ class ChannelMembershipTest(_MeshHarness):
 
     def test_the_channels_route_passes_members_to_the_store(self):
         try:
-            import herd.dashboard.plugin_api as api
+            import hermes_multiplayer.dashboard.plugin_api as api
         except Exception:  # noqa: BLE001 — fastapi is a test-only dependency
             self.skipTest("fastapi not installed (pip install -r requirements-dev.txt)")
         with self.m.gw("tyler"):
@@ -648,9 +648,9 @@ class ChannelMembershipTest(_MeshHarness):
 
     def test_unknown_or_malformed_member_ids_are_refused(self):
         with self.m.gw("tyler"):
-            with self.assertRaises(store.HerdError):
+            with self.assertRaises(store.MultiplayerError):
                 store.create_channel("ghosts", members=["nobody-we-know"])
-            with self.assertRaises(store.HerdError):
+            with self.assertRaises(store.MultiplayerError):
                 store.create_channel("odd", members="riley")
             self.assertIsNone(store._clean_members(["has spaces"]))
 
@@ -708,11 +708,11 @@ class _ParallelFixture(unittest.TestCase):
         store.SYNC_TIMEOUT_S = 0.6
         store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "a.db"
         # The hanging teammate is listed first: a sequential pass would make the fast one wait for it.
-        store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {"HERD_PEER_KEY": "k-slow",
-                                                                             "HERD_PEER_KEY_2": "k-fast"},
-                                   "peers": [{"name": "slow", "url": self.urls["slow"], "key_env": "HERD_PEER_KEY"},
+        store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "k-slow",
+                                                                             "HERMES_MULTIPLAYER_PEER_KEY_2": "k-fast"},
+                                   "peers": [{"name": "slow", "url": self.urls["slow"], "key_env": "HERMES_MULTIPLAYER_PEER_KEY"},
                                              {"name": "fast", "url": self.urls["fast"],
-                                              "key_env": "HERD_PEER_KEY_2"}]}
+                                              "key_env": "HERMES_MULTIPLAYER_PEER_KEY_2"}]}
 
     def tearDown(self):
         for srv in self.servers:
@@ -740,7 +740,7 @@ class TeammateThreadScopeTest(_ParallelFixture):
 
     def test_each_teammate_thread_sees_the_callers_context(self):
         import contextvars
-        scope = contextvars.ContextVar("herd_test_scope", default="missing")
+        scope = contextvars.ContextVar("multiplayer_test_scope", default="missing")
         seen = {}
 
         def fake_sync_peer(peer, rounds=5):
@@ -758,7 +758,7 @@ class TeammateThreadScopeTest(_ParallelFixture):
         self.assertEqual([r["name"] for r in results], ["slow", "fast"])
         self.assertEqual({name: value for name, (value, _thread) in seen.items()},
                          {"slow": "profile-A", "fast": "profile-A"})
-        self.assertTrue(all(thread.startswith("herd-peer") for _value, thread in seen.values()), seen)
+        self.assertTrue(all(thread.startswith("multiplayer-peer") for _value, thread in seen.values()), seen)
 
 
 if __name__ == "__main__":

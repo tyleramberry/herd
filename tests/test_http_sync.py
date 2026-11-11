@@ -66,7 +66,7 @@ class TwoGatewaysOverHttp(unittest.TestCase):
     def use_a(self, key=KEY, url=None):
         store.DB_PATH_OVERRIDE = self.a_db
         store.SETTINGS_OVERRIDE = {"display_name": "tyler", "peer_name": "riley", "peer_url": url or self.url,
-                                   "__secrets__": {"HERD_PEER_KEY": key}}
+                                   "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": key}}
 
     def test_round_trip_over_http(self):
         self.use_a()
@@ -101,7 +101,7 @@ class TwoGatewaysOverHttp(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertIn("rejected our Hermes Multiplayer secret", res["error"])
 
-    def test_herd_not_enabled_on_peer(self):
+    def test_multiplayer_not_enabled_on_peer(self):
         self.use_a(url=self.url + "/nothing-here")
         [res] = store.sync_all()
         self.assertFalse(res["ok"])

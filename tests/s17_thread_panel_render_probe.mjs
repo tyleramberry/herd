@@ -1,5 +1,5 @@
 // S-17 thread panel render probe — imports the SHIPPED desktop/plugin.js with the plugin SDK stubbed, and calls
-// its real HerdView(), ThreadPanel() and ThreadBody(), so the render contract is checked by running the pane code
+// its real MultiplayerView(), ThreadPanel() and ThreadBody(), so the render contract is checked by running the pane code
 // (spec §2):
 //   * the route renders the channel column, the message column and, with a thread open, a right-hand panel
 //     as three siblings in that order;
@@ -65,9 +65,9 @@ const rewired = source
   .replace("from 'react/jsx-runtime'", "from './jsx-runtime.mjs'")
 if (rewired === source) throw new Error('import specifiers did not match — probe needs updating')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${rewired}\nexport { HerdView as probeHerdView, ThreadPanel as probeThreadPanel, ThreadBody as probeThreadBody, thread as probeThread }\n`)
+  `${rewired}\nexport { MultiplayerView as probeMultiplayerView, ThreadPanel as probeThreadPanel, ThreadBody as probeThreadBody, thread as probeThread }\n`)
 
-const { probeHerdView: HerdView, probeThreadPanel: ThreadPanel, probeThreadBody: ThreadBody,
+const { probeMultiplayerView: MultiplayerView, probeThreadPanel: ThreadPanel, probeThreadBody: ThreadBody,
   probeThread: thread } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 const { queries } = await import(pathToFileURL(join(work, 'sdk.mjs')).href)
 
@@ -115,12 +115,12 @@ const REPLY_B = { id: 'b1', channel_id: 'general', author_name: 'kai', author_ty
 queries.thread = { r1: { data: { parent: ROOT, replies: [REPLY_A, REPLY_B] }, isLoading: false, isError: false } }
 queries.channels = { data: [CH], isLoading: false, isError: false }
 queries.status = { data: { self: { gateway_id: 'me', display_name: 'tyler' }, peers: [], refused: [],
-  incoming: [], herd_secret_set: true }, isLoading: false, isError: false, isSuccess: true }
+  incoming: [], multiplayer_secret_set: true }, isLoading: false, isError: false, isSuccess: true }
 queries.participants = { data: [], isLoading: false, isError: false }
 
 // 1. The route with a thread open: channel column, message column, then the panel, in that order.
 thread.page.set('r1')
-const route = HerdView({ compact: false })
+const route = MultiplayerView({ compact: false })
 const row = findAll(route, n => Array.isArray(n.props.children) && n.props.children.some(c => c && c.type === 'ChannelList'))[0]
 const kinds = row ? row.props.children.filter(Boolean).map(c => c.type) : []
 check('route row: ChannelList, MessageView, ThreadPanel in order', kinds, ['ChannelList', 'MessageView', 'ThreadPanel'])
@@ -165,7 +165,7 @@ check('thread body: root message is the parent', rows[0] && rows[0].props.messag
 
 // 4. The compact pane keeps the thread in its column: no side panel there, and the column becomes the thread.
 thread.pane.set('r1')
-const pane = HerdView({ compact: true })
+const pane = MultiplayerView({ compact: true })
 check('compact pane renders no side panel', findAll(pane, n => n.type === 'ThreadPanel').length, 0)
 const paneRow = findAll(pane, n => Array.isArray(n.props.children) && n.props.children.some(c => c && c.type === 'ChannelList'))[0]
 const paneMessage = paneRow && paneRow.props.children.find(c => c && c.type === 'MessageView')
@@ -174,7 +174,7 @@ thread.pane.set(null)
 
 // 5. No open thread: the route has no panel at all.
 thread.page.set(null)
-const plain = HerdView({ compact: false })
+const plain = MultiplayerView({ compact: false })
 check('no open thread, no panel', findAll(plain, n => n.type === 'ThreadPanel').length, 0)
 
 console.log(failures.length ? `\nPROBE FAIL (${failures.length}): ${failures.join(', ')}` : '\nPROBE OK')

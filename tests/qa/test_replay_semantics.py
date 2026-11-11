@@ -21,7 +21,7 @@ _, store, _tools = _pkg.load()
 class ReplaySemanticsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name) / "herd.db"
+        self.db = Path(self.tmp.name) / "hermes-multiplayer.db"
         self.settings = {"display_name": "tyler", "__secrets__": {}}
         store.DB_PATH_OVERRIDE = self.db
         store.SETTINGS_OVERRIDE = self.settings
@@ -54,7 +54,7 @@ class ReplaySemanticsTest(unittest.TestCase):
     def test_cross_channel_replay_is_refused(self):
         store.post_message("general", "in general", message_id="shared-id")
         store.create_channel("beta")
-        with self.assertRaises(store.HerdError) as caught:
+        with self.assertRaises(store.MultiplayerError) as caught:
             store.post_message("beta", "in beta", message_id="shared-id")
         self.assertEqual(caught.exception.status, 409)
         # Neither channel gained a row from the refused replay.

@@ -9,18 +9,18 @@ re-run by anyone with one command.
 Topology (one machine, two processes, four loopback ports, nothing shared):
 
     gateway A (q11-a)                         gateway B (q11-b)
-      :P_peer  /herd/v1/sync   <---3s loop---  :Q_peer  /herd/v1/sync
-      :P_api   /api/plugins/herd/*             :Q_api   /api/plugins/herd/*
-      <tmp>/a/herd.db                          <tmp>/b/herd.db
+      :P_peer  /hermes-multiplayer/v1/sync   <---3s loop---  :Q_peer  /hermes-multiplayer/v1/sync
+      :P_api   /api/plugins/hermes-multiplayer/*             :Q_api   /api/plugins/hermes-multiplayer/*
+      <tmp>/a/hermes-multiplayer.db                          <tmp>/b/hermes-multiplayer.db
 
-Each side runs the plugin's own code: ``herd._wire_api_server`` (the peer route + the real 3 s
-background sync loop, behind Hermes Multiplayer's OWN ``Bearer <HERD_SECRET>`` check — the gateway's Hermes Multiplayer
-secret, never its API_SERVER_KEY, which is refused on /herd/v1/*) and ``dashboard/plugin_api.py`` (the FastAPI backend the desktop half calls).
+Each side runs the plugin's own code: ``hermes_multiplayer._wire_api_server`` (the peer route + the real 3 s
+background sync loop, behind Hermes Multiplayer's OWN ``Bearer <HERMES_MULTIPLAYER_SECRET>`` check — the gateway's Hermes Multiplayer
+secret, never its API_SERVER_KEY, which is refused on /hermes-multiplayer/v1/*) and ``dashboard/plugin_api.py`` (the FastAPI backend the desktop half calls).
 B is spawned first with no peer (the README's one-sided link); A links to B.
 
 One harness-only route, ``POST /harness/agent-post`` on each gateway's peer app (never in plugin
-code): it runs the same own-key check and calls ``tools.herd_post`` — the exact handler Hermes
-invokes for the ``herd_post`` agent tool — in-process. The backend composer route deliberately
+code): it runs the same own-key check and calls ``tools.multiplayer_post`` — the exact handler Hermes
+invokes for the ``multiplayer_post`` agent tool — in-process. The backend composer route deliberately
 hardcodes ``author_type="human"`` (an HTTP client must not be able to forge agent posts), so this
 is how TC-2.3 / S-16 get a row authored by the agent path. Every cross-gateway hop is still real
 HTTP + the real sync loop + real SQLite.
@@ -55,17 +55,17 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PEER_PATH = "/herd/v1/sync"
-API_PREFIX = "/api/plugins/herd"
+PEER_PATH = "/hermes-multiplayer/v1/sync"
+API_PREFIX = "/api/plugins/hermes-multiplayer"
 AGENT_POST_PATH = "/harness/agent-post"
 CHANNEL = "general"
 NAME_A, NAME_B = "q11-a", "q11-b"
 KEY_A = "q11-a-api-server-key"
 KEY_B = "q11-b-api-server-key"
-# Each gateway's own Hermes Multiplayer secret (HERD_SECRET): what a peer must present on /herd/v1/*. The
+# Each gateway's own Hermes Multiplayer secret (HERMES_MULTIPLAYER_SECRET): what a peer must present on /hermes-multiplayer/v1/*. The
 # API_SERVER_KEYs above only guard StubAdapter / the harness-only agent-post route.
-SECRET_A = "q11-a-herd-secret"
-SECRET_B = "q11-b-herd-secret"
+SECRET_A = "q11-a-mp-secret"
+SECRET_B = "q11-b-mp-secret"
 ARRIVAL_TIMEOUT_S = 10.0
 S16_TASK_IDS = ("t_16d10f75", "t_2f22ab63", "t_810b8329")
 FALLBACK_OLD_REF = "a20f742^"
@@ -138,29 +138,29 @@ def wait_up(url: str, key: str, seconds: float = 30.0) -> bool:
 def gateway_main() -> int:
     """Run ONE gateway: the plugin's peer route + sync loop, its backend router, + the harness route."""
     sys.path.insert(0, str(ROOT / "tests"))
-    import _pkg  # noqa: E402  (test loader: imports the repo root as the `herd` package)
+    import _pkg  # noqa: E402  (test loader: imports the repo root as the `hermes_multiplayer` package)
 
-    herd, store, tools = _pkg.load()
+    hermes_multiplayer, store, tools = _pkg.load()
 
-    home = Path(os.environ["HERD_GW_HOME"])
+    home = Path(os.environ["MP_GW_HOME"])
     home.mkdir(parents=True, exist_ok=True)
-    store.DB_PATH_OVERRIDE = home / "herd.db"
+    store.DB_PATH_OVERRIDE = home / "hermes-multiplayer.db"
     store.SETTINGS_OVERRIDE = {
-        "display_name": os.environ["HERD_GW_NAME"],
-        "peer_name": os.environ.get("HERD_GW_PEER_NAME", ""),
-        "peer_url": os.environ.get("HERD_GW_PEER_URL", ""),
-        "__secrets__": {"HERD_PEER_KEY": os.environ.get("HERD_GW_PEER_KEY", ""),
-                        "HERD_SECRET": os.environ.get("HERD_GW_SECRET", "")},
+        "display_name": os.environ["MP_GW_NAME"],
+        "peer_name": os.environ.get("MP_GW_PEER_NAME", ""),
+        "peer_url": os.environ.get("MP_GW_PEER_URL", ""),
+        "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": os.environ.get("MP_GW_PEER_KEY", ""),
+                        "HERMES_MULTIPLAYER_SECRET": os.environ.get("MP_GW_SECRET", "")},
     }
     store.AUTO_SYNC = True
-    own_key = os.environ["HERD_GW_KEY"]
-    peer_port = int(os.environ["HERD_GW_PEER_PORT"])
-    api_port = int(os.environ["HERD_GW_API_PORT"])
+    own_key = os.environ["MP_GW_KEY"]
+    peer_port = int(os.environ["MP_GW_PEER_PORT"])
+    api_port = int(os.environ["MP_GW_API_PORT"])
 
     from aiohttp import web
     from fastapi import FastAPI
 
-    from herd.dashboard import plugin_api
+    from hermes_multiplayer.dashboard import plugin_api
 
     class StubAdapter:
         """Stands in for the Hermes api_server adapter: the same Bearer key check."""
@@ -172,7 +172,7 @@ def gateway_main() -> int:
 
     adapter = StubAdapter()
     peer_app = web.Application()
-    herd._wire_api_server(peer_app, adapter)
+    hermes_multiplayer._wire_api_server(peer_app, adapter)
 
     async def harness_agent_post(request: "web.Request") -> "web.Response":
         # HARNESS-ONLY: the plugin's real agent tool handler, invoked in-process. The backend
@@ -187,7 +187,7 @@ def gateway_main() -> int:
         args = {"channel": body.get("channel") or CHANNEL,
                 "content": body.get("content") or "",
                 "task_id": body.get("task_id")}
-        out = await asyncio.to_thread(tools.herd_post, args)  # returns a JSON *string*
+        out = await asyncio.to_thread(tools.multiplayer_post, args)  # returns a JSON *string*
         return web.json_response({"tool_result": out})
 
     peer_app.router.add_post(AGENT_POST_PATH, harness_agent_post)
@@ -222,7 +222,7 @@ def gateway_main() -> int:
 class Run:
     def __init__(self, keep: bool):
         self.keep = keep
-        self.tmp = Path(tempfile.mkdtemp(prefix="herd-q11-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="mp-q11-"))
         self.procs: list[subprocess.Popen] = []
         self.logs: list = []
 
@@ -231,10 +231,10 @@ class Run:
         home = self.tmp / short
         peer_port, api_port = free_port(), free_port()
         env = dict(os.environ,
-                   HERD_GW_HOME=str(home), HERD_GW_NAME=name, HERD_GW_PEER_NAME=peer_name,
-                   HERD_GW_PEER_URL=peer_url, HERD_GW_PEER_KEY=peer_key, HERD_GW_KEY=own_key,
-                   HERD_GW_SECRET=own_secret,
-                   HERD_GW_PEER_PORT=str(peer_port), HERD_GW_API_PORT=str(api_port),
+                   MP_GW_HOME=str(home), MP_GW_NAME=name, MP_GW_PEER_NAME=peer_name,
+                   MP_GW_PEER_URL=peer_url, MP_GW_PEER_KEY=peer_key, MP_GW_KEY=own_key,
+                   MP_GW_SECRET=own_secret,
+                   MP_GW_PEER_PORT=str(peer_port), MP_GW_API_PORT=str(api_port),
                    # Isolate each gateway from the operator's real ~/.hermes.
                    HERMES_HOME=str(home / "hermes-home"),
                    PYTHONPATH="")
@@ -273,7 +273,7 @@ class Run:
 
 def ping(gw: dict) -> tuple[int, dict]:
     # Calling a gateway's OWN peer route needs its OWN Hermes Multiplayer secret (not its API_SERVER_KEY).
-    status, body = http("GET", gw["peer"] + "/herd/v1/ping", key=gw["secret"])
+    status, body = http("GET", gw["peer"] + "/hermes-multiplayer/v1/ping", key=gw["secret"])
     return status, (body or {})
 
 
@@ -384,7 +384,7 @@ def resolve_old_ref(override: str | None) -> str:
         return override
     try:
         out = subprocess.check_output(
-            ["git", "-C", str(ROOT), "log", "--format=%H", "-S", "task_id", "--", "dashboard/herd_store.py"],
+            ["git", "-C", str(ROOT), "log", "--format=%H", "-S", "task_id", "--", "dashboard/multiplayer_store.py"],
             stderr=subprocess.DEVNULL).decode().split()
         if out:
             return out[-1] + "^"   # oldest commit that changed the task_id count = the introducer
@@ -396,14 +396,14 @@ def resolve_old_ref(override: str | None) -> str:
 def old_peer_check(a: dict, ref: str, task_ids: list[str]) -> None:
     row = "S-16.pre-change peer ingests the new payload"
     try:
-        source = subprocess.check_output(["git", "-C", str(ROOT), "show", f"{ref}:dashboard/herd_store.py"],
+        source = subprocess.check_output(["git", "-C", str(ROOT), "show", f"{ref}:dashboard/multiplayer_store.py"],
                                          stderr=subprocess.PIPE).decode()
         sha = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--short", ref],
                                       stderr=subprocess.DEVNULL).decode().strip()
     except Exception as exc:  # noqa: BLE001
-        check(row, False, f"could not read {ref}:dashboard/herd_store.py ({exc.__class__.__name__})")
+        check(row, False, f"could not read {ref}:dashboard/multiplayer_store.py ({exc.__class__.__name__})")
         return
-    info(f"pre-change ref {ref} = {sha}; task_id occurrences in its herd_store.py: "
+    info(f"pre-change ref {ref} = {sha}; task_id occurrences in its multiplayer_store.py: "
          f"{source.count('task_id')}")
     if "task_id" in source:
         check(row, False, f"ref {ref} is not pre-change — it already knows task_id")
@@ -423,11 +423,11 @@ def old_peer_check(a: dict, ref: str, task_ids: list[str]) -> None:
                           "(the check would prove nothing)")
         return
 
-    tmp = Path(tempfile.mkdtemp(prefix="herd-q11-prechange-"))
+    tmp = Path(tempfile.mkdtemp(prefix="mp-q11-prechange-"))
     try:
-        path = tmp / "herd_store_prechange.py"
+        path = tmp / "multiplayer_store_prechange.py"
         path.write_text(source)
-        spec = importlib.util.spec_from_file_location("herd_store_prechange", path)
+        spec = importlib.util.spec_from_file_location("multiplayer_store_prechange", path)
         old = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(old)
         old.DB_PATH_OVERRIDE = tmp / "prechange.db"
@@ -483,11 +483,11 @@ def old_peer_check(a: dict, ref: str, task_ids: list[str]) -> None:
 def read_peer_state(home: Path) -> list[dict]:
     """After the gateways stop: A's peer_state cursors (not exposed by GET /status)."""
     try:
-        path = ROOT / "dashboard" / "herd_store.py"
-        spec = importlib.util.spec_from_file_location("herd_store_peerstate_reader", path)
+        path = ROOT / "dashboard" / "multiplayer_store.py"
+        spec = importlib.util.spec_from_file_location("multiplayer_store_peerstate_reader", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        mod.DB_PATH_OVERRIDE = home / "herd.db"
+        mod.DB_PATH_OVERRIDE = home / "hermes-multiplayer.db"
         mod.SETTINGS_OVERRIDE = {"__secrets__": {}}
         mod.AUTO_SYNC = False
         with mod.connect() as conn:
@@ -522,8 +522,8 @@ def main() -> int:
         a = run.spawn(NAME_A, "a", KEY_A, NAME_B, b["peer"], SECRET_B, own_secret=SECRET_A)
         if not (wait_up(a["api"] + API_PREFIX + "/status", "", 40)
                 and wait_up(b["api"] + API_PREFIX + "/status", "", 40)
-                and wait_up(a["peer"] + "/herd/v1/ping", a["secret"], 20)
-                and wait_up(b["peer"] + "/herd/v1/ping", b["secret"], 20)):
+                and wait_up(a["peer"] + "/hermes-multiplayer/v1/ping", a["secret"], 20)
+                and wait_up(b["peer"] + "/hermes-multiplayer/v1/ping", b["secret"], 20)):
             print("  gateway failed to start; log tails:")
             for gw in (a, b):
                 gw["log"].flush()
@@ -543,18 +543,18 @@ def main() -> int:
         b["gateway_id"] = (ping_b.get("from") or {}).get("gateway_id", "")
         check("ENV.healthy", sa == 200 and sb == 200 and pa == 200 and pb == 200
               and bool(a["gateway_id"]) and bool(b["gateway_id"]),
-              f"/status A={sa} B={sb}; /herd/v1/ping A={pa} B={pb}; "
+              f"/status A={sa} B={sb}; /hermes-multiplayer/v1/ping A={pa} B={pb}; "
               f"A.gateway_id={a['gateway_id']} B.gateway_id={b['gateway_id']} v={ping_a.get('v')}")
         check("ENV.settings", (ping_a.get("from") or {}).get("display_name") == NAME_A,
               f"A ping display_name={(ping_a.get('from') or {}).get('display_name')!r} (spawned as {NAME_A!r})")
         # S-20: the gateway's API_SERVER_KEY must NOT open Hermes Multiplayer's peer routes (only its Hermes Multiplayer secret does).
-        ka, kbody_a = http("GET", a["peer"] + "/herd/v1/ping", key=a["key"])
-        kb, kbody_b = http("GET", b["peer"] + "/herd/v1/ping", key=b["key"])
+        ka, kbody_a = http("GET", a["peer"] + "/hermes-multiplayer/v1/ping", key=a["key"])
+        kb, kbody_b = http("GET", b["peer"] + "/hermes-multiplayer/v1/ping", key=b["key"])
         codes = [((body or {}).get("error") or {}).get("code") if isinstance((body or {}).get("error"), dict)
                  else None for body in (kbody_a, kbody_b)]
         check("ENV.gateway-key-refused", ka == 401 and kb == 401
               and codes == ["gateway_auth_failed", "gateway_auth_failed"],
-              f"/herd/v1/ping with API_SERVER_KEY: A={ka} B={kb}; error.code={codes}")
+              f"/hermes-multiplayer/v1/ping with API_SERVER_KEY: A={ka} B={kb}; error.code={codes}")
 
         # --- TC-2.1 A->B ---------------------------------------------------------
         print("\n-- TC-2.1  A -> B (human, A's composer route; read on B) --")
@@ -596,7 +596,7 @@ def main() -> int:
               f"landed={sum(oks)}/3 in-order-on-A={in_order(a, ids)}")
 
         # --- TC-2.3 agent on A -> B ---------------------------------------------
-        print("\n-- TC-2.3  agent on A (tools.herd_post in-process) -> read on B --")
+        print("\n-- TC-2.3  agent on A (tools.multiplayer_post in-process) -> read on B --")
         ids = []
         oks = []
         for i in (1, 2, 3):

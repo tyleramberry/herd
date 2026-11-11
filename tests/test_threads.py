@@ -22,7 +22,7 @@ class Gateway:
         self.settings = {"display_name": name, "__secrets__": {}}
         if peer:
             self.settings.update({"peer_name": peer, "peer_url": "http://127.0.0.1:8642"})  # loopback: allowed by the default cleartext policy
-            self.settings["__secrets__"]["HERD_PEER_KEY"] = "k-" + peer
+            self.settings["__secrets__"]["HERMES_MULTIPLAYER_PEER_KEY"] = "k-" + peer
 
     def __enter__(self):
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE)
@@ -111,15 +111,15 @@ class StorageTest(ThreadBase):
 
     def test_unknown_parent_is_404(self):
         with self.A:
-            with self.assertRaises(store.HerdError) as e:
+            with self.assertRaises(store.MultiplayerError) as e:
                 store.post_message("general", "x", thread_parent_id="nope")
             self.assertEqual(e.exception.status, 404)
             self.assertIn("No message with id 'nope' to reply to.", e.exception.message)
-            with self.assertRaises(store.HerdError) as e:
+            with self.assertRaises(store.MultiplayerError) as e:
                 store.list_thread("nope")
             self.assertEqual(e.exception.status, 404)
             long_id = "z" * 500
-            with self.assertRaises(store.HerdError) as e:
+            with self.assertRaises(store.MultiplayerError) as e:
                 store.post_message("general", "x", thread_parent_id=long_id)
             self.assertLess(len(e.exception.message), 200)
 
@@ -127,7 +127,7 @@ class StorageTest(ThreadBase):
         with self.A:
             store.create_channel("design")
             parent = store.post_message("design", "over there")
-            with self.assertRaises(store.HerdError) as e:
+            with self.assertRaises(store.MultiplayerError) as e:
                 store.post_message("general", "x", thread_parent_id=parent["id"])
             self.assertEqual(e.exception.status, 422)
             self.assertEqual(e.exception.message, "You can only reply in a thread within the same channel.")
@@ -274,7 +274,7 @@ class ApiTest(ThreadBase):
         spec_path = _pkg.ROOT / "dashboard" / "plugin_api.py"
         import importlib.util
 
-        spec = importlib.util.spec_from_file_location("herd.dashboard.plugin_api", spec_path)
+        spec = importlib.util.spec_from_file_location("hermes_multiplayer.dashboard.plugin_api", spec_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         app = FastAPI()
@@ -331,37 +331,37 @@ class ToolsTest(ThreadBase):
         self.A.__exit__(None, None, None)
         super().tearDown()
 
-    def test_herd_post_reply_to(self):
+    def test_multiplayer_post_reply_to(self):
         parent = store.post_message("general", "task?")
-        out = json.loads(tools.herd_post({"reply_to": parent["id"], "content": "done"}))
+        out = json.loads(tools.multiplayer_post({"reply_to": parent["id"], "content": "done"}))
         self.assertTrue(out["ok"], out)
         reply = store.get_message(out["message"]["id"])
         self.assertEqual(reply["thread_parent_id"], parent["id"])
         self.assertEqual(reply["author_type"], "agent")
-        out2 = json.loads(tools.herd_post({"channel": "#general", "reply_to": parent["id"], "content": "again"}))
+        out2 = json.loads(tools.multiplayer_post({"channel": "#general", "reply_to": parent["id"], "content": "again"}))
         self.assertTrue(out2["ok"], out2)
 
-    def test_herd_post_reply_to_unknown(self):
-        out = json.loads(tools.herd_post({"reply_to": "ghost", "content": "x"}))
+    def test_multiplayer_post_reply_to_unknown(self):
+        out = json.loads(tools.multiplayer_post({"reply_to": "ghost", "content": "x"}))
         self.assertEqual(out, {"ok": False, "error": "No message with id 'ghost' to reply to."})
 
-    def test_herd_post_reply_to_disagreeing_channel(self):
+    def test_multiplayer_post_reply_to_disagreeing_channel(self):
         store.create_channel("design")
         parent = store.post_message("general", "p")
-        out = json.loads(tools.herd_post({"channel": "design", "reply_to": parent["id"], "content": "x"}))
+        out = json.loads(tools.multiplayer_post({"channel": "design", "reply_to": parent["id"], "content": "x"}))
         self.assertEqual(out, {"ok": False, "error": "That message is in a different channel."})
 
-    def test_herd_post_still_requires_channel_without_reply_to(self):
-        out = json.loads(tools.herd_post({"content": "x"}))
+    def test_multiplayer_post_still_requires_channel_without_reply_to(self):
+        out = json.loads(tools.multiplayer_post({"content": "x"}))
         self.assertFalse(out["ok"])
 
     def test_read_channel_has_id_and_replies_and_thread(self):
         parent = store.post_message("general", "p")
         store.post_message("general", "r1", thread_parent_id=parent["id"])
-        read = json.loads(tools.herd_read_channel({"channel": "general"}))
+        read = json.loads(tools.multiplayer_read_channel({"channel": "general"}))
         [m] = read["messages"]
         self.assertEqual((m["id"], m["replies"], m["text"]), (parent["id"], 1, "p"))
-        thread = json.loads(tools.herd_read_channel({"channel": "general", "thread": parent["id"]}))
+        thread = json.loads(tools.multiplayer_read_channel({"channel": "general", "thread": parent["id"]}))
         self.assertTrue(thread["ok"])
         self.assertNotIn("messages", thread)
         self.assertEqual(thread["thread"]["parent"]["id"], parent["id"])
@@ -372,15 +372,15 @@ class ToolsTest(ThreadBase):
             self.assertIn(key, r)
 
     def test_read_thread_unknown(self):
-        out = json.loads(tools.herd_read_channel({"channel": "general", "thread": "ghost"}))
+        out = json.loads(tools.multiplayer_read_channel({"channel": "general", "thread": "ghost"}))
         self.assertFalse(out["ok"])
 
     def test_schemas_document_new_params(self):
-        from herd import schemas
+        from hermes_multiplayer import schemas
 
-        self.assertIn("reply_to", schemas.HERD_POST["parameters"]["properties"])
-        self.assertIn("thread", schemas.HERD_READ_CHANNEL["parameters"]["properties"])
-        self.assertNotIn("reply_to", schemas.HERD_POST["parameters"].get("required", []))
+        self.assertIn("reply_to", schemas.MULTIPLAYER_POST["parameters"]["properties"])
+        self.assertIn("thread", schemas.MULTIPLAYER_READ_CHANNEL["parameters"]["properties"])
+        self.assertNotIn("reply_to", schemas.MULTIPLAYER_POST["parameters"].get("required", []))
 
 
 if __name__ == "__main__":

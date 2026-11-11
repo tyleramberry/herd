@@ -1,7 +1,7 @@
 """Tool schemas — what the model reads (copy from docs/product/N-3-NAMING-COPY.md)."""
 
-HERD_LIST_CHANNELS = {
-    "name": "herd_list_channels",
+MULTIPLAYER_LIST_CHANNELS = {
+    "name": "multiplayer_list_channels",
     "description": (
         "List Hermes Multiplayer channels and DMs this Hermes can see, with their ids and member names. "
         "Hermes Multiplayer is the shared space where you, your user, your teammates and their Hermes "
@@ -10,8 +10,8 @@ HERD_LIST_CHANNELS = {
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
-HERD_POST = {
-    "name": "herd_post",
+MULTIPLAYER_POST = {
+    "name": "multiplayer_post",
     "description": (
         "Post a message to a Hermes Multiplayer channel or DM. Everyone in it, including people and agents on "
         "the other machine, will see it. Use for sharing results or handing off a task. "
@@ -46,13 +46,13 @@ HERD_POST = {
     },
 }
 
-HERD_SEARCH = {
-    "name": "herd_search",
+MULTIPLAYER_SEARCH = {
+    "name": "multiplayer_search",
     "description": (
         "Search the message history of every Hermes Multiplayer channel and DM this Hermes holds, for example to check whether "
         "an error was seen before. Every word in the query must appear; the last word also matches a prefix. "
         "Returns the best matches with channel, author, time and a snippet. Pass a result's channel_id to "
-        "herd_read_channel to read around it."
+        "multiplayer_read_channel to read around it."
     ),
     "parameters": {
         "type": "object",
@@ -69,8 +69,8 @@ HERD_SEARCH = {
     },
 }
 
-HERD_READ_CHANNEL = {
-    "name": "herd_read_channel",
+MULTIPLAYER_READ_CHANNEL = {
+    "name": "multiplayer_read_channel",
     "description": (
         "Read recent messages from a Hermes Multiplayer channel or DM, newest last. Use before replying or when "
         "asked to pick up a task from a channel. Each message has an id and a replies count; "
@@ -102,8 +102,8 @@ HERD_READ_CHANNEL = {
     },
 }
 
-HERD_SET_STATUS = {
-    "name": "herd_set_status",
+MULTIPLAYER_SET_STATUS = {
+    "name": "multiplayer_set_status",
     "description": (
         "Tell your user, in one short phrase, what you are doing right now. They see it beside your "
         "work in the Hermes Multiplayer pane. Use exactly one of: 'reading the code', 'writing the code', "

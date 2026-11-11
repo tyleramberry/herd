@@ -81,7 +81,7 @@ class PeerRedirectSecurity(unittest.TestCase):
     def test_no_plain_urlopen_fallback_remains(self):
         # The fallback existed only to survive a failed core import; no core import and no
         # unguarded opener should be left (this also clears the validator's rule-9 WARN).
-        source = (Path(__file__).resolve().parent.parent / "dashboard" / "herd_store.py").read_text()
+        source = (Path(__file__).resolve().parent.parent / "dashboard" / "multiplayer_store.py").read_text()
         self.assertNotIn("urllib_security", source)
         self.assertNotIn("urllib.request.urlopen", source)
         self.assertIn("build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open", source)

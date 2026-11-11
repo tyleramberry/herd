@@ -241,7 +241,7 @@ class DmExportScopeTest(unittest.TestCase):
         with self.A:
             a_ident = store.identity()
         self.B.settings.update({"peer_name": "ash", "peer_url": "http://127.0.0.1:8642"})
-        self.B.settings["__secrets__"]["HERD_PEER_KEY"] = "k-ash"
+        self.B.settings["__secrets__"]["HERMES_MULTIPLAYER_PEER_KEY"] = "k-ash"
         sent = []
 
         def recording(peer, body):

@@ -38,9 +38,9 @@ class ThreadPanelProbeTest(unittest.TestCase):
 
 class ThreadPanelSourceTest(unittest.TestCase):
     def test_route_renders_the_panel_and_the_compact_pane_does_not(self):
-        herd_view = _function_body("HerdView")
-        self.assertIn("!compact && threadId && selected", herd_view)
-        self.assertIn("jsx(ThreadPanel, { channel: selected, rootId: threadId, selfId, $thread }", herd_view)
+        multiplayer_view = _function_body("MultiplayerView")
+        self.assertIn("!compact && threadId && selected", multiplayer_view)
+        self.assertIn("jsx(ThreadPanel, { channel: selected, rootId: threadId, selfId, $thread }", multiplayer_view)
         self.assertIn("if (openThreadId && compact) {", SOURCE)  # the compact pane keeps its in-column thread
 
     def test_panel_width_is_a_share_of_the_row(self):

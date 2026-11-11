@@ -1,6 +1,6 @@
 // Hermes Multiplayer team room: the logic of the relay, with no dependency on where it runs.
 //
-// A room speaks the same sync exchange a Hermes Multiplayer gateway does (dashboard/herd_store.py, handle_peer_sync): a
+// A room speaks the same sync exchange a Hermes Multiplayer gateway does (dashboard/multiplayer_store.py, handle_peer_sync): a
 // member POSTs what it wrote plus its cursors, and gets back what the others wrote. The room keeps every row,
 // so members never need to reach each other, and a message written while a teammate is offline waits here.
 //
@@ -160,7 +160,7 @@ export class Room {
   /** The room belongs to the first key that reaches it; after that, only that key opens it. */
   async authorize(key) {
     if (!validKey(key)) return false
-    const hash = await sha256Hex(`herd-room:${this.roomId}:${key}`)
+    const hash = await sha256Hex(`hermes-multiplayer-room:${this.roomId}:${key}`)
     const known = this.meta('key_hash')
     if (!known) {
       this.setMeta('key_hash', hash)
@@ -174,7 +174,7 @@ export class Room {
   async admit(gatewayId, name, token, create) {
     if (!ID_RE.test(String(gatewayId || ''))) return 422
     if (typeof token !== 'string' || token.length < 16 || token.length > 200) return 401
-    const hash = await sha256Hex(`herd-member:${gatewayId}:${token}`)
+    const hash = await sha256Hex(`hermes-multiplayer-member:${gatewayId}:${token}`)
     const row = this.db.all('SELECT name, token_hash, last_seen FROM members WHERE gateway_id = ?', gatewayId)[0]
     const now = this.now()
     if (!row) {
@@ -413,7 +413,7 @@ export class Room {
     }
   }
 
-  /** POST /herd/v1/sync. Returns `{status, body}`. The caller has already checked the room key. */
+  /** POST /hermes-multiplayer/v1/sync. Returns `{status, body}`. The caller has already checked the room key. */
   async sync(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return fail(422, 'Body must be a JSON object.')
     const from = body.from && typeof body.from === 'object' ? body.from : {}
@@ -474,7 +474,7 @@ export class Room {
     return { status: 200, body: { changed, alone: others === 0, ev: this.ev } }
   }
 
-  /** GET /herd/v1/wait: answer at once when there is news (or nobody else is here), else hold for a while. */
+  /** GET /hermes-multiplayer/v1/wait: answer at once when there is news (or nobody else is here), else hold for a while. */
   async wait(query, token, holdMs = WAIT_HOLD_MS) {
     const first = await this.waitState(query, token)
     if (first.status !== 200 || first.body.changed || first.body.alone) return first
@@ -494,9 +494,9 @@ const ADMIT_ERRORS = {
 }
 const fail = (status, message) => ({ status, body: { error: message } })
 
-/** Parse `/r/<room>/herd/v1/<action>`; null when the path is something else. */
+/** Parse `/r/<room>/hermes-multiplayer/v1/<action>`; null when the path is something else. */
 export function route(pathname) {
-  const match = /^\/r\/([A-Za-z0-9_-]{8,64})\/herd\/v1\/(sync|wait)$/.exec(pathname)
+  const match = /^\/r\/([A-Za-z0-9_-]{8,64})\/(?:hermes-multiplayer|herd)\/v1\/(sync|wait)$/.exec(pathname)
   return match ? { roomId: match[1], action: match[2] } : null
 }
 

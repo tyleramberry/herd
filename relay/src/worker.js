@@ -4,7 +4,7 @@ import { MAX_BODY_BYTES, Room, bearer, route, validKey } from './core.js'
 
 const json = (status, body) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
 
-export class HerdRoom extends DurableObject {
+export class MultiplayerRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
     const sql = ctx.storage.sql
@@ -34,7 +34,7 @@ export class HerdRoom extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (url.pathname === '/' || url.pathname === '/health') return json(200, { ok: true, service: 'herd-relay' })
+    if (url.pathname === '/' || url.pathname === '/health') return json(200, { ok: true, service: 'hermes-multiplayer-relay' })
     const target = route(url.pathname)
     if (!target) return json(404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(request.headers.get('Authorization'))
@@ -42,7 +42,7 @@ export default {
     const stub = env.ROOMS.get(env.ROOMS.idFromName(target.roomId))
     if (target.action === 'wait') {
       if (request.method !== 'GET') return json(405, { error: 'Use GET.' })
-      const out = await stub.wait(target.roomId, key, request.headers.get('X-Herd-Member') || '',
+      const out = await stub.wait(target.roomId, key, request.headers.get('X-Multiplayer-Member') || request.headers.get('X-Herd-Member') || '',
         Object.fromEntries(url.searchParams))
       return json(out.status, out.body)
     }

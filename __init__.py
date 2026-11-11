@@ -1,9 +1,9 @@
 """Hermes Multiplayer — multiplayer Hermes. Agent-side registration.
 
-* Four agent tools (``herd_list_channels``, ``herd_post``, ``herd_read_channel``, ``herd_set_status``).
-* The peer endpoints ``POST /herd/v1/sync`` and ``GET /herd/v1/ping`` on this gateway's
+* Four agent tools (``multiplayer_list_channels``, ``multiplayer_post``, ``multiplayer_read_channel``, ``multiplayer_set_status``).
+* The peer endpoints ``POST /hermes-multiplayer/v1/sync`` and ``GET /hermes-multiplayer/v1/ping`` on this gateway's
   ``api_server``, authenticated with Hermes Multiplayer's OWN credential: this gateway's Hermes Multiplayer secret
-  (``HERD_SECRET``), never the gateway-wide ``API_SERVER_KEY``. Plus a background sync loop that
+  (``HERMES_MULTIPLAYER_SECRET``), never the gateway-wide ``API_SERVER_KEY``. Plus a background sync loop that
   keeps this gateway and its configured teammates (up to four) converged.
 """
 
@@ -21,9 +21,9 @@ SYNC_INTERVAL_S = 3.0
 
 
 def _store():
-    from .dashboard import herd_store
+    from .dashboard import multiplayer_store
 
-    return herd_store
+    return multiplayer_store
 
 
 def _sync_pass(store) -> None:
@@ -46,7 +46,7 @@ def _sync_pass(store) -> None:
         token = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
         reset = reset_secret_scope
     except Exception:  # noqa: BLE001 — scope is an enhancement, never a hard requirement
-        logger.debug("herd: profile secret scope unavailable for the sync loop", exc_info=True)
+        logger.debug("hermes-multiplayer: profile secret scope unavailable for the sync loop", exc_info=True)
     try:
         store.sync_all()
     finally:
@@ -67,13 +67,13 @@ def _wire_api_server(app, adapter) -> None:
         store = _store()
         if store.inbound_authorized(request.headers.get("Authorization")):
             return None
-        message = "Invalid Hermes Multiplayer secret (HERD_SECRET)" if store.herd_secret_set() else store.NO_LOCAL_SECRET
+        message = "Invalid Hermes Multiplayer secret (HERMES_MULTIPLAYER_SECRET)" if store.multiplayer_secret_set() else store.NO_LOCAL_SECRET
         # Same shape as the api_server adapter's 401: the desktop pane keys off error.code.
         return web.json_response(
             {"error": {"message": message, "type": "gateway_auth_error",
                        "code": "gateway_auth_failed"}}, status=401)
 
-    async def herd_sync(request: "web.Request") -> "web.Response":
+    async def multiplayer_sync(request: "web.Request") -> "web.Response":
         # Only a gateway holding this gateway's Hermes Multiplayer secret (the linked peer) can read or write
         # Hermes Multiplayer data here. The gateway API_SERVER_KEY is not accepted.
         denied = _denied(request)
@@ -86,16 +86,16 @@ def _wire_api_server(app, adapter) -> None:
         store = _store()
         try:
             result = await asyncio.to_thread(store.handle_peer_sync, body)
-        except store.HerdError as exc:
+        except store.MultiplayerError as exc:
             return web.json_response({"error": exc.message}, status=exc.status)
         except Exception:  # noqa: BLE001 — never leak a stack trace to the network
-            logger.exception("herd: peer sync failed")
+            logger.exception("hermes-multiplayer: peer sync failed")
             return web.json_response({"error": "Hermes Multiplayer sync failed on this gateway."}, status=500)
         return web.json_response(result)
 
-    async def herd_pair(request: "web.Request") -> "web.Response":
+    async def multiplayer_pair(request: "web.Request") -> "web.Response":
         # No Hermes Multiplayer secret here: the one-time pairing code is the credential for this exchange. Wrong, used and expired
-        # codes all get one reply, and five wrong tries pause pairing (see herd_store.handle_pair_request).
+        # codes all get one reply, and five wrong tries pause pairing (see multiplayer_store.handle_pair_request).
         try:
             body = await request.json()
         except (ValueError, json.JSONDecodeError):
@@ -103,14 +103,14 @@ def _wire_api_server(app, adapter) -> None:
         store = _store()
         try:
             result = await asyncio.to_thread(store.handle_pair_request, body)
-        except store.HerdError as exc:
+        except store.MultiplayerError as exc:
             return web.json_response({"error": exc.message}, status=exc.status)
         except Exception:  # noqa: BLE001 — never leak a stack trace to the network
-            logger.exception("herd: pairing failed")
+            logger.exception("hermes-multiplayer: pairing failed")
             return web.json_response({"error": "Hermes Multiplayer pairing failed on this gateway."}, status=500)
         return web.json_response(result)
 
-    async def herd_ping(request: "web.Request") -> "web.Response":
+    async def multiplayer_ping(request: "web.Request") -> "web.Response":
         denied = _denied(request)
         if denied is not None:
             return denied
@@ -118,9 +118,11 @@ def _wire_api_server(app, adapter) -> None:
         me = await asyncio.to_thread(store.identity)
         return web.json_response({"ok": True, "from": me, "v": store.PROTOCOL_VERSION})
 
-    app.router.add_post(_store().PEER_SYNC_PATH, herd_sync)
-    app.router.add_post(_store().PAIR_PATH, herd_pair)
-    app.router.add_get("/herd/v1/ping", herd_ping)
+    # Served under the pre-rename /herd/v1/* too, so a teammate still on that build keeps syncing with us.
+    for prefix in (_store().PEER_PATH_PREFIX, _store().LEGACY_PEER_PATH_PREFIX):
+        app.router.add_post(prefix + "sync", multiplayer_sync)
+        app.router.add_post(prefix + "pair", multiplayer_pair)
+        app.router.add_get(prefix + "ping", multiplayer_ping)
 
     async def _start_sync_loop(_app) -> None:
         async def loop() -> None:
@@ -129,14 +131,14 @@ def _wire_api_server(app, adapter) -> None:
                 try:
                     await asyncio.to_thread(_sync_pass, store)
                 except Exception:  # noqa: BLE001 — keep syncing through transient failures
-                    logger.debug("herd: sync pass failed", exc_info=True)
+                    logger.debug("hermes-multiplayer: sync pass failed", exc_info=True)
                 await asyncio.sleep(SYNC_INTERVAL_S)
 
-        task = asyncio.get_running_loop().create_task(loop(), name="herd-sync")
-        _app["herd_sync_task"] = task
+        task = asyncio.get_running_loop().create_task(loop(), name="multiplayer-sync")
+        _app["multiplayer_sync_task"] = task
 
     async def _stop_sync_loop(_app) -> None:
-        task = _app.get("herd_sync_task")
+        task = _app.get("multiplayer_sync_task")
         if task is not None:
             task.cancel()
 
@@ -145,33 +147,33 @@ def _wire_api_server(app, adapter) -> None:
 
 
 def _listen_command(raw_args: str, session_key: str = "", **_kw) -> str:
-    """``/herd-listen`` (here) / ``/herd-listen off``: pick the chat that receives @mentions."""
+    """``/multiplayer-listen`` (here) / ``/multiplayer-listen off``: pick the chat that receives @mentions."""
     store = _store()
     if raw_args.strip().lower() in {"off", "stop", "none"}:
         store.set_mention_target("")
         return "Hermes Multiplayer will no longer pass @mentions to an agent."
     if not session_key:
-        return "Run /herd-listen inside the chat you want your agent to answer Hermes Multiplayer mentions in."
+        return "Run /multiplayer-listen inside the chat you want your agent to answer Hermes Multiplayer mentions in."
     store.set_mention_target(session_key, "this chat")
     on = "on" if store.wake_enabled() else "OFF (turn on \"Let my agent answer @mentions\" in Settings > Plugins > Hermes Multiplayer)"
     return ("Done. @mentions of you in Hermes Multiplayer will be handed to this chat. "
-            f"Mention wake is {on}. It also needs allow_gateway_injection: true for herd in config.yaml.")
+            f"Mention wake is {on}. It also needs allow_gateway_injection: true for hermes-multiplayer in config.yaml.")
 
 
 def register(ctx):
     """Wire schemas to handlers and the peer endpoint. Never touches the network or the db."""
-    ctx.register_tool(name="herd_list_channels", toolset="herd",
-                      schema=schemas.HERD_LIST_CHANNELS, handler=tools.herd_list_channels)
-    ctx.register_tool(name="herd_post", toolset="herd",
-                      schema=schemas.HERD_POST, handler=tools.herd_post)
-    ctx.register_tool(name="herd_read_channel", toolset="herd",
-                      schema=schemas.HERD_READ_CHANNEL, handler=tools.herd_read_channel)
-    ctx.register_tool(name="herd_set_status", toolset="herd",
-                      schema=schemas.HERD_SET_STATUS, handler=tools.herd_set_status)
-    # herd_search is built (tools.herd_search) but not registered: the catalog's locked tool scope (TC-0.8) is
+    ctx.register_tool(name="multiplayer_list_channels", toolset="hermes-multiplayer",
+                      schema=schemas.MULTIPLAYER_LIST_CHANNELS, handler=tools.multiplayer_list_channels)
+    ctx.register_tool(name="multiplayer_post", toolset="hermes-multiplayer",
+                      schema=schemas.MULTIPLAYER_POST, handler=tools.multiplayer_post)
+    ctx.register_tool(name="multiplayer_read_channel", toolset="hermes-multiplayer",
+                      schema=schemas.MULTIPLAYER_READ_CHANNEL, handler=tools.multiplayer_read_channel)
+    ctx.register_tool(name="multiplayer_set_status", toolset="hermes-multiplayer",
+                      schema=schemas.MULTIPLAYER_SET_STATUS, handler=tools.multiplayer_set_status)
+    # multiplayer_search is built (tools.multiplayer_search) but not registered: the catalog's locked tool scope (TC-0.8) is
     # four tools. Registering it means re-approving that scope first.
     ctx.register_platform_handler("api_server", _wire_api_server)
-    ctx.register_command("herd-listen", _listen_command,
+    ctx.register_command("multiplayer-listen", _listen_command,
                          description="Let your agent in this chat answer Hermes Multiplayer @mentions (or: off)",
                          args_hint="[off]")
 

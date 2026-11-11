@@ -51,13 +51,13 @@ class TopicLocalTest(TwoGateways):
             with store.connect() as conn:
                 conn.execute("INSERT INTO channels(id, name, topic, is_dm, members, created_at) "
                              "VALUES ('dm:a+b', 'A & B', '', 1, '[]', '2026-11-01T00:00:00Z')")
-            with self.assertRaises(store.HerdError) as ctx:
+            with self.assertRaises(store.MultiplayerError) as ctx:
                 store.set_topic("dm:a+b", "nope")
         self.assertEqual(ctx.exception.status, 422)
 
     def test_an_unknown_channel_is_a_404(self):
         with self.A:
-            with self.assertRaises(store.HerdError) as ctx:
+            with self.assertRaises(store.MultiplayerError) as ctx:
                 store.set_topic("nowhere", "x")
         self.assertEqual(ctx.exception.status, 404)
 
@@ -131,7 +131,7 @@ class TopicRouteTest(TwoGateways):
         super().setUp()
         import importlib.util
 
-        spec = importlib.util.spec_from_file_location("herd_api_topic_test", _pkg.ROOT / "dashboard" / "plugin_api.py")
+        spec = importlib.util.spec_from_file_location("multiplayer_api_topic_test", _pkg.ROOT / "dashboard" / "plugin_api.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = FastAPI()

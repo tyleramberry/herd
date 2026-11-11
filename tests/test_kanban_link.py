@@ -17,8 +17,8 @@ except Exception:  # noqa: BLE001
 sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
-herd, store, tools = _pkg.load()
-from herd.dashboard import kanban_tasks  # noqa: E402
+hermes_multiplayer, store, tools = _pkg.load()
+from hermes_multiplayer.dashboard import kanban_tasks  # noqa: E402
 
 TITLE = "S-16: Agent response links to the Kanban board"
 
@@ -45,7 +45,7 @@ class KanbanBase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.AUTO_SYNC,
                        kanban_tasks.DB_PATH_OVERRIDE, kanban_tasks.hermes_root)
-        store.DB_PATH_OVERRIDE = self.root / "herd.db"
+        store.DB_PATH_OVERRIDE = self.root / "hermes-multiplayer.db"
         store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {}}
         store.AUTO_SYNC = False
         kanban_tasks.DB_PATH_OVERRIDE = None
@@ -132,15 +132,15 @@ class PathResolutionTest(KanbanBase):
         (self.hroot / "kanban").mkdir(parents=True)
         kanban_tasks.hermes_root = lambda: self.hroot
 
-    def board(self, slug="herd"):
+    def board(self, slug="multiplayer"):
         d = self.hroot / "kanban" / "boards" / slug
         d.mkdir(parents=True)
         return make_kanban_db(d / "kanban.db")
 
     def test_current_board(self):
-        db = self.board("herd")
-        (self.hroot / "kanban" / "current").write_text("herd\n")
-        self.assertEqual(kanban_tasks.board_slug(), "herd")
+        db = self.board("multiplayer")
+        (self.hroot / "kanban" / "current").write_text("multiplayer\n")
+        self.assertEqual(kanban_tasks.board_slug(), "multiplayer")
         self.assertEqual(kanban_tasks.kanban_db_path(), db)
 
     def test_malformed_current_falls_back(self):
@@ -153,11 +153,11 @@ class PathResolutionTest(KanbanBase):
 
     def test_missing_board_file_uses_root_db(self):
         legacy = make_kanban_db(self.hroot / "kanban.db")
-        (self.hroot / "kanban" / "current").write_text("herd\n")
+        (self.hroot / "kanban" / "current").write_text("multiplayer\n")
         self.assertEqual(kanban_tasks.kanban_db_path(), legacy)
 
     def test_nothing_present(self):
-        (self.hroot / "kanban" / "current").write_text("herd\n")
+        (self.hroot / "kanban" / "current").write_text("multiplayer\n")
         self.assertIsNone(kanban_tasks.kanban_db_path())
         self.assertFalse((self.hroot / "kanban.db").exists())
 
@@ -171,7 +171,7 @@ class StoreTest(KanbanBase):
     def test_post_with_task_id(self):
         stored = store.post_message("general", "x", author_type="agent", task_id="t_e7741438")
         self.assertEqual(stored["task_id"], "t_e7741438")
-        with self.assertRaises(store.HerdError) as cm:
+        with self.assertRaises(store.MultiplayerError) as cm:
             store.post_message("general", "x", author_type="agent", task_id="nope")
         self.assertEqual(cm.exception.status, 422)
         self.assertIsNone(store.post_message("general", "plain", author_type="agent")["task_id"])
@@ -229,10 +229,10 @@ class SyncTest(KanbanBase):
 
 
 class MigrationTest(KanbanBase):
-    """A herd.db created before S-16 has no task_id column; the schema memo must add it."""
+    """A hermes-multiplayer.db created before S-16 has no task_id column; the schema memo must add it."""
 
     def test_pre_s16_db_gains_task_id(self):
-        db = self.root / "herd.db"
+        db = self.root / "hermes-multiplayer.db"
         conn = sqlite3.connect(db)
         conn.executescript(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
@@ -253,25 +253,25 @@ class MigrationTest(KanbanBase):
 
 
 class ToolsTest(KanbanBase):
-    def test_herd_post_task_id(self):
-        out = json.loads(tools.herd_post({"channel": "general", "content": "x", "task_id": "t_e7741438"}))
+    def test_multiplayer_post_task_id(self):
+        out = json.loads(tools.multiplayer_post({"channel": "general", "content": "x", "task_id": "t_e7741438"}))
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["message"]["task_id"], "t_e7741438")
-        bad = json.loads(tools.herd_post({"channel": "general", "content": "x", "task_id": "nope"}))
+        bad = json.loads(tools.multiplayer_post({"channel": "general", "content": "x", "task_id": "nope"}))
         self.assertFalse(bad["ok"])
         self.assertIn("task id", bad["error"].lower())
 
     def test_read_channel_exposes_task_id(self):
-        tools.herd_post({"channel": "general", "content": "x", "task_id": "t_e7741438"})
-        tools.herd_post({"channel": "general", "content": "see t_deadbeef"})
-        msgs = json.loads(tools.herd_read_channel({"channel": "general"}))["messages"]
+        tools.multiplayer_post({"channel": "general", "content": "x", "task_id": "t_e7741438"})
+        tools.multiplayer_post({"channel": "general", "content": "see t_deadbeef"})
+        msgs = json.loads(tools.multiplayer_read_channel({"channel": "general"}))["messages"]
         self.assertEqual([m["task_id"] for m in msgs], ["t_e7741438", None])
 
 
 class RouterTest(KanbanBase):
     @unittest.skipIf(TestClient is None, "fastapi/httpx not installed")
     def test_task_route(self):
-        import herd.dashboard.plugin_api as api
+        import hermes_multiplayer.dashboard.plugin_api as api
         kanban_tasks.DB_PATH_OVERRIDE = make_kanban_db(self.root / "kanban.db")
         app = FastAPI()
         app.include_router(api.router, prefix="/api/plugins/hermes-multiplayer")

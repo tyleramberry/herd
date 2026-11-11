@@ -25,7 +25,7 @@ class _Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         store.AUTO_SYNC = False
-        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "herd.db"
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "hermes-multiplayer.db"
         store.SETTINGS_OVERRIDE = {"display_name": "Tyler"}
         store._initialized.clear()
         store._wake_times.clear()
@@ -49,7 +49,7 @@ class OwnAgent(_Base):
         key, text = self.woken[0]
         self.assertEqual(key, "chat-1")
         self.assertIn("your own user (Tyler)", text)
-        self.assertIn('herd_post with channel="general"', text)
+        self.assertIn('multiplayer_post with channel="general"', text)
         self.assertNotIn("another person", text)
 
     def test_the_hermes_shortcut_wakes_your_own_agent(self):
@@ -136,13 +136,13 @@ class ThreadAnswers(_Base):
         store.ingest(peer_msg("@tyler-hermes thoughts?", "reply-1", thread="root-1"))
         self.assertEqual(len(self.woken), 1)
         text = self.woken[0][1]
-        self.assertIn('herd_post with channel="general", reply_to="root-1"', text)
-        self.assertIn('herd_read_channel with thread="root-1"', text)
+        self.assertIn('multiplayer_post with channel="general", reply_to="root-1"', text)
+        self.assertIn('multiplayer_read_channel with thread="root-1"', text)
 
     def test_the_named_call_really_lands_in_the_thread(self):
         store.ingest(peer_msg("kickoff", "root-2"))
         import json
-        out = json.loads(tools.herd_post({"channel": "general", "reply_to": "root-2", "content": "on it"}))
+        out = json.loads(tools.multiplayer_post({"channel": "general", "reply_to": "root-2", "content": "on it"}))
         self.assertTrue(out["ok"])
         thread = store.list_thread("root-2")
         self.assertEqual([r["content"] for r in thread["replies"]], ["on it"])
@@ -155,7 +155,7 @@ class ThreadAnswers(_Base):
 
     def test_a_top_level_mention_still_reports_to_the_channel(self):
         store.ingest(peer_msg("@tyler hi", "top-1"))
-        self.assertIn('herd_post with channel="general" and your reply', self.woken[0][1])
+        self.assertIn('multiplayer_post with channel="general" and your reply', self.woken[0][1])
         self.assertNotIn("reply_to", self.woken[0][1])
 
     def test_your_own_tag_in_a_thread_stays_in_the_thread(self):
@@ -165,7 +165,7 @@ class ThreadAnswers(_Base):
 
 
 class Onboarding(_Base):
-    def test_name_from_the_herd_page_wins_and_clears(self):
+    def test_name_from_the_multiplayer_page_wins_and_clears(self):
         self.assertEqual(store.set_display_name("  Ty   A ")["display_name"], "Ty A")
         self.assertEqual(store.identity()["display_name"], "Ty A")
         self.assertEqual(store.post_message("general", "hi")["author_name"], "Ty A")
@@ -192,7 +192,7 @@ class Onboarding(_Base):
             raise store.urllib.error.URLError("stop here")
         store.PAIR_TRANSPORT = transport
         try:
-            with self.assertRaises(store.HerdError):
+            with self.assertRaises(store.MultiplayerError):
                 store.redeem_pairing("https://b.ts.net:8642#abcde-fghjk", "")
         finally:
             store.PAIR_TRANSPORT = None

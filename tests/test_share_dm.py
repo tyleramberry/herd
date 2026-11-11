@@ -100,14 +100,14 @@ class ShareDmTest(unittest.TestCase):
         dm, _ = self.seeded_dm()
         with self.A:
             for bad, status in (("", 422), ("Bad/Name", 422), ("general", 409)):
-                with self.assertRaises(store.HerdError) as cm:
+                with self.assertRaises(store.MultiplayerError) as cm:
                     store.share_dm(dm["id"], bad)
                 self.assertEqual(cm.exception.status, status)
-            with self.assertRaises(store.HerdError) as cm:
+            with self.assertRaises(store.MultiplayerError) as cm:
                 store.share_dm("general", "x")                                              # not a DM
             self.assertEqual(cm.exception.status, 404)
             store.share_dm(dm["id"], "once")
-            with self.assertRaises(store.HerdError) as cm:
+            with self.assertRaises(store.MultiplayerError) as cm:
                 store.share_dm(dm["id"], "once")                                            # repeat
             self.assertEqual(cm.exception.status, 409)
             self.assertEqual(len(store.list_messages("once")), 2)                           # not doubled
@@ -116,7 +116,7 @@ class ShareDmTest(unittest.TestCase):
         self.sync()
         with self.A:
             dm = store.open_dm(next(p["id"] for p in store.list_participants() if not p["is_self"]))
-            with self.assertRaises(store.HerdError) as cm:
+            with self.assertRaises(store.MultiplayerError) as cm:
                 store.share_dm(dm["id"], "empty")
             self.assertEqual(cm.exception.status, 422)
             self.assertIsNone(store.get_channel("empty"))

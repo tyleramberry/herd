@@ -15,7 +15,7 @@ except Exception:  # noqa: BLE001
 sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
-herd, store, tools = _pkg.load()
+hermes_multiplayer, store, tools = _pkg.load()
 ROOT = _pkg.ROOT
 SOURCE = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
 
@@ -47,16 +47,16 @@ class FakeCtx:
 class ManifestTest(unittest.TestCase):
     def test_provides_tools_matches_register(self):
         ctx = FakeCtx()
-        herd.register(ctx)
+        hermes_multiplayer.register(ctx)
         self.assertEqual(sorted(ctx.tools), sorted(_manifest()["provides_tools"]))
         self.assertEqual(sorted(ctx.tools),
-                         ["herd_list_channels", "herd_post", "herd_read_channel", "herd_set_status"])
+                         ["multiplayer_list_channels", "multiplayer_post", "multiplayer_read_channel", "multiplayer_set_status"])
         self.assertEqual(list(ctx.platform), ["api_server"])
         for name, (_ts, schema, handler) in ctx.tools.items():
             self.assertEqual(schema["name"], name)
             params = inspect.signature(handler).parameters
             self.assertTrue(any(p.kind is p.VAR_KEYWORD for p in params.values()), name)
-        status_schema = ctx.tools["herd_set_status"][1]
+        status_schema = ctx.tools["multiplayer_set_status"][1]
         self.assertEqual(status_schema["parameters"]["properties"]["status"]["enum"], list(store.STATUS_PHRASES))
         self.assertEqual(status_schema["parameters"]["required"], ["status"])
 
@@ -75,7 +75,7 @@ class ManifestTest(unittest.TestCase):
         for path in list(ROOT.glob("*.py")) + list((ROOT / "dashboard").glob("*.py")):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("os.environ", text, path)
-            self.assertNotIn(".env", text.replace("env: HERD", ""), path)
+            self.assertNotIn(".env", text.replace("env: HERMES_MULTIPLAYER", ""), path)
             self.assertNotIn("HERMES_PEER_", text, path)
             self.assertNotIn("sys.modules[", text, path)
 

@@ -8,9 +8,9 @@ from typing import Any
 
 def _store():
     # Lazy: registration stays cheap and never opens the database.
-    from .dashboard import herd_store
+    from .dashboard import multiplayer_store
 
-    return herd_store
+    return multiplayer_store
 
 
 def _fail(exc: Exception) -> str:
@@ -28,7 +28,7 @@ def _brief_channel(ch: dict) -> dict:
     return out
 
 
-def herd_list_channels(args: dict, **kwargs: Any) -> str:
+def multiplayer_list_channels(args: dict, **kwargs: Any) -> str:
     try:
         store = _store()
         return json.dumps({"ok": True, "you_are": store.identity()["display_name"],
@@ -46,7 +46,7 @@ def _brief_message(m: dict) -> dict:
     return out
 
 
-def herd_post(args: dict, **kwargs: Any) -> str:
+def multiplayer_post(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}
         channel = str(args.get("channel") or "").strip()
@@ -73,7 +73,7 @@ def herd_post(args: dict, **kwargs: Any) -> str:
         return _fail(exc)
 
 
-def herd_read_channel(args: dict, **kwargs: Any) -> str:
+def multiplayer_read_channel(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}
         channel = str(args.get("channel") or "").strip()
@@ -109,7 +109,7 @@ def _brief_hit(r: dict) -> dict:
             "in_thread": bool(r["thread_parent_id"])}
 
 
-def herd_search(args: dict, **kwargs: Any) -> str:
+def multiplayer_search(args: dict, **kwargs: Any) -> str:
     """Search message history across channels and DMs this gateway holds. Read-only."""
     try:
         args = args or {}
@@ -123,7 +123,7 @@ def herd_search(args: dict, **kwargs: Any) -> str:
         return _fail(exc)
 
 
-def herd_set_status(args: dict, **kwargs: Any) -> str:
+def multiplayer_set_status(args: dict, **kwargs: Any) -> str:
     try:
         args = args or {}
         entry = _store().set_status(args.get("status"))

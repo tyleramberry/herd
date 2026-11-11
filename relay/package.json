@@ -1,5 +1,5 @@
 {
-  "name": "herd-relay",
+  "name": "hermes-multiplayer-relay",
   "version": "0.1.0",
   "private": true,
   "type": "module",

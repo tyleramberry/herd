@@ -234,7 +234,7 @@ class ResultShapeTest(SearchBase):
         self.assertEqual(self.ids("shared", channel="#ops"), ["c-ops"])
 
     def test_unknown_channel_is_a_404_not_a_silent_empty_list(self):
-        with self.assertRaises(store.HerdError) as ctx:
+        with self.assertRaises(store.MultiplayerError) as ctx:
             store.search_messages("anything", channel="nope")
         self.assertEqual(ctx.exception.status, 404)
 
@@ -249,36 +249,36 @@ class ResultShapeTest(SearchBase):
 
 
 class AgentToolTest(SearchBase):
-    def test_herd_search_tool_returns_hits(self):
+    def test_multiplayer_search_tool_returns_hits(self):
         store.ingest(peer_msg("we saw this error before in march", "tool1"))
-        out = json.loads(tools.herd_search({"query": "error before"}))
+        out = json.loads(tools.multiplayer_search({"query": "error before"}))
         self.assertTrue(out["ok"])
         self.assertEqual([r["id"] for r in out["results"]], ["tool1"])
         self.assertEqual(out["results"][0]["channel_id"], "general")
         self.assertIn("[error]", out["results"][0]["snippet"])
 
     def test_query_is_required(self):
-        out = json.loads(tools.herd_search({"query": "  "}))
+        out = json.loads(tools.multiplayer_search({"query": "  "}))
         self.assertFalse(out["ok"])
 
     def test_unknown_channel_reports_a_clean_error(self):
-        out = json.loads(tools.herd_search({"query": "x", "channel": "missing"}))
+        out = json.loads(tools.multiplayer_search({"query": "x", "channel": "missing"}))
         self.assertFalse(out["ok"])
         self.assertIn("missing", out["error"])
 
     def test_tool_is_built_but_held_out_of_registration(self):
-        # The catalog locks the tool scope at four tools (TC-0.8). Registering herd_search needs that re-approved,
+        # The catalog locks the tool scope at four tools (TC-0.8). Registering multiplayer_search needs that re-approved,
         # so this test pins the held state: it fails loudly when someone turns the tool on.
-        herd_pkg = _pkg.load()[0]
+        multiplayer_pkg = _pkg.load()[0]
         registered = []
         ctx = mock.Mock()
         ctx.register_tool.side_effect = lambda **kw: registered.append(kw["name"])
-        herd_pkg.register(ctx)
-        self.assertNotIn("herd_search", registered)
-        self.assertEqual(sorted(registered), ["herd_list_channels", "herd_post", "herd_read_channel", "herd_set_status"])
-        from herd import schemas  # noqa: WPS433 - the package is loaded by _pkg
-        self.assertEqual(schemas.HERD_SEARCH["name"], "herd_search")
-        self.assertEqual(schemas.HERD_SEARCH["parameters"]["required"], ["query"])
+        multiplayer_pkg.register(ctx)
+        self.assertNotIn("multiplayer_search", registered)
+        self.assertEqual(sorted(registered), ["multiplayer_list_channels", "multiplayer_post", "multiplayer_read_channel", "multiplayer_set_status"])
+        from hermes_multiplayer import schemas  # noqa: WPS433 - the package is loaded by _pkg
+        self.assertEqual(schemas.MULTIPLAYER_SEARCH["name"], "multiplayer_search")
+        self.assertEqual(schemas.MULTIPLAYER_SEARCH["parameters"]["required"], ["query"])
 
 
 @unittest.skipUnless(TestClient is not None, "fastapi/httpx not installed")
@@ -287,7 +287,7 @@ class SearchRouteTest(SearchBase):
         super().setUp()
         import importlib.util
 
-        spec = importlib.util.spec_from_file_location("herd_api_search_test",
+        spec = importlib.util.spec_from_file_location("multiplayer_api_search_test",
                                                       _pkg.ROOT / "dashboard" / "plugin_api.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

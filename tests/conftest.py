@@ -2,7 +2,7 @@
 
 pytest's Package collector imports the repository root ``__init__.py`` under the
 synthetic top-level module name ``__init__`` while collecting ``tests/``. When the
-checkout directory is not a valid Python identifier (e.g. ``herd-qa``), that import
+checkout directory is not a valid Python identifier (e.g. ``hermes-multiplayer``), that import
 fails on the relative imports and every test errors out. Preloading the same file
 under that identity — with the repo root as its search path — makes the suite
 independent of the checkout directory name. Test infrastructure only: pytest is

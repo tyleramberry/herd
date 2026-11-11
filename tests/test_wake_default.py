@@ -1,7 +1,7 @@
 """Track 0: @mention wake is on by default, and a mention that does not reach the agent says why.
 
 Covers the three silent blockers the night-build brief named: default-off setting, a missing target
-(now a recorded skip, surfaced in the pane and herd_read_channel), and the injection gate (now reported
+(now a recorded skip, surfaced in the pane and multiplayer_read_channel), and the injection gate (now reported
 as ``injection_not_allowed`` before any call is made).
 """
 import json
@@ -88,7 +88,7 @@ class SkipRecordingTest(_Base):
         self.assertEqual(self.woken, [])
         self.assertEqual(self.skip_of("n1"), "no_target")
         msg = next(m for m in store.list_messages("general") if m["id"] == "n1")
-        self.assertIn("/herd-listen", msg["wake_note"])
+        self.assertIn("/multiplayer-listen", msg["wake_note"])
 
     def test_wake_off_is_recorded(self):
         store.SETTINGS_OVERRIDE = {"display_name": "Tyler", "mention_wake": False}
@@ -186,14 +186,14 @@ class WakeBlockTest(_Base):
 class ReadChannelSurfacesTheReasonTest(_Base):
     def test_read_channel_carries_mention_not_delivered(self):
         store.ingest(peer_msg("@tyler help", "rc1"))
-        read = json.loads(tools.herd_read_channel({"channel": "general"}))
+        read = json.loads(tools.multiplayer_read_channel({"channel": "general"}))
         msg = next(m for m in read["messages"] if m["id"] == "rc1")
-        self.assertIn("/herd-listen", msg["mention_not_delivered"])
+        self.assertIn("/multiplayer-listen", msg["mention_not_delivered"])
 
     def test_a_delivered_mention_has_no_note(self):
         store.set_mention_target("ses_x")
         store.ingest(peer_msg("@tyler help", "rc2"))
-        read = json.loads(tools.herd_read_channel({"channel": "general"}))
+        read = json.loads(tools.multiplayer_read_channel({"channel": "general"}))
         msg = next(m for m in read["messages"] if m["id"] == "rc2")
         self.assertNotIn("mention_not_delivered", msg)
 
@@ -203,7 +203,7 @@ class ReadChannelSurfacesTheReasonTest(_Base):
         thread = store.list_thread("t-root")
         self.assertEqual(thread["parent"]["wake_note"], "")
         self.assertEqual([r["id"] for r in thread["replies"]], ["t-reply"])
-        self.assertIn("/herd-listen", thread["replies"][0]["wake_note"])
+        self.assertIn("/multiplayer-listen", thread["replies"][0]["wake_note"])
 
 
 @unittest.skipUnless(TestClient is not None, "fastapi/httpx not installed")
@@ -213,7 +213,7 @@ class WakeTargetRouteTest(_Base):
         spec_path = _pkg.ROOT / "dashboard" / "plugin_api.py"
         import importlib.util
 
-        spec = importlib.util.spec_from_file_location("herd_api_under_test", spec_path)
+        spec = importlib.util.spec_from_file_location("multiplayer_api_under_test", spec_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = FastAPI()

@@ -53,7 +53,7 @@ MALFORMED_STATUS_RECORDS = (
 class StatusTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name) / "herd.db"
+        self.db = Path(self.tmp.name) / "hermes-multiplayer.db"
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.TRANSPORT, store.AUTO_SYNC)
         store.DB_PATH_OVERRIDE = self.db
         store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {}}
@@ -111,7 +111,7 @@ class StatusTest(unittest.TestCase):
 
     def test_invented_phrase_refused(self):
         for bad in ("thinking about it", "ran bash", "", "reading code", None):
-            with self.assertRaises(store.HerdError) as cm:
+            with self.assertRaises(store.MultiplayerError) as cm:
                 store.set_status(bad)
             self.assertEqual(cm.exception.status, 422)
             for phrase in store.STATUS_PHRASES:
@@ -120,16 +120,16 @@ class StatusTest(unittest.TestCase):
 
     def test_refusal_does_not_clear_or_replace_valid_status(self):
         store.set_status("reviewing")
-        with self.assertRaises(store.HerdError):
+        with self.assertRaises(store.MultiplayerError):
             store.set_status("almost done")
         self.assertEqual(store.agent_status()["phrase"], "reviewing")
 
     def test_tool_contract(self):
-        ok = json.loads(tools.herd_set_status({"status": "reviewing"}))
+        ok = json.loads(tools.multiplayer_set_status({"status": "reviewing"}))
         self.assertIs(ok["ok"], True)
         self.assertEqual(ok["status"], "reviewing")
         for args in ({"status": "nope"}, {}, None):
-            raw = tools.herd_set_status(args)
+            raw = tools.multiplayer_set_status(args)
             self.assertIsInstance(raw, str)
             bad = json.loads(raw)
             self.assertIs(bad["ok"], False)
@@ -152,7 +152,7 @@ class StatusTest(unittest.TestCase):
     def test_no_persistence_across_restart(self):
         store.set_status("writing the code")
         spec = importlib.util.spec_from_file_location(
-            "herd_status_fresh", ROOT / "dashboard" / "herd_store.py")
+            "multiplayer_status_fresh", ROOT / "dashboard" / "multiplayer_store.py")
         fresh = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fresh)
         fresh.DB_PATH_OVERRIDE = self.db
@@ -254,7 +254,7 @@ class StatusRouteTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.AUTO_SYNC, store._notify)
-        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "herd.db"
+        store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "hermes-multiplayer.db"
         store.SETTINGS_OVERRIDE = {"display_name": "tyler", "__secrets__": {}}
         store.AUTO_SYNC = False
         store._status = None
@@ -267,7 +267,7 @@ class StatusRouteTest(unittest.TestCase):
 
     @unittest.skipIf(TestClient is None, "fastapi/httpx not installed")
     def test_route_serves_the_phrase_and_nothing_when_unset(self):
-        import herd.dashboard.plugin_api as api
+        import hermes_multiplayer.dashboard.plugin_api as api
 
         app = FastAPI()
         app.include_router(api.router, prefix="/api/plugins/hermes-multiplayer")
@@ -275,7 +275,7 @@ class StatusRouteTest(unittest.TestCase):
         url = "/api/plugins/hermes-multiplayer/status"
 
         self.assertIsNone(client.get(url).json()["agent_status"])          # never set -> nothing
-        self.assertEqual(json.loads(tools.herd_set_status({"status": "reviewing"}))["ok"], True)
+        self.assertEqual(json.loads(tools.multiplayer_set_status({"status": "reviewing"}))["ok"], True)
         got = client.get(url).json()["agent_status"]                        # poll -> the phrase
         self.assertEqual(got["phrase"], "reviewing")
         self.assertEqual(got["agent"], "tyler")
@@ -288,7 +288,7 @@ class StatusRouteTest(unittest.TestCase):
     # agent_status: null, not bubble KeyError/ValueError out of the route as a 500.
     @unittest.skipIf(TestClient is None, "fastapi/httpx not installed")
     def test_route_fails_closed_on_malformed_record(self):
-        import herd.dashboard.plugin_api as api
+        import hermes_multiplayer.dashboard.plugin_api as api
 
         app = FastAPI()
         app.include_router(api.router, prefix="/api/plugins/hermes-multiplayer")

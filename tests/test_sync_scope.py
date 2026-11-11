@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
-herd, _store, _tools = _pkg.load()
+hermes_multiplayer, _store, _tools = _pkg.load()
 
 _SCOPE_MODULES = ("agent", "agent.secret_scope", "hermes_constants")
 
@@ -54,12 +54,12 @@ class SyncScopeTest(unittest.TestCase):
 
         def build_profile_secret_scope(home):
             events.append(("build", str(home)))
-            return {"HERD_PEER_KEY": "k-1"}
+            return {"HERMES_MULTIPLAYER_PEER_KEY": "k-1"}
 
         def set_secret_scope(mapping, *, profile_home=None):
             if fail_set:
                 raise RuntimeError("scope machine broke")
-            events.append(("set", mapping.get("HERD_PEER_KEY"), profile_home))
+            events.append(("set", mapping.get("HERMES_MULTIPLAYER_PEER_KEY"), profile_home))
             return "TOKEN"
 
         def reset_secret_scope(token):
@@ -77,7 +77,7 @@ class SyncScopeTest(unittest.TestCase):
 
     def test_scope_is_bound_before_sync_and_reset_after(self):
         self._install_fakes()
-        herd._sync_pass(_FakeStore(self.events))
+        hermes_multiplayer._sync_pass(_FakeStore(self.events))
         self.assertEqual(
             self.events,
             [
@@ -91,27 +91,27 @@ class SyncScopeTest(unittest.TestCase):
     def test_scope_is_reset_even_when_sync_raises(self):
         self._install_fakes()
         with self.assertRaises(RuntimeError):
-            herd._sync_pass(_FakeStore(self.events, raise_on_sync=True))
+            hermes_multiplayer._sync_pass(_FakeStore(self.events, raise_on_sync=True))
         self.assertEqual([event[0] for event in self.events], ["build", "set", "sync", "reset"])
 
     def test_degrades_gracefully_without_scope_modules(self):
         self._drop_scope_modules()
-        herd._sync_pass(_FakeStore(self.events))  # must not raise
+        hermes_multiplayer._sync_pass(_FakeStore(self.events))  # must not raise
         self.assertEqual(self.events, [("sync",)])
 
     def test_degrades_gracefully_when_scope_setup_fails(self):
         self._install_fakes(fail_set=True)
         store = _FakeStore(self.events)
-        herd._sync_pass(store)  # scope failed, the pass still runs
+        hermes_multiplayer._sync_pass(store)  # scope failed, the pass still runs
         self.assertEqual([event[0] for event in self.events], ["build", "sync"])
 
     def test_helper_never_writes_peer_state_itself(self):
         # The store owns peer_state error/ok bookkeeping; the scope wrapper must not
         # touch the db, or it could re-introduce the every-cycle error it exists to stop.
-        source = (Path(herd.__file__).read_text())
+        source = (Path(hermes_multiplayer.__file__).read_text())
         start = source.index("def _sync_pass(")
         body = source[start:source.index("\ndef ", start + 1)]
-        self.assertNotIn("herd_store", body.replace("store.sync_all", ""))
+        self.assertNotIn("multiplayer_store", body.replace("store.sync_all", ""))
 
 
 if __name__ == "__main__":

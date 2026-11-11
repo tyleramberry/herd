@@ -1,6 +1,6 @@
-"""Hermes Multiplayer backend for the desktop half: FastAPI routes mounted at ``/api/plugins/herd/``.
+"""Hermes Multiplayer backend for the desktop half: FastAPI routes mounted at ``/api/plugins/hermes-multiplayer/``.
 
-Thin HTTP wrappers around ``herd_store`` (the same code the agent tools and the peer endpoint
+Thin HTTP wrappers around ``multiplayer_store`` (the same code the agent tools and the peer endpoint
 use, so the surfaces cannot drift). The dashboard imports this file by path, so the sibling
 store module is loaded by path too.
 """
@@ -15,20 +15,20 @@ from fastapi import APIRouter, HTTPException, Query
 
 
 def _load_store():
-    try:  # imported as part of the herd package (tests, agent process)
-        from . import herd_store  # type: ignore[import-not-found]
+    try:  # imported as part of the hermes_multiplayer package (tests, agent process)
+        from . import multiplayer_store  # type: ignore[import-not-found]
 
-        return herd_store
+        return multiplayer_store
     except ImportError:
         # Reuse the copy the agent half already imported (read-only lookup) so both halves share
         # one module state, e.g. the @mention wake handler.
         import sys
 
         for name, mod in list(sys.modules.items()):
-            if name.endswith("dashboard.herd_store") and hasattr(mod, "handle_peer_sync"):
+            if name.endswith("dashboard.multiplayer_store") and hasattr(mod, "handle_peer_sync"):
                 return mod
-        path = Path(__file__).resolve().parent / "herd_store.py"
-        spec = importlib.util.spec_from_file_location("herd_dashboard_store", path)
+        path = Path(__file__).resolve().parent / "multiplayer_store.py"
+        spec = importlib.util.spec_from_file_location("multiplayer_dashboard_store", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -41,7 +41,7 @@ def _load_kanban():
         return kanban_tasks
     except ImportError:
         path = Path(__file__).resolve().parent / "kanban_tasks.py"
-        spec = importlib.util.spec_from_file_location("herd_kanban_tasks", path)
+        spec = importlib.util.spec_from_file_location("multiplayer_kanban_tasks", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -55,7 +55,7 @@ router = APIRouter()
 def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except store.HerdError as exc:
+    except store.MultiplayerError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
 
 
@@ -94,7 +94,7 @@ def post_pair(body: dict[str, Any]):
 @router.post("/wake-target")
 def post_wake_target(body: dict[str, Any]):
     """One-click 'Answer @mentions here' from the pane: the active chat's session key becomes the wake target.
-    An empty session_key clears it (the same as ``/herd-listen off``). Returns the fresh status."""
+    An empty session_key clears it (the same as ``/multiplayer-listen off``). Returns the fresh status."""
     session_key = str(body.get("session_key") or "").strip()
     if len(session_key) > 256 or any(ord(c) < 0x20 for c in session_key):
         raise HTTPException(status_code=422, detail="That chat's id isn't usable. Open the chat and try again.")

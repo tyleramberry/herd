@@ -27,7 +27,7 @@ class CleartextPolicy(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.settings = {"display_name": "tyler", "peer_name": "brooklyn", "peer_url": CLEAR_URL,
-                         "__secrets__": {"HERD_PEER_KEY": SECRET}}
+                         "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": SECRET}}
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.AUTO_SYNC, store.TRANSPORT)
         store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "a.db"
         store.SETTINGS_OVERRIDE = self.settings
@@ -140,7 +140,7 @@ class CleartextPolicy(unittest.TestCase):
         self.assertEqual(store._http_sync({"name": "r", "url": target, "key": SECRET}, {}), {})
 
     def test_no_redirect_handler_preserved(self):
-        source = (Path(__file__).resolve().parent.parent / "dashboard" / "herd_store.py").read_text()
+        source = (Path(__file__).resolve().parent.parent / "dashboard" / "multiplayer_store.py").read_text()
         self.assertIn("build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open", source)
         self.assertNotIn("build_opener(_NoRedirect()).open", source)  # the pre-fix form must be gone
         self.assertGreaterEqual(source.count("_NoRedirect"), 2)
@@ -180,7 +180,7 @@ class CleartextPolicy(unittest.TestCase):
         # _OPEN_PEER is built at import time and urllib's default ProxyHandler binds getproxies() at
         # construction, so load a fresh copy of the module while the proxy variables are set.
         spec = importlib.util.spec_from_file_location(
-            "herd_store_proxyprobe", ROOT / "dashboard" / "herd_store.py")
+            "multiplayer_store_proxyprobe", ROOT / "dashboard" / "multiplayer_store.py")
         mod = importlib.util.module_from_spec(spec)
         with mock.patch.dict(os.environ, proxy_env):
             spec.loader.exec_module(mod)

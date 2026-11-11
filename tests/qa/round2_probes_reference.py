@@ -2,8 +2,8 @@ import json, threading
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from herd import tools
-from herd.dashboard import plugin_api as api
+from hermes_multiplayer import tools
+from hermes_multiplayer.dashboard import plugin_api as api
 @pytest.fixture
 def client(tmp_path,monkeypatch):
  monkeypatch.setattr(api,'_db_path',lambda:tmp_path/'probe.db'); monkeypatch.setattr(api,'_initialized',set()); monkeypatch.setattr(api,'_broadcast',lambda m:None); app=FastAPI(); app.include_router(api.router,prefix='/api/plugins/hermes-multiplayer'); return TestClient(app)
@@ -19,7 +19,7 @@ def test_2(client):
 def test_3(client):
  i=ch(client,'large')['id']; s=('🌿🧪 café 漢字 — '*700)+'END✨'; post(client,i,content=s); got=client.get(f'/api/plugins/hermes-multiplayer/channels/{i}/messages').json()[0]['content']; ev(3,{'chars':len(s),'bytes':len(s.encode()),'intact':got==s}); assert got==s and len(s.encode())>=10000
 def test_4(client):
- ch(client,'ops'); d=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'#ops'}); s=ch(client,'  #  design  '); h=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'#'}); b=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'   '}); t={n:json.loads(tools.herd_post({'channel':n,'content':'ok'})) for n in ['#ops','ops']}; v={'duplicate':d.status_code,'trimmed':s['name'],'hash':h.status_code,'blank':b.status_code,'tool_ok':{n:x['ok'] for n,x in t.items()}}; ev(4,v); assert d.status_code==409 and s['name']=='design' and h.status_code==b.status_code==422 and all(x['ok'] for x in t.values())
+ ch(client,'ops'); d=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'#ops'}); s=ch(client,'  #  design  '); h=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'#'}); b=client.post('/api/plugins/hermes-multiplayer/channels',json={'name':'   '}); t={n:json.loads(tools.multiplayer_post({'channel':n,'content':'ok'})) for n in ['#ops','ops']}; v={'duplicate':d.status_code,'trimmed':s['name'],'hash':h.status_code,'blank':b.status_code,'tool_ok':{n:x['ok'] for n,x in t.items()}}; ev(4,v); assert d.status_code==409 and s['name']=='design' and h.status_code==b.status_code==422 and all(x['ok'] for x in t.values())
 def test_5(client):
  b=ch(client,'target'); c=ch(client,b['id']); r=api.resolve_channel(b['id']); p=api.post_agent_message(b['id'],'x'); v={'B_id':b['id'],'collision_id':c['id'],'resolved':r['id'],'posted':p['channel_id']}; ev(5,v); assert r['id']==b['id'] and p['channel_id']==b['id']
 def test_6(client):
@@ -38,7 +38,7 @@ def test_7(client,tmp_path,monkeypatch):
 def test_8(client):
  cases={'unknown':{'channel':'absent','content':'x'},'empty':{'channel':'general','content':''},'whitespace':{'channel':'general','content':'  '},'missing':{},'none':{'channel':'general','content':None}}; o={}
  for n,a in cases.items():
-  try: x=json.loads(tools.herd_post(a)); o[n]={'valid_json':True,'ok':x.get('ok'),'error':x.get('error')}
+  try: x=json.loads(tools.multiplayer_post(a)); o[n]={'valid_json':True,'ok':x.get('ok'),'error':x.get('error')}
   except Exception as e: o[n]={'valid_json':False,'error':repr(e)}
  ev(8,o); assert all(x['valid_json'] and x['ok'] is False and isinstance(x['error'],str) and x['error'] and 'Traceback' not in str(x) for x in o.values())
 def test_9(client,monkeypatch):

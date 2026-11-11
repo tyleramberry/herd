@@ -82,7 +82,7 @@ test('wait reports changes and being alone', async () => {
 test('small helpers', () => {
   assert.equal(isReactionEmoji('🚀'), true)
   assert.equal(isReactionEmoji('lol'), false)
-  assert.deepEqual(route('/r/abcdefgh1234/herd/v1/sync'), { roomId: 'abcdefgh1234', action: 'sync' })
-  assert.equal(route('/r/x/herd/v1/sync'), null)
+  assert.deepEqual(route('/r/abcdefgh1234/hermes-multiplayer/v1/sync'), { roomId: 'abcdefgh1234', action: 'sync' })
+  assert.equal(route('/r/x/hermes-multiplayer/v1/sync'), null)
   assert.equal(bearer('Bearer abc'), 'abc')
 })

@@ -14,7 +14,7 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from dashboard import herd_store as store  # noqa: E402
+from dashboard import multiplayer_store as store  # noqa: E402
 
 
 class DefaultRelayTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class DefaultRelayTests(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             saved = store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE
-            store.DB_PATH_OVERRIDE = str(pathlib.Path(tmp) / "herd.db")
+            store.DB_PATH_OVERRIDE = str(pathlib.Path(tmp) / "hermes-multiplayer.db")
             store.SETTINGS_OVERRIDE = {"display_name": "Tester", "mention_wake": True}
             try:
                 out = store.room_status()

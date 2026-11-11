@@ -9,10 +9,10 @@ manifest_version: 2
 api_version: 1
 tags: [multiplayer, chat, peers, desktop]
 provides_tools:
-  - herd_list_channels
-  - herd_post
-  - herd_read_channel
-  - herd_set_status
+  - multiplayer_list_channels
+  - multiplayer_post
+  - multiplayer_read_channel
+  - multiplayer_set_status
 config_schema:
   display_name:
     type: str
@@ -29,16 +29,16 @@ config_schema:
     default: ""
     label: Teammate's gateway URL
     description: "Their Hermes API server address, e.g. https://brooklyn-mac.tailnet-name.ts.net:8642 — prefer https:// (or your VPN/tailnet address). A plain http:// URL is accepted only for this machine (127.0.0.1, localhost, ::1)."
-  herd_secret:
+  multiplayer_secret:
     type: secret
-    env: HERD_SECRET
+    env: HERMES_MULTIPLAYER_SECRET
     label: This gateway's Hermes Multiplayer secret
     description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Hermes Multiplayer access only, never your gateway's API key.
   peer_key:
     type: secret
-    env: HERD_PEER_KEY
+    env: HERMES_MULTIPLAYER_PEER_KEY
     label: Teammate's Hermes Multiplayer secret
-    description: Your teammate's Hermes Multiplayer secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
+    description: Your teammate's Hermes Multiplayer secret (the value they set as their HERMES_MULTIPLAYER_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
   peer_name_2:
     type: str
     default: ""
@@ -51,7 +51,7 @@ config_schema:
     description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
   peer_key_2:
     type: secret
-    env: HERD_PEER_KEY_2
+    env: HERMES_MULTIPLAYER_PEER_KEY_2
     label: Teammate 2's Hermes Multiplayer secret
     description: Teammate 2's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 2.
   peer_name_3:
@@ -66,7 +66,7 @@ config_schema:
     description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
   peer_key_3:
     type: secret
-    env: HERD_PEER_KEY_3
+    env: HERMES_MULTIPLAYER_PEER_KEY_3
     label: Teammate 3's Hermes Multiplayer secret
     description: Teammate 3's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 3.
   peer_name_4:
@@ -81,28 +81,28 @@ config_schema:
     description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
   peer_key_4:
     type: secret
-    env: HERD_PEER_KEY_4
+    env: HERMES_MULTIPLAYER_PEER_KEY_4
     label: Teammate 4's Hermes Multiplayer secret
     description: Teammate 4's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 4.
   peers:
     type: list
     default: []
     label: Teammates (advanced)
-    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Hermes Multiplayer secret slot (HERD_PEER_KEY, HERD_PEER_KEY_2, HERD_PEER_KEY_3 or HERD_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
+    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Hermes Multiplayer secret slot (HERMES_MULTIPLAYER_PEER_KEY, HERMES_MULTIPLAYER_PEER_KEY_2, HERMES_MULTIPLAYER_PEER_KEY_3 or HERMES_MULTIPLAYER_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
   relay_url:
     type: str
     default: ""
     label: Team room address
-    description: "Optional. The address of a Hermes Multiplayer team room, e.g. https://herd-relay.your-name.workers.dev/r/<room>. Easier: join from the Hermes Multiplayer page with an invite link and leave this blank."
+    description: "Optional. The address of a Hermes Multiplayer team room, e.g. https://hermes-multiplayer-relay.your-name.workers.dev/r/<room>. Easier: join from the Hermes Multiplayer page with an invite link and leave this blank."
   relay_key:
     type: secret
-    env: HERD_RELAY_KEY
+    env: HERMES_MULTIPLAYER_RELAY_KEY
     label: Team room key
     description: The part of a team room link after the '#'. Only needed when the address above is set here rather than joined from the Hermes Multiplayer page.
   allow_cleartext_peer:
     type: bool
     default: false
-    env: HERD_ALLOW_CLEARTEXT
+    env: HERMES_MULTIPLAYER_ALLOW_CLEARTEXT
     label: Send the peer key in cleartext (unsafe)
     description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."
   notify_messages:
@@ -114,4 +114,4 @@ config_schema:
     type: bool
     default: true
     label: Let my agent answer @mentions
-    description: On by default. When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you pick (the pane's "Answer @mentions here" button, or /herd-listen). Also needs allow_gateway_injection (see README). Turn off to stop wakes; mentions still show why they weren't answered.
+    description: On by default. When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you pick (the pane's "Answer @mentions here" button, or /multiplayer-listen). Also needs allow_gateway_injection (see README). Turn off to stop wakes; mentions still show why they weren't answered.

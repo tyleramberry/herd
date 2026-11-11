@@ -1,6 +1,6 @@
 """A database replaced under a live process must not error until restart (QA observation).
 
-``herd_store`` caches schema init per DB path per process. When the file is replaced
+``multiplayer_store`` caches schema init per DB path per process. When the file is replaced
 (restore, copy, rm + recreate) the cache still says "initialized", so queries ran against a
 schema-less database and the peer route answered 500 until the gateway was restarted. The
 per-connect usability check makes that self-healing.
@@ -21,7 +21,7 @@ _, store, _tools = _pkg.load()
 class SchemaSelfHeal(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name) / "herd.db"
+        self.db = Path(self.tmp.name) / "hermes-multiplayer.db"
         self.saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.AUTO_SYNC)
         store.DB_PATH_OVERRIDE = self.db
         store.SETTINGS_OVERRIDE = {"display_name": "tyler"}

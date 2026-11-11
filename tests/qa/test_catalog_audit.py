@@ -20,10 +20,10 @@ name: hermes-multiplayer
 version: "0.1.0"
 requires_hermes: ">=0.22.7"
 provides_tools:
-  - herd_list_channels
-  - herd_post
-  - herd_read_channel
-  - herd_set_status
+  - multiplayer_list_channels
+  - multiplayer_post
+  - multiplayer_read_channel
+  - multiplayer_set_status
 provides_hooks: []
 """
 
@@ -49,10 +49,10 @@ def _status(args=None, **kwargs):
 
 
 def register(ctx):
-    ctx.register_tool(name="herd_list_channels", toolset="herd", schema={}, handler=_list)
-    ctx.register_tool(name="herd_post", toolset="herd", schema={}, handler=_post)
-    ctx.register_tool(name="herd_read_channel", toolset="herd", schema={}, handler=_read)
-    ctx.register_tool(name="herd_set_status", toolset="herd", schema={}, handler=_status)
+    ctx.register_tool(name="multiplayer_list_channels", toolset="hermes-multiplayer", schema={}, handler=_list)
+    ctx.register_tool(name="multiplayer_post", toolset="hermes-multiplayer", schema={}, handler=_post)
+    ctx.register_tool(name="multiplayer_read_channel", toolset="hermes-multiplayer", schema={}, handler=_read)
+    ctx.register_tool(name="multiplayer_set_status", toolset="hermes-multiplayer", schema={}, handler=_status)
 '''
 
 GOOD_JS = """\
@@ -79,10 +79,10 @@ version: {version}
 requires_hermes: ">=0.22.7"
 capabilities:
   {tools_key}:
-    - herd_list_channels
-    - herd_post
-    - herd_read_channel
-    - herd_set_status
+    - multiplayer_list_channels
+    - multiplayer_post
+    - multiplayer_read_channel
+    - multiplayer_set_status
   provides_hooks: []
   provides_middleware: []
   requires_env: []
@@ -120,10 +120,10 @@ def test_good_tree_passes(tmp_path, yaml_mode):
 
 
 def test_undeclared_tool_fails(tmp_path, yaml_mode):
-    init = GOOD_INIT + '    ctx.register_tool(name="herd_secret_extra", toolset="herd", schema={}, handler=_read)\n'
+    init = GOOD_INIT + '    ctx.register_tool(name="multiplayer_secret_extra", toolset="hermes-multiplayer", schema={}, handler=_read)\n'
     rc, f = run(make_tree(tmp_path, init=init))
     assert rc == 1
-    assert any(x.rule == "6" and "herd_secret_extra" in x.msg for x in f)
+    assert any(x.rule == "6" and "multiplayer_secret_extra" in x.msg for x in f)
 
 
 def test_core_override_and_env_read_fail(tmp_path):

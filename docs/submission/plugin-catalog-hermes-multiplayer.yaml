@@ -18,7 +18,7 @@ version: "0.1.0"
 requires_hermes: ">=0.22.0"
 docs_url: https://github.com/tyleramberry/hermes-multiplayer#readme
 capabilities:
-  provides_tools: [herd_list_channels, herd_post, herd_read_channel, herd_set_status]
+  provides_tools: [multiplayer_list_channels, multiplayer_post, multiplayer_read_channel, multiplayer_set_status]
   provides_hooks: []
   provides_middleware: []
   requires_env: []

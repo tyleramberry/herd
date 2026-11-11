@@ -149,7 +149,7 @@ class UnreadAcrossPeersTest(TwoGateways):
 
     def test_marking_an_unknown_channel_is_a_404(self):
         with self.A:
-            with self.assertRaises(store.HerdError) as ctx:
+            with self.assertRaises(store.MultiplayerError) as ctx:
                 store.mark_read("nowhere")
         self.assertEqual(ctx.exception.status, 404)
 

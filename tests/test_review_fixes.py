@@ -18,7 +18,7 @@ _, store, _tools = _pkg.load()
 class PairingRaceTest(PairingTest):
     def responder_redeem(self, code):
         with self.responder:
-            return store.handle_pair_request({"code": code, "nonce": "f" * 32,
+            return store.handle_pair_request({"pair": store.PAIR_PROTOCOL, "code": code, "nonce": "f" * 32,
                                               "requester": {"gateway_id": "tyler-gw"}})
 
     def test_two_requests_that_both_read_the_code_unspent_get_one_secret(self):
@@ -34,9 +34,9 @@ class PairingRaceTest(PairingTest):
             return real(a, b)
 
         with mock.patch.object(store.hmac, "compare_digest", racing):
-            with self.assertRaises(store.HerdError) as ctx:
+            with self.assertRaises(store.MultiplayerError) as ctx:
                 self.responder_redeem(code)
-        self.assertEqual(inner["out"]["herd_secret"], RESPONDER_SECRET)
+        self.assertEqual(inner["out"]["multiplayer_secret"], RESPONDER_SECRET)
         self.assertEqual(ctx.exception.status, 403)
 
 
@@ -58,7 +58,7 @@ class ErrorMappingTest(PairingTest):
     def test_a_protocol_level_failure_is_a_502_not_a_stack_trace(self):
         store.PAIR_TRANSPORT = lambda url, body: (_ for _ in ()).throw(http.client.BadStatusLine("junk"))
         with self.requester:
-            with self.assertRaises(store.HerdError) as ctx:
+            with self.assertRaises(store.MultiplayerError) as ctx:
                 store.redeem_pairing("https://brooklyn-mac.tailnet.ts.net:8642", "ABCDE-FGHJK")
         self.assertEqual(ctx.exception.status, 502)
 

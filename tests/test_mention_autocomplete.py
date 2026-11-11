@@ -74,7 +74,7 @@ class MentionRoundTrip(unittest.TestCase):
         self.assertNotIn(r"(?<![\w@])@[A-Za-z0-9]", JS)
 
     def test_unicode_boundary_matches_backend(self):
-        # Parity with herd_store.mentions_me's lookbehind for the QA-found cases.
+        # Parity with multiplayer_store.mentions_me's lookbehind for the QA-found cases.
         # Boundary detection only — whether the handle names a *specific* person is
         # mentions_me's job, and "@ty" is a mention of someone who isn't Tyler.
         texts = ["hi @ty", "@ty", "x@ty", "(ty@ty", "é@ty", "\u212a@ty", "İ@ty"]

@@ -16,7 +16,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(__file__))
 import _pkg  # noqa: E402
 
-herd, store, _tools = _pkg.load()
+hermes_multiplayer, store, _tools = _pkg.load()
 
 try:
     from aiohttp import web
@@ -26,8 +26,8 @@ except ImportError:  # pragma: no cover - depends on the venv
     HAVE_AIOHTTP = False
 
 API_KEY = "-".join(["gateway", "api", "server", "key"])   # B's API_SERVER_KEY (must be refused)
-B_SECRET = "-".join(["b", "herd", "secret", "canary"])   # B's HERD_SECRET
-A_SECRET = "-".join(["a", "herd", "secret", "canary"])   # A's own HERD_SECRET
+B_SECRET = "-".join(["b", "hermes_multiplayer", "secret", "canary"])   # B's HERMES_MULTIPLAYER_SECRET
+A_SECRET = "-".join(["a", "hermes_multiplayer", "secret", "canary"])   # A's own HERMES_MULTIPLAYER_SECRET
 
 
 class StubAdapter:
@@ -56,7 +56,7 @@ class LiveServer:
     def _run(self):
         asyncio.set_event_loop(self.loop)
         app = web.Application()
-        herd._wire_api_server(app, self.adapter)
+        hermes_multiplayer._wire_api_server(app, self.adapter)
         app.on_startup.clear()  # no background sync loop in a unit test
         app.on_cleanup.clear()
         self.runner = web.AppRunner(app)
@@ -101,9 +101,9 @@ def http(method, url, body=None, key=""):
 
 
 def load_second_store():
-    """A second, independent in-process instance of herd_store.py (gateway A), like the harness."""
+    """A second, independent in-process instance of multiplayer_store.py (gateway A), like the harness."""
     spec = importlib.util.spec_from_file_location(
-        "herd_store_gateway_a", Path(store.__file__).resolve())
+        "multiplayer_store_gateway_a", Path(store.__file__).resolve())
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -114,7 +114,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self._saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE, store.AUTO_SYNC, store.TRANSPORT)
         store.DB_PATH_OVERRIDE = Path(self.tmp.name) / "b.db"
-        self.secrets = {"HERD_SECRET": B_SECRET}
+        self.secrets = {"HERMES_MULTIPLAYER_SECRET": B_SECRET}
         store.SETTINGS_OVERRIDE = {"display_name": "brooklyn", "__secrets__": self.secrets}
         store.AUTO_SYNC = False
         store.TRANSPORT = None
@@ -124,16 +124,16 @@ class Base(unittest.TestCase):
         self.tmp.cleanup()
 
     def unset_secret(self):
-        self.secrets.pop("HERD_SECRET", None)
+        self.secrets.pop("HERMES_MULTIPLAYER_SECRET", None)
 
 
 class SecretHelpers(Base):
-    def test_status_reports_herd_secret_set_as_bool(self):
+    def test_status_reports_multiplayer_secret_set_as_bool(self):
         st = store.status()
-        self.assertIs(st["herd_secret_set"], True)
+        self.assertIs(st["multiplayer_secret_set"], True)
         self.assertNotIn(B_SECRET, json.dumps(st))
         self.unset_secret()
-        self.assertIs(store.status()["herd_secret_set"], False)
+        self.assertIs(store.status()["multiplayer_secret_set"], False)
 
     def test_constant_time_compare_on_bytes(self):
         with mock.patch.object(store.hmac, "compare_digest", wraps=hmac.compare_digest) as cmp:
@@ -157,7 +157,7 @@ class Routes(Base):
         self.adapter = StubAdapter()
         self.server = LiveServer(self.adapter).start()
         self.sync_url = self.server.url + store.PEER_SYNC_PATH
-        self.ping_url = self.server.url + "/herd/v1/ping"
+        self.ping_url = self.server.url + "/hermes-multiplayer/v1/ping"
 
     def tearDown(self):
         self.server.stop()
@@ -179,7 +179,7 @@ class Routes(Base):
         self.assert_denied(*http("GET", self.ping_url, key=API_KEY))
         self.assertEqual(self.adapter.calls, 0, "the plugin must not consult adapter._check_auth")
 
-    def test_fail_closed_without_a_herd_secret(self):
+    def test_fail_closed_without_a_multiplayer_secret(self):
         self.unset_secret()
         for key in (API_KEY, B_SECRET, ""):
             self.assert_denied(*http("POST", self.sync_url, {}, key=key), message=store.NO_LOCAL_SECRET)
@@ -206,7 +206,7 @@ class Routes(Base):
         a.AUTO_SYNC = False
         a.TRANSPORT = None  # the real _http_sync
         a.SETTINGS_OVERRIDE = {"display_name": "tyler", "peer_name": "brooklyn", "peer_url": self.server.url,
-                               "__secrets__": {"HERD_PEER_KEY": B_SECRET, "HERD_SECRET": A_SECRET}}
+                               "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": B_SECRET, "HERMES_MULTIPLAYER_SECRET": A_SECRET}}
         posted = a.post_message("general", "hello from A", author_type="human")
         [peer] = a.configured_peers()
         res = a.sync_peer(peer)
@@ -220,7 +220,7 @@ class Routes(Base):
         a.AUTO_SYNC = False
         a.TRANSPORT = None
         a.SETTINGS_OVERRIDE = {"display_name": "tyler", "peer_name": "brooklyn", "peer_url": self.server.url,
-                               "__secrets__": {"HERD_PEER_KEY": "not-" + B_SECRET, "HERD_SECRET": A_SECRET}}
+                               "__secrets__": {"HERMES_MULTIPLAYER_PEER_KEY": "not-" + B_SECRET, "HERMES_MULTIPLAYER_SECRET": A_SECRET}}
         [peer] = a.configured_peers()
         res = a.sync_peer(peer)
         self.assertFalse(res["ok"])
@@ -234,7 +234,7 @@ class Routes(Base):
             self.assertNotIn(value, res["error"])
 
         self.unset_secret()  # now the peer itself has no Hermes Multiplayer secret
-        a.SETTINGS_OVERRIDE["__secrets__"]["HERD_PEER_KEY"] = B_SECRET
+        a.SETTINGS_OVERRIDE["__secrets__"]["HERMES_MULTIPLAYER_PEER_KEY"] = B_SECRET
         res = a.sync_peer(peer)
         self.assertFalse(res["ok"])
         self.assertIn("peer has no Hermes Multiplayer secret set", res["error"])

@@ -136,20 +136,20 @@ check('no status at all keeps the existing no-teammate line',
 
 // 5. S-20: this gateway having no Hermes Multiplayer secret is its own, distinct state — and it only renders when
 //    the backend says so explicitly (older/partial payloads keep the old behaviour).
-check('no herd secret set renders the settings prompt, not a link state',
+check('no multiplayer secret set renders the settings prompt, not a link state',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
-             herd_secret_set: false }),
+             multiplayer_secret_set: false }),
   ['This gateway has no Hermes Multiplayer secret set. Set one in Settings → Plugins → Hermes Multiplayer.'])
-check('herd_secret_set true is unchanged',
+check('multiplayer_secret_set true is unchanged',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
-             herd_secret_set: true }),
+             multiplayer_secret_set: true }),
   ['Connected to riley'])
-check('a status missing herd_secret_set is unchanged',
+check('a status missing multiplayer_secret_set is unchanged',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }] }),
   ['Connected to riley'])
 check('peer with no stored secret asks for the Hermes Multiplayer secret (not the gateway API key)',
   peerLine({ peers: [{ name: 'riley', connected: false, has_key: false, last_attempt: '' }],
-             herd_secret_set: true }),
+             multiplayer_secret_set: true }),
   ["Add riley's Hermes Multiplayer secret to connect"])
 
 // 6. One line per teammate (spec §1.5): a dead teammate never hides a live one, and a refusal still shows.

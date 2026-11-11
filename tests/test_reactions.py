@@ -73,13 +73,13 @@ class LocalTests(Base):
     def test_validation(self):
         with self.A:
             mid = store.post_message("general", "hi")["id"]
-            with self.assertRaises(store.HerdError) as c:
+            with self.assertRaises(store.MultiplayerError) as c:
                 store.toggle_reaction("general", mid, "lol")  # a reaction is an emoji, never text
             self.assertEqual(c.exception.status, 422)
-            with self.assertRaises(store.HerdError) as c:
+            with self.assertRaises(store.MultiplayerError) as c:
                 store.toggle_reaction("general", "nope", UP)
             self.assertEqual(c.exception.status, 404)
-            with self.assertRaises(store.HerdError) as c:
+            with self.assertRaises(store.MultiplayerError) as c:
                 store.toggle_reaction("nochan", mid, UP)
             self.assertEqual(c.exception.status, 404)
 
@@ -102,7 +102,7 @@ class LocalTests(Base):
             out = store.handle_peer_sync({"from": {"gateway_id": "x"}})
             for k in ("reactions", "next_rseq", "rmore"):
                 self.assertIn(k, out)
-            with self.assertRaises(store.HerdError) as c:
+            with self.assertRaises(store.MultiplayerError) as c:
                 store.handle_peer_sync({"after_rseq": "abc"})
             self.assertEqual(c.exception.status, 422)
 
