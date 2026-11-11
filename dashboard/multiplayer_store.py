@@ -1455,7 +1455,9 @@ def list_participants() -> list[dict]:
         # running Hermes Multiplayer at least once a minute).
         relay_age = (now - _ts(r["relay_seen"])).total_seconds() if r["relay_seen"] else -1.0
         row = {k: v for k, v in dict(r).items() if k != "relay_seen"}
-        out.append({**row, "is_self": bool(r["is_self"]),
+        # ``in_room``: the current team room has listed them as a member who is running. Someone known only
+        # from an old direct link never is, so the room screen doesn't call them connected.
+        out.append({**row, "is_self": bool(r["is_self"]), "in_room": bool(r["relay_seen"]),
                     "online": bool(r["is_self"]) or 0 <= age < ONLINE_WINDOW_S
                     or 0 <= relay_age < RELAY_ONLINE_WINDOW_S})
     return out

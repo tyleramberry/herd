@@ -89,6 +89,8 @@ class FirstRunTest(unittest.TestCase):
         with self.B:
             self.assertIn("hi riley", [m["content"] for m in store.list_messages("general")])
             self.assertTrue(store.status()["room"]["connected"])
+            riley_sees = {p["display_name"]: p["in_room"] for p in store.list_participants() if not p["is_self"]}
+        self.assertTrue(riley_sees.get("tyler"), riley_sees)
 
     def test_inviting_twice_hands_out_the_same_room(self):
         with self.A:
