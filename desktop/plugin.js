@@ -12,7 +12,6 @@ import {
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
   STATUSBAR_AREAS,
-  ScrollArea,
   SearchField,
   StatusDot,
   Textarea,
@@ -1450,7 +1449,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped, 
     }
   })
   return jsxs('div', {
-    className: 'group relative flex flex-col gap-0.5 px-3 ' + (grouped ? 'py-0.5' : 'py-1.5'),
+    className: 'group relative flex min-w-0 max-w-full flex-col gap-0.5 px-3 ' + (grouped ? 'py-0.5' : 'py-1.5'),
     'data-multiplayer-message-id': message.id,
     title: grouped ? exactTime(message.created_at) : undefined,
     ref: node => {
@@ -1484,7 +1483,8 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped, 
         : isEditing
           ? jsx(EditForm, { message, channelId })
           : jsxs('div', {
-              className: 'whitespace-pre-wrap break-words text-sm',
+              className: 'min-w-0 max-w-full whitespace-pre-wrap text-sm',
+              style: { overflowWrap: 'anywhere' },
               children: [
                 renderBody(message.content),
                 // A grouped row has no header to carry the mark, so it sits after the text.
@@ -1653,7 +1653,7 @@ function ThreadView({ channel, rootId, selfId, status, $thread, compact }) {
         ]
       }),
       jsx(WorkLine, { status }),
-      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
+      jsx('div', { style: { flex: '1 1 0%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }, children: jsx(ThreadBody, { rootId }) }),
       jsx(Composer, { channel, compact, placeholderName: 'this thread', threadParentId: rootId })
     ]
   })
@@ -1715,7 +1715,7 @@ function ThreadWorkspace({ channel, rootId }) {
           })
         ]
       }),
-      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
+      jsx('div', { style: { flex: '1 1 0%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }, children: jsx(ThreadBody, { rootId }) }),
       jsx(Composer, { channel, compact: false, placeholderName: 'this thread', threadParentId: rootId })
     ]
   })
@@ -1735,46 +1735,47 @@ function ThreadPanel({ channel, rootId, selfId, $thread }) {
         close()
       }
     },
-    className:
-      'flex min-h-0 w-[40%] min-w-64 max-w-[45%] shrink-0 flex-col border-l border-(--ui-stroke-secondary) bg-(--ui-bg-primary) outline-none',
+    // Inline styles on purpose: arbitrary Tailwind widths (w-[40%]) are not in the host's CSS scan, which let the
+    // panel grow to the whole page. A fixed-basis column keeps it a right sidebar beside the messages.
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '0 0 380px',
+      width: 380,
+      minWidth: 280,
+      maxWidth: '45%',
+      minHeight: 0,
+      overflow: 'hidden',
+      borderLeft: '1px solid var(--ui-stroke-secondary)',
+      background: 'var(--ui-bg-primary)',
+      outline: 'none'
+    },
     children: [
       jsxs('div', {
-        className: 'flex items-center justify-between gap-3 border-b border-(--ui-stroke-secondary) px-3 py-2',
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--ui-stroke-secondary)' },
         children: [
           jsxs('div', {
-            className: 'flex min-w-0 items-baseline gap-2',
+            style: { display: 'flex', minWidth: 0, flex: '1 1 0', alignItems: 'baseline', gap: 8 },
             children: [
-              jsx('span', { className: 'shrink-0 text-sm font-medium', children: 'Thread' }),
-              jsx('span', { className: 'truncate text-xs text-(--ui-text-tertiary)', children: threadTitle(channel, selfId) })
+              jsx('span', { style: { flexShrink: 0, fontSize: 14, fontWeight: 600 }, children: 'Thread' }),
+              jsx('span', {
+                style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--ui-text-tertiary, inherit)' },
+                children: threadTitle(channel, selfId)
+              })
             ]
           }),
           jsxs('div', {
-            className: 'flex shrink-0 items-center gap-1',
+            style: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: 4 },
             children: [
               canOpenWorkspace()
-                ? jsx(Button, {
-                    type: 'button',
-                    size: 'xs',
-                    variant: 'ghost',
-                    title: 'Open this thread as a page',
-                    onClick: () => openThreadWorkspace(channel, rootId),
-                    children: 'Open as page'
-                  })
+                ? jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', title: 'Open this thread as a page', onClick: () => openThreadWorkspace(channel, rootId), children: 'Open as page' })
                 : null,
-              jsx(Button, {
-                type: 'button',
-                size: 'xs',
-                variant: 'ghost',
-                'aria-label': 'Close thread',
-                title: 'Close thread (Esc)',
-                onClick: close,
-                children: jsx(Codicon, { name: 'close', size: '0.8rem' })
-              })
+              jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', 'aria-label': 'Close thread', title: 'Close thread (Esc)', onClick: close, children: jsx(Codicon, { name: 'close', size: '0.8rem' }) })
             ]
           })
         ]
       }),
-      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: jsx(ThreadBody, { rootId }) }),
+      jsx('div', { style: { flex: '1 1 0%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }, children: jsx(ThreadBody, { rootId }) }),
       jsx(Composer, { channel, compact: false, placeholderName: 'this thread', threadParentId: rootId, autoFocus: true })
     ]
   })
@@ -1950,13 +1951,15 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
     })
   }
   return jsxs('div', {
-    className: 'flex min-h-0 min-w-0 flex-1 flex-col',
+    style: { display: 'flex', flex: '1 1 0', minWidth: 0, minHeight: 0, flexDirection: 'column', overflow: 'hidden' },
     children: [
       jsxs('div', {
         className: 'flex items-center justify-between gap-3 border-b border-(--ui-stroke-secondary) px-3 py-2',
+        style: { flexWrap: 'wrap' },
         children: [
           jsxs('div', {
             className: 'flex min-w-0 items-baseline gap-2',
+            style: { minWidth: 0 },
             children: [
               compact
                 ? jsx('button', {
@@ -1993,7 +1996,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
         ? jsx(ShareDmForm, { channel, $sharing, onShared: id => { $thread.set(null); $selected.set(id) } })
         : null,
       jsx(WorkLine, { status }),
-      jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
+      jsx('div', { style: { flex: '1 1 0%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }, children: body }),
       jsx(TypingLine, { channel, status }),
       jsx(Composer, { channel, compact, placeholderName: isDirect(channel) ? dmLabel(channel, selfId) : '#' + channel.name })
     ]

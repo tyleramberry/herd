@@ -135,8 +135,9 @@ check('message column keeps the channel open (not replaced by the thread)', mess
 const panel = ThreadPanel({ channel: CH, rootId: 'r1', selfId: 'me', $thread: thread.page })
 check('panel is a labelled region', [panel.type, panel.props.role, panel.props['aria-label']],
   ['section', 'region', 'Thread'])
-ok('panel is 35–45% of the row', /(^|\s)w-\[(3[5-9]|4[0-5])%\](\s|$)/.test(panel.props.className),
-  panel.props.className)
+const ps = panel.props.style || {}
+ok('panel is a fixed-basis right sidebar (inline style, capped at 45%)',
+  ps.flex === '0 0 380px' && ps.maxWidth === '45%' && ps.overflow === 'hidden', JSON.stringify(ps))
 const close = byLabel(panel, 'Close thread')
 ok('a visible close control with an accessible name', close && close.props.onClick, 'no Close thread control')
 thread.page.set('r1')
