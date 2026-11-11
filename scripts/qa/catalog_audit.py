@@ -412,7 +412,10 @@ DYN_IMPORT_RE = re.compile(r"""\bimport\s*\(\s*([^)]*)\)""")
 
 
 def check_js(root: Path):
-    js_files = [p for p in iter_files(root) if p.suffix in (".js", ".mjs") and "tests" not in p.relative_to(root).parts]
+    # relay/ is the team room server (a Cloudflare Worker / node program). Hermes never loads it, so the desktop
+    # plugin's import and timer rules do not apply there; every other check (secrets, text) still covers it.
+    js_files = [p for p in iter_files(root) if p.suffix in (".js", ".mjs")
+                and not {"tests", "relay"} & set(p.relative_to(root).parts)]
     for p in js_files:
         text = p.read_text(encoding="utf-8", errors="replace")
         where = rel(root, p)

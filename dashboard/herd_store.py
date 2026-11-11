@@ -41,7 +41,7 @@ import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
@@ -81,6 +81,38 @@ NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
 REACTIONS = ["👍", "❤️", "👀", "🎉"]
 LEGACY_REACTIONS = ["👁️"]
 _ACCEPTED_REACTIONS = REACTIONS + LEGACY_REACTIONS
+REACTION_MAX_CHARS = 16  # a family or flag emoji is several code points joined together
+
+
+def is_reaction_emoji(value: Any) -> bool:
+    """Whether ``value`` is usable as a reaction: one short emoji, never text.
+
+    The four quick reactions are always accepted. Anything else must be short, hold no letters, digits, spaces or
+    control characters, and contain at least one pictograph, so a reaction can never carry a word or a link."""
+    if not isinstance(value, str) or not value:
+        return False
+    if value in _ACCEPTED_REACTIONS:
+        return True
+    if len(value) > REACTION_MAX_CHARS:
+        return False
+    pictograph = False
+    for ch in value:
+        code = ord(ch)
+        if code in (0x200D, 0xFE0F, 0x20E3) or 0x1F3FB <= code <= 0x1F3FF or 0xE0020 <= code <= 0xE007F:
+            continue  # joiner, emoji presentation, keycap, skin tone, flag tag letters
+        if (0x1F000 <= code <= 0x1FAFF or 0x2600 <= code <= 0x27BF or 0x2B00 <= code <= 0x2BFF
+                or 0x2190 <= code <= 0x21FF or 0x2300 <= code <= 0x23FF or 0x25A0 <= code <= 0x25FF
+                or 0x2900 <= code <= 0x297F or code in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x3030,
+                                                        0x303D, 0x3297, 0x3299)):
+            pictograph = True
+            continue
+        return False
+    return pictograph
+
+
+def _reaction_rank(emoji: str) -> tuple:
+    """Quick reactions first, in their fixed order; every other emoji after them, in a stable order."""
+    return (0, _ACCEPTED_REACTIONS.index(emoji), "") if emoji in _ACCEPTED_REACTIONS else (1, 0, emoji)
 
 _CHANNEL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 # Gateway ids are plain identifier strings (a uuid4 hex in this codebase). A DM whose member id is not
@@ -127,7 +159,7 @@ class HerdError(Exception):
 # One row per teammate, keyed by the teammate's name (spec §1.2). The URL is recorded so a changed address
 # resets that teammate's cursors instead of trusting cursors that belonged to another gateway.
 _PEER_STATE_COLS = ("push_seq", "pull_seq", "push_rseq", "pull_rseq", "remote_gateway_id", "remote_name",
-                    "last_attempt", "last_ok", "last_error")
+                    "last_attempt", "last_ok", "last_error")  # the columns the url-keyed layout also had
 _PEER_STATE_DDL = """CREATE TABLE IF NOT EXISTS peer_state (
     name TEXT PRIMARY KEY,
     url TEXT NOT NULL DEFAULT '',
@@ -139,7 +171,9 @@ _PEER_STATE_DDL = """CREATE TABLE IF NOT EXISTS peer_state (
     remote_name TEXT NOT NULL DEFAULT '',
     last_attempt TEXT NOT NULL DEFAULT '',
     last_ok TEXT NOT NULL DEFAULT '',
-    last_error TEXT NOT NULL DEFAULT ''
+    last_error TEXT NOT NULL DEFAULT '',
+    push_eseq INTEGER NOT NULL DEFAULT 0,
+    pull_eseq INTEGER NOT NULL DEFAULT 0
 );"""
 
 _SCHEMA = """
@@ -168,14 +202,17 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL,
     thread_parent_id TEXT,
     promoted_from TEXT,
-    task_id TEXT
+    task_id TEXT,
+    edited_at TEXT,
+    deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at, id);
 CREATE TABLE IF NOT EXISTS participants (
     id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
     is_self INTEGER NOT NULL DEFAULT 0,
-    last_seen TEXT NOT NULL
+    last_seen TEXT NOT NULL,
+    relay_seen TEXT NOT NULL DEFAULT ''
 );
 """ + _PEER_STATE_DDL + """
 CREATE TABLE IF NOT EXISTS incoming_peers (
@@ -224,6 +261,17 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
     used_at TEXT NOT NULL DEFAULT '',
     used_by TEXT NOT NULL DEFAULT ''
 );
+-- The latest edit (or deletion) of a message: one row per message, newest edited_at wins. It rides the sync
+-- round with its own cursor (eseq), like reactions. channel_id is '' while the message itself has not arrived.
+CREATE TABLE IF NOT EXISTS edits (
+    eseq INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT UNIQUE NOT NULL,
+    channel_id TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    deleted INTEGER NOT NULL DEFAULT 0,
+    edited_at TEXT NOT NULL,
+    gateway_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS read_cursors (
     channel_id TEXT PRIMARY KEY,
     seq INTEGER NOT NULL DEFAULT 0
@@ -237,9 +285,9 @@ _initialized: set[str] = set()
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
 _REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips",
-                    "messages_fts", "read_cursors", "pairing_codes")
+                    "messages_fts", "read_cursors", "pairing_codes", "edits")
 _REQUIRED_MESSAGE_COLS = ("id", "channel_id", "content", "created_at", "thread_parent_id",
-                          "promoted_from", "task_id")
+                          "promoted_from", "task_id", "edited_at", "deleted")
 
 
 def _now() -> str:
@@ -283,6 +331,8 @@ def _schema_usable(conn: sqlite3.Connection) -> bool:
         if not set(_REQUIRED_TABLES) <= have:
             return False
         cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "relay_seen" not in {r[1] for r in conn.execute("PRAGMA table_info(participants)")}:
+            return False
         return set(_REQUIRED_MESSAGE_COLS) <= cols
     except sqlite3.DatabaseError:
         return False
@@ -295,6 +345,14 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
         if key in _initialized and _schema_usable(conn):
             return
         had_cursors = _has_table(conn, "read_cursors")
+        # Columns the schema's own statements (indexes, triggers) may name must exist before the script runs on
+        # an older database; CREATE TABLE IF NOT EXISTS never adds them.
+        if _has_table(conn, "messages"):
+            have_cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+            if "edited_at" not in have_cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN edited_at TEXT")
+            if "deleted" not in have_cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
         conn.executescript(_SCHEMA)
         _backfill_search_index(conn)
         if not had_cursors:
@@ -310,9 +368,11 @@ def _ensure_schema(conn: sqlite3.Connection, key: str) -> None:
             conn.execute("ALTER TABLE messages ADD COLUMN task_id TEXT")
         if "topic_at" not in {r[1] for r in conn.execute("PRAGMA table_info(channels)")}:
             conn.execute("ALTER TABLE channels ADD COLUMN topic_at TEXT NOT NULL DEFAULT ''")
+        if "relay_seen" not in {r[1] for r in conn.execute("PRAGMA table_info(participants)")}:
+            conn.execute("ALTER TABLE participants ADD COLUMN relay_seen TEXT NOT NULL DEFAULT ''")
         # Pre-S-12 DBs have peer_state without the reaction cursors (CREATE IF NOT EXISTS won't add them).
         have = {r[1] for r in conn.execute("PRAGMA table_info(peer_state)").fetchall()}
-        for col in ("push_rseq", "pull_rseq"):
+        for col in ("push_rseq", "pull_rseq", "push_eseq", "pull_eseq"):
             if col not in have:
                 conn.execute(f"ALTER TABLE peer_state ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
         _rekey_peer_state(conn)
@@ -504,6 +564,10 @@ def _channel_row(row: sqlite3.Row) -> dict:
     except ValueError:
         out["members"] = []
     out["is_dm"] = bool(out.get("is_dm"))
+    # Two kinds of member-listed channel: a group conversation (opened from People, named after its members)
+    # and a private channel (created with a name and a member list). Both go only to their members.
+    out["is_group"] = (not out["is_dm"]) and str(out.get("id") or "").startswith(GROUP_PREFIX) and bool(out["members"])
+    out["is_private"] = (not out["is_dm"]) and bool(out["members"]) and not out["is_group"]
     return out
 
 
@@ -521,7 +585,8 @@ def _unread_counts(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute(
         "SELECT m.channel_id, COUNT(*) AS n FROM messages m "
         "LEFT JOIN read_cursors r ON r.channel_id = m.channel_id "
-        "WHERE m.seq > COALESCE(r.seq, 0) AND m.gateway_id != ? GROUP BY m.channel_id", (me,)).fetchall()
+        "WHERE m.seq > COALESCE(r.seq, 0) AND m.gateway_id != ? AND m.deleted = 0 GROUP BY m.channel_id",
+        (me,)).fetchall()
     return {r["channel_id"]: int(r["n"]) for r in rows}
 
 
@@ -605,6 +670,8 @@ def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
     clean = normalize_channel_name(name)
     if not clean:
         raise HerdError(422, "Channel name is required.")
+    if clean.startswith(GROUP_PREFIX):
+        raise HerdError(422, f"Channel names can't start with {GROUP_PREFIX} (that is how group conversations are stored).")
     if not _CHANNEL_NAME_RE.match(clean):
         raise HerdError(422, "Use lowercase letters, numbers, - or _ (max 48 characters).")
     member_list: list[dict] = []
@@ -634,7 +701,8 @@ def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
         except sqlite3.IntegrityError as exc:
             raise HerdError(409, f"#{clean} already exists.") from exc
     request_sync()
-    return {**channel, "is_dm": False, "members": member_list, "message_count": 0, "last_message_at": None}
+    return {**channel, "is_dm": False, "members": member_list, "message_count": 0, "last_message_at": None,
+            "is_group": False, "is_private": bool(member_list)}
 
 
 def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
@@ -652,7 +720,7 @@ def share_dm(dm_ref: str, name: Any, topic: Any = "") -> dict:
     with connect() as conn:
         src = conn.execute(
             "SELECT id, author_type, author_name, gateway_name, content, created_at, thread_parent_id, task_id "
-            "FROM messages WHERE channel_id = ? ORDER BY created_at, id", (dm["id"],)).fetchall()
+            "FROM messages WHERE channel_id = ? AND deleted = 0 ORDER BY created_at, id", (dm["id"],)).fetchall()
     if not src:
         raise HerdError(422, "This conversation has no messages to share yet.")
     me = identity()["gateway_id"]
@@ -762,6 +830,45 @@ def open_dm(participant_id: str) -> dict:
     return _channel_row(row)
 
 
+GROUP_PREFIX = "gdm-"
+
+
+def group_channel_id(member_ids: Any) -> str:
+    """The id of the group conversation between these people: the same on every gateway, whoever opens it."""
+    digest = hashlib.sha256("+".join(sorted(str(m) for m in member_ids)).encode("utf-8")).hexdigest()
+    return GROUP_PREFIX + digest[:20]
+
+
+def open_group(participant_ids: Any) -> dict:
+    """Get or create the group conversation between this person and two to four others.
+
+    It is a channel with a member list (so it only ever goes to those people), whose id is derived from the
+    members: two people who each open "the same group" land in one conversation, not two."""
+    if not isinstance(participant_ids, list):
+        raise HerdError(422, "Pick the people for this group.")
+    me = identity()
+    others = sorted({str(p or "").strip() for p in participant_ids} - {"", me["gateway_id"]})
+    if len(others) == 1:
+        return open_dm(others[0])
+    if len(others) < 2 or len(others) + 1 > MAX_HUMANS:
+        raise HerdError(422, f"A group holds 3 to {MAX_HUMANS} people, including you.")
+    with connect() as conn:
+        known = {r["id"]: r["display_name"] for r in conn.execute(
+            "SELECT id, display_name FROM participants WHERE is_self = 0")}
+        if any(o not in known for o in others):
+            raise HerdError(404, "One of those people isn't connected yet.")
+        members = sorted([{"id": me["gateway_id"], "name": me["display_name"]},
+                          *[{"id": o, "name": known[o]} for o in others]], key=lambda m: m["id"])
+        channel_id = group_channel_id([m["id"] for m in members])
+        conn.execute(
+            "INSERT OR IGNORE INTO channels(id, name, topic, is_dm, members, created_at) VALUES (?, ?, '', 0, ?, ?)",
+            (channel_id, channel_id, json.dumps(members), _now()))
+        row = conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
+    _notify("channels.changed", {})
+    request_sync()
+    return _channel_row(row)
+
+
 def _clean_members(value: Any) -> Optional[list[dict]]:
     """A member list from a peer or a caller, as ``[{id, name}]``: plain ids, no repeats, at most five people.
 
@@ -819,6 +926,8 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
             return  # malformed, or more than five people: refused, never repaired
         if members and _local_gateway_id(conn) not in _member_ids(members):
             return  # a member-listed channel that does not include this gateway is not ours to hold
+        if cid.startswith(GROUP_PREFIX) and cid != group_channel_id(_member_ids(members)):
+            return  # a group conversation's id is derived from its members; one that does not match is refused
         created = str(ch.get("created_at") or _now())[:40]
         topic = _one_line(ch.get("topic"))[:200]
         their_at = str(ch.get("topic_at") or created)[:40]
@@ -840,14 +949,14 @@ def _upsert_channel(conn: sqlite3.Connection, ch: dict) -> None:
 # ---------------------------------------------------------------------------
 
 _MESSAGE_COLS = ("seq, id, channel_id, author_type, author_name, gateway_id, gateway_name, content, "
-                 "created_at, thread_parent_id, promoted_from, task_id")
+                 "created_at, thread_parent_id, promoted_from, task_id, edited_at, deleted")
 # Same columns qualified for the reply-count queries, plus the per-message thread summary.
 _MESSAGE_SELECT = (
     ", ".join("m." + c.strip() for c in _MESSAGE_COLS.split(","))
-    + ", (SELECT COUNT(*) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
-    " AS reply_count"
-    ", (SELECT MAX(r.created_at) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id)"
-    " AS last_reply_at"
+    + ", (SELECT COUNT(*) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id"
+    " AND r.deleted = 0) AS reply_count"
+    ", (SELECT MAX(r.created_at) FROM messages r WHERE r.thread_parent_id = m.id AND r.channel_id = m.channel_id"
+    " AND r.deleted = 0) AS last_reply_at"
     ", (SELECT w.reason FROM wake_skips w WHERE w.message_id = m.id) AS wake_skip"
 )
 
@@ -963,6 +1072,118 @@ def _thread_root_id(conn: sqlite3.Connection, message_id: str, channel_id: Optio
     return row["id"]
 
 
+def _own_message(conn: sqlite3.Connection, message_id: Any) -> sqlite3.Row:
+    """The message, if it was written on this gateway (by its person or its agent) and is still there."""
+    mid = str(message_id or "").strip()
+    row = conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (mid,)).fetchone()
+    if row is None or row["deleted"]:
+        raise HerdError(404, "That message isn't here any more.")
+    if row["gateway_id"] != _local_gateway_id(conn):
+        raise HerdError(403, "You can only change messages written on this Herd.")
+    return row
+
+
+def _record_edit(conn: sqlite3.Connection, row: sqlite3.Row, content: str, deleted: int) -> str:
+    """Write an edit of one of this gateway's messages: the message row, and the edit row that syncs it."""
+    stamp = _now()
+    if row["edited_at"] and _ts(stamp) <= _ts(row["edited_at"]):  # two edits in one millisecond: keep them ordered
+        stamp = (_ts(row["edited_at"]) + timedelta(milliseconds=1)).isoformat(timespec="milliseconds")
+    conn.execute("UPDATE messages SET content = ?, edited_at = ?, deleted = ? WHERE id = ?",
+                 (content, stamp, deleted, row["id"]))
+    conn.execute(
+        "INSERT OR REPLACE INTO edits(message_id, channel_id, content, deleted, edited_at, gateway_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)", (row["id"], row["channel_id"], content, deleted, stamp, row["gateway_id"]))
+    return stamp
+
+
+def edit_message(message_id: Any, content: Any) -> dict:
+    """Change the text of a message written on this gateway. The change syncs; the newest edit wins everywhere.
+    An edit never wakes an agent (the original post already did, or didn't)."""
+    text = str(content or "")
+    if not text.strip():
+        raise HerdError(422, "Message is empty. Delete it instead.")
+    if len(text) > MAX_CONTENT:
+        raise HerdError(422, f"Message is too long (max {MAX_CONTENT} characters).")
+    with connect() as conn:
+        row = _own_message(conn, message_id)
+        if text != row["content"]:
+            _record_edit(conn, row, text, 0)
+        stored = dict(conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?", (row["id"],)).fetchone())
+    _notify("message.created", {"channel_id": stored["channel_id"], "id": stored["id"],
+                                "thread_parent_id": stored["thread_parent_id"]})
+    request_sync()
+    return stored
+
+
+def delete_message(message_id: Any) -> dict:
+    """Delete a message written on this gateway. Its text is removed here and, through sync, everywhere; its
+    reactions go with it. A message with replies keeps its place in the channel as "deleted"."""
+    with connect() as conn:
+        row = _own_message(conn, message_id)
+        _record_edit(conn, row, "", 1)
+        conn.execute("DELETE FROM wake_skips WHERE message_id = ?", (row["id"],))
+    _notify("message.created", {"channel_id": row["channel_id"], "id": row["id"],
+                                "thread_parent_id": row["thread_parent_id"]})
+    request_sync()
+    return {"id": row["id"], "channel_id": row["channel_id"], "deleted": True}
+
+
+def _valid_edit(e: Any) -> Optional[dict]:
+    if not isinstance(e, dict):
+        return None
+    mid = str(e.get("message_id") or "")[:64]
+    gid = str(e.get("gateway_id") or "").strip()[:64]
+    stamp = str(e.get("edited_at") or "")[:40]
+    deleted = 1 if e.get("deleted") else 0
+    content = "" if deleted else str(e.get("content") or "")
+    if not mid or not _MEMBER_ID_RE.match(gid) or not stamp or not _valid_stamp(stamp):
+        return None
+    if not deleted and (not content.strip() or len(content) > MAX_CONTENT):
+        return None
+    return {"message_id": mid, "gateway_id": gid, "edited_at": stamp, "deleted": deleted, "content": content}
+
+
+def _apply_edit(conn: sqlite3.Connection, e: dict) -> Optional[str]:
+    """Apply one validated edit row. Returns the channel it changed, or None when nothing changed.
+
+    Only the gateway that wrote a message can edit it, so the edit must name the message's own gateway. The
+    newest ``edited_at`` wins, whatever order edits arrive in. An edit that arrives before its message is kept
+    (``channel_id`` '') and applied when the message lands."""
+    held = conn.execute("SELECT edited_at FROM edits WHERE message_id = ?", (e["message_id"],)).fetchone()
+    if held is not None and _ts(held["edited_at"]) >= _ts(e["edited_at"]):
+        return None
+    msg = conn.execute("SELECT channel_id, gateway_id FROM messages WHERE id = ?", (e["message_id"],)).fetchone()
+    if msg is not None and msg["gateway_id"] != e["gateway_id"]:
+        return None  # someone else's message: not theirs to change
+    channel_id = msg["channel_id"] if msg is not None else ""
+    conn.execute(
+        "INSERT OR REPLACE INTO edits(message_id, channel_id, content, deleted, edited_at, gateway_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (e["message_id"], channel_id, e["content"], e["deleted"], e["edited_at"], e["gateway_id"]))
+    if msg is None:
+        return None
+    conn.execute("UPDATE messages SET content = ?, edited_at = ?, deleted = ? WHERE id = ?",
+                 (e["content"], e["edited_at"], e["deleted"], e["message_id"]))
+    return channel_id
+
+
+def _apply_held_edit(conn: sqlite3.Connection, m: dict) -> None:
+    """A message just arrived: if its edit got here first, apply it now and let it sync on from here."""
+    held = conn.execute("SELECT content, deleted, edited_at, gateway_id FROM edits WHERE message_id = ? "
+                        "AND channel_id = ''", (m["id"],)).fetchone()
+    if held is None:
+        return
+    if held["gateway_id"] != m["gateway_id"]:
+        conn.execute("DELETE FROM edits WHERE message_id = ?", (m["id"],))
+        return
+    conn.execute("UPDATE messages SET content = ?, edited_at = ?, deleted = ? WHERE id = ?",
+                 (held["content"], held["edited_at"], held["deleted"], m["id"]))
+    conn.execute(
+        "INSERT OR REPLACE INTO edits(message_id, channel_id, content, deleted, edited_at, gateway_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (m["id"], m["channel_id"], held["content"], held["deleted"], held["edited_at"], held["gateway_id"]))
+
+
 def get_message(message_id: str) -> Optional[dict]:
     with connect() as conn:
         row = conn.execute(f"SELECT {_MESSAGE_COLS} FROM messages WHERE id = ?",
@@ -979,7 +1200,7 @@ def list_thread(parent_id: str) -> dict:
                                    (root_id,)).fetchone())
         replies = conn.execute(
             f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.thread_parent_id = ? AND m.channel_id = ? "
-            "ORDER BY m.created_at, m.id", (root_id, parent["channel_id"])).fetchall()
+            "AND m.deleted = 0 ORDER BY m.created_at, m.id", (root_id, parent["channel_id"])).fetchall()
     return {"parent": _with_wake_notes([parent])[0], "replies": _with_wake_notes([dict(r) for r in replies])}
 
 
@@ -1014,7 +1235,7 @@ def search_messages(text: Any, *, channel: Optional[str] = None, limit: Any = No
         cap = SEARCH_DEFAULT_LIMIT
     cap = max(1, min(cap, SEARCH_MAX_LIMIT))
     args: list[Any] = [match]
-    where = "messages_fts MATCH ?"
+    where = "messages_fts MATCH ? AND m.deleted = 0"
     if channel is not None and str(channel).strip():
         found = resolve_channel(channel)
         if not found:
@@ -1044,6 +1265,9 @@ def _with_wake_notes(rows: list[dict]) -> list[dict]:
     return rows
 
 
+MESSAGES_MAX_LIMIT = 5000  # the pane starts at 200 and asks for more as the reader loads older messages
+
+
 def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: int = 200) -> list[dict]:
     """Top-level messages in a channel, oldest first (newest last), each with ``reply_count`` and
     ``last_reply_at``; replies live in ``list_thread``. ``after_seq`` is a local cursor, immune
@@ -1051,7 +1275,7 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
     channel = resolve_channel(channel_ref)
     if not channel:
         raise HerdError(404, f"No channel or DM named '{channel_ref}'.")
-    limit = max(1, min(int(limit or 200), 500))
+    limit = max(1, min(int(limit or 200), MESSAGES_MAX_LIMIT))
     with connect() as conn:
         if after_seq is not None:
             rows = conn.execute(
@@ -1065,9 +1289,11 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
                 "ORDER BY created_at, id",
                 (channel["id"], limit)).fetchall()
         reactions = _reaction_map(conn, channel["id"])
-    out = _with_wake_notes([dict(r) for r in rows])
+    # A deleted message disappears, unless a thread hangs off it: then its place is kept (the pane shows
+    # "This message was deleted") so the replies still have somewhere to live.
+    out = _with_wake_notes([dict(r) for r in rows if not r["deleted"] or r["reply_count"]])
     for m in out:
-        m["reactions"] = reactions.get(m["id"], [])
+        m["reactions"] = [] if m["deleted"] else reactions.get(m["id"], [])
     return out
 
 
@@ -1083,11 +1309,11 @@ def _reaction_map(conn: sqlite3.Connection, channel_id: str, me: Optional[str] =
         args.append(message_id)
     out: dict[str, list[dict]] = {}
     for r in conn.execute(sql + " GROUP BY message_id, emoji", args).fetchall():
-        if r["emoji"] in _ACCEPTED_REACTIONS:
+        if is_reaction_emoji(r["emoji"]):
             out.setdefault(r["message_id"], []).append(
                 {"emoji": r["emoji"], "count": r["n"], "mine": bool(r["mine"])})
     for items in out.values():
-        items.sort(key=lambda x: _ACCEPTED_REACTIONS.index(x["emoji"]))
+        items.sort(key=lambda x: _reaction_rank(x["emoji"]))
     return out
 
 
@@ -1106,8 +1332,8 @@ def toggle_reaction(channel_ref: str, message_id: str, emoji: Any) -> dict:
         if not conn.execute("SELECT 1 FROM messages WHERE id = ? AND channel_id = ?",
                             (mid, channel["id"])).fetchone():
             raise HerdError(404, "No message with that id.")
-    if emoji not in _ACCEPTED_REACTIONS:
-        raise HerdError(422, "Pick one of " + " ".join(REACTIONS) + ".")
+    if not is_reaction_emoji(emoji):
+        raise HerdError(422, "A reaction is one emoji, such as " + " ".join(REACTIONS) + ".")
     me = identity()["gateway_id"]
     rid = f"{mid}|{emoji}|{me}"
     with connect() as conn:
@@ -1138,8 +1364,13 @@ def list_participants() -> list[dict]:
         age = (now - _ts(r["last_seen"])).total_seconds()
         # ``last_seen`` moves on every sync exchange with that gateway (every few seconds while both run), so a
         # recent one means their Hermes is up. A person we only know through a relay has no direct exchange.
-        out.append({**dict(r), "is_self": bool(r["is_self"]),
-                    "online": bool(r["is_self"]) or 0 <= age < ONLINE_WINDOW_S})
+        # Someone reached through a team room is online when the room said so recently (the room hears from every
+        # running Herd at least once a minute).
+        relay_age = (now - _ts(r["relay_seen"])).total_seconds() if r["relay_seen"] else -1.0
+        row = {k: v for k, v in dict(r).items() if k != "relay_seen"}
+        out.append({**row, "is_self": bool(r["is_self"]),
+                    "online": bool(r["is_self"]) or 0 <= age < ONLINE_WINDOW_S
+                    or 0 <= relay_age < RELAY_ONLINE_WINDOW_S})
     return out
 
 
@@ -1163,10 +1394,18 @@ def _valid_message(m: Any) -> Optional[dict]:
             "promoted_from": str(m.get("promoted_from") or "")[:200],
             # Explicit tie only: a peer value that isn't a clean Kanban id is dropped, never repaired.
             "task_id": _kanban().normalize_task_id(m.get("task_id")) or "",
+            "edited_at": str(m.get("edited_at") or "")[:40],
+            "deleted": 1 if m.get("deleted") else 0,
         }
     except (KeyError, TypeError):
         return None
-    if not out["id"] or not out["content"].strip() or len(out["content"]) > MAX_CONTENT:
+    if out["edited_at"] and not _valid_stamp(out["edited_at"]):
+        out["edited_at"] = ""
+    if out["deleted"]:
+        out["content"] = ""  # a deleted message travels as an empty shell, so threads under it keep their root
+    elif not out["content"].strip():
+        return None
+    if not out["id"] or len(out["content"]) > MAX_CONTENT:
         return None
     if out["author_type"] not in _AUTHOR_TYPES:
         return None
@@ -1177,7 +1416,7 @@ def _valid_reaction(r: Any) -> Optional[dict]:
     if not isinstance(r, dict):
         return None
     emoji = r.get("emoji")
-    if emoji not in _ACCEPTED_REACTIONS:
+    if not is_reaction_emoji(emoji):
         return None
     mid = str(r.get("message_id") or "")[:64]
     gateway_id = str(r.get("gateway_id") or "")[:64]
@@ -1216,7 +1455,7 @@ def _bound_gateway_name(row_name: str, sender_name: str, sender_gid: str, origin
     return row_name
 
 
-def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = None) -> int:
+def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = None, relay: bool = False) -> int:
     """Store channels + messages received from a peer. Idempotent. Returns rows newly inserted.
 
     ``suppress_wakes``: store everything but never wake the agent (a peer's first exchange is history).
@@ -1225,6 +1464,10 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     refused when it claims THIS gateway's id, or a malformed one (S-21). Otherwise it keeps the origin id it
     claims, which is how a relayed row arrives (spec §1.3). A row with no claim binds to the sender. The batch is
     untrusted input: the sender comes from ``batch["from"]``, and no row can be stored as this gateway.
+
+    ``relay``: the batch came from the team room this gateway joined. A room is a store, not a person: it is not
+    added to People, and it is not expected to be a member of the channels it carries (the room itself only hands
+    a member-listed channel to its members). Every row's origin is still checked exactly as for a teammate.
     """
     sender = batch.get("from") if isinstance(batch.get("from"), dict) else {}
     sender_gid = str(sender.get("gateway_id") or "").strip()[:64]
@@ -1232,6 +1475,11 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     channels = batch.get("channels") if isinstance(batch.get("channels"), list) else []
     messages = batch.get("messages") if isinstance(batch.get("messages"), list) else []
     reactions = batch.get("reactions") if isinstance(batch.get("reactions"), list) else []
+    edits = batch.get("edits") if isinstance(batch.get("edits"), list) else []
+
+    def _sender_ok(members_json: Any) -> bool:
+        return relay or _accepts_from(members_json, sender_gid)
+
     inserted = 0
     touched: set[str] = set()
     rtouched: set[str] = set()
@@ -1240,7 +1488,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
     with connect() as conn:
         local_gid = _local_gateway_id(conn)
         dropped = 0
-        if sender.get("gateway_id"):
+        if sender.get("gateway_id") and not relay:
             _touch_participant(conn, str(sender["gateway_id"])[:64],
                                _clean_name(sender.get("display_name"), "peer"), False)
         for ch in channels[:BATCH_LIMIT]:
@@ -1259,7 +1507,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
             channel_row = conn.execute("SELECT members FROM channels WHERE id = ?", (m["channel_id"],)).fetchone()
             if channel_row is None:
                 continue
-            if not (_accepts_from(channel_row["members"], sender_gid) and _accepts_from(channel_row["members"], gid)):
+            if not (_sender_ok(channel_row["members"]) and _accepts_from(channel_row["members"], gid)):
                 dropped += 1  # sent by, or relayed from, someone who is not a member of this channel
                 continue
             tid = m.get("thread_parent_id")
@@ -1282,16 +1530,19 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 # parent arrives; dropping it would be silent data loss.
             cur = conn.execute(
                 "INSERT OR IGNORE INTO messages(id, channel_id, author_type, author_name, gateway_id, "
-                "gateway_name, content, created_at, thread_parent_id, promoted_from, task_id) VALUES (:id, "
-                ":channel_id, :author_type, :author_name, :gateway_id, :gateway_name, :content, "
+                "gateway_name, content, created_at, thread_parent_id, promoted_from, task_id, edited_at, deleted) "
+                "VALUES (:id, :channel_id, :author_type, :author_name, :gateway_id, :gateway_name, :content, "
                 ":created_at, NULLIF(:thread_parent_id, ''), NULLIF(:promoted_from, ''), "
-                "NULLIF(:task_id, ''))", m)
+                "NULLIF(:task_id, ''), NULLIF(:edited_at, ''), :deleted)", m)
             if cur.rowcount:
                 inserted += 1
                 touched.add(m["channel_id"])
-                wakes.append(m)
-                if m["gateway_id"] != local_gid and not m.get("promoted_from"):
-                    fresh.append(m)
+                _apply_held_edit(conn, m)
+                # A room marks what a newly joined teammate uploaded as history: stored, never announced or woken on.
+                if not m["deleted"] and not (relay and isinstance(raw, dict) and raw.get("history")):
+                    wakes.append(m)
+                    if m["gateway_id"] != local_gid and not m.get("promoted_from"):
+                        fresh.append(m)
         for raw in reactions[:BATCH_LIMIT]:
             r = _valid_reaction(raw)
             if not r:
@@ -1306,7 +1557,7 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 "WHERE m.id = ?", (r["message_id"],)).fetchone()
             if not msg:
                 continue
-            if not (_accepts_from(msg["members"], sender_gid) and _accepts_from(msg["members"], rgid)):
+            if not (_sender_ok(msg["members"]) and _accepts_from(msg["members"], rgid)):
                 dropped += 1
                 continue
             r["channel_id"] = msg["channel_id"]
@@ -1322,6 +1573,23 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
                 "INSERT OR REPLACE INTO reactions(id, message_id, channel_id, emoji, gateway_id, active, "
                 "created_at) VALUES (:id, :message_id, :channel_id, :emoji, :gateway_id, :active, :created_at)", r)
             rtouched.add(r["channel_id"])
+        for raw in edits[:BATCH_LIMIT]:
+            e = _valid_edit(raw)
+            if not e:
+                continue
+            if e["gateway_id"] == local_gid:
+                dropped += 1  # nothing written here is ever changed from outside (as with rows claiming our id)
+                continue
+            target = conn.execute(
+                "SELECT c.members FROM messages m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.id = ?",
+                (e["message_id"],)).fetchone()
+            if target is not None and not (_sender_ok(target["members"])
+                                           and _accepts_from(target["members"], e["gateway_id"])):
+                dropped += 1
+                continue
+            changed = _apply_edit(conn, e)
+            if changed:
+                touched.add(changed)
     if isinstance(stats, dict):
         stats["accepted"] = inserted
         stats["dropped"] = dropped
@@ -1338,13 +1606,18 @@ def ingest(batch: dict, suppress_wakes: bool = False, stats: Optional[dict] = No
 
 
 def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_LIMIT,
-                 after_rseq: int = 0, viewer_gateway: str = "") -> dict:
+                 after_rseq: int = 0, viewer_gateway: str = "", after_eseq: int = 0,
+                 everything: bool = False) -> dict:
     """Our channels + messages after ``after_seq`` (skipping ones that came from ``exclude_gateway``).
 
     ``viewer_gateway`` is the requesting gateway's id, as the call site authenticated it (never read
     from a row). A DM — its channel, its messages, and reactions on it — is only returned to a member
     of that DM. A channel with a member list is only returned to its members (spec §1.6). Open channels
     (no member list) go to every caller. An empty ``viewer_gateway`` gets no DMs and no restricted channels.
+
+    ``everything`` is for the team room this gateway joined: the room holds the conversation for all of its
+    members and applies the same member rules itself when it hands rows out, so it is sent every row. It is a
+    separate argument, never a special viewer id, so no caller can ask for it over the wire.
     """
     with connect() as conn:
         examined = conn.execute(
@@ -1352,18 +1625,21 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
             (int(after_seq), int(limit))).fetchall()
         channels = [_channel_row(r) for r in conn.execute("SELECT * FROM channels").fetchall()]
         known = {c["id"] for c in channels}
-        visible = {c["id"] for c in channels if _channel_visible(c, viewer_gateway)}
+        visible = {c["id"] for c in channels if everything or _channel_visible(c, viewer_gateway)}
         channels = [c for c in channels if c["id"] in visible]
         rexamined = conn.execute(
             "SELECT rseq, id, message_id, channel_id, emoji, gateway_id, active, created_at FROM reactions "
             "WHERE rseq > ? ORDER BY rseq LIMIT ?", (int(after_rseq), int(limit))).fetchall()
+        eexamined = conn.execute(
+            "SELECT eseq, message_id, channel_id, content, deleted, edited_at, gateway_id FROM edits "
+            "WHERE eseq > ? ORDER BY eseq LIMIT ?", (int(after_eseq), int(limit))).fetchall()
     # The cursor moves past excluded rows too (the peer already has its own messages), and past rows
     # in a DM the viewer is not a member of (it may never have them): the filter runs after the
     # LIMIT-bounded SELECT, so a filtered row is examined once and never re-pulled.
     def visible_here(channel_id: str) -> bool:
         if channel_id in known:
             return channel_id in visible
-        return _dm_export_allowed(channel_id, viewer_gateway)  # a row whose channel we never stored
+        return everything or _dm_export_allowed(channel_id, viewer_gateway)  # a row whose channel we never stored
 
     rows = [dict(r) for r in examined
             if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
@@ -1371,8 +1647,15 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
     rrows = [dict(r) for r in rexamined
              if (not exclude_gateway or r["gateway_id"] != exclude_gateway) and visible_here(r["channel_id"])]
     next_rseq = rexamined[-1]["rseq"] if rexamined else int(after_rseq)
+    # An edit still waiting for its message (channel_id '') stays here: where it belongs is not known yet. It
+    # gets a new eseq when the message lands, so passing it now loses nothing.
+    erows = [dict(r) for r in eexamined
+             if r["channel_id"] and (not exclude_gateway or r["gateway_id"] != exclude_gateway)
+             and visible_here(r["channel_id"])]
+    next_eseq = eexamined[-1]["eseq"] if eexamined else int(after_eseq)
     return {"channels": channels, "messages": rows, "next_seq": int(next_seq), "more": len(examined) >= limit,
-            "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit}
+            "reactions": rrows, "next_rseq": int(next_rseq), "rmore": len(rexamined) >= limit,
+            "edits": erows, "next_eseq": int(next_eseq), "emore": len(eexamined) >= limit}
 
 
 def _record_incoming(sender: dict) -> None:
@@ -1420,6 +1703,7 @@ def handle_peer_sync(body: Any) -> dict:
             _prime_peer_wake(conn, sender_gid)
     _record_incoming(sender)
     _record_peer_status(sender, body.get("status"))
+    _record_peer_typing(sender, body.get("typing"))
     try:
         after_seq = max(0, int(body.get("after_seq") or 0))
     except (TypeError, ValueError):
@@ -1428,7 +1712,12 @@ def handle_peer_sync(body: Any) -> dict:
         after_rseq = max(0, int(body.get("after_rseq") or 0))
     except (TypeError, ValueError):
         raise HerdError(422, "after_rseq must be an integer.")
-    out = export_batch(after_seq, exclude_gateway=sender_gid, after_rseq=after_rseq, viewer_gateway=sender_gid)
+    try:
+        after_eseq = max(0, int(body.get("after_eseq") or 0))
+    except (TypeError, ValueError):
+        raise HerdError(422, "after_eseq must be an integer.")
+    out = export_batch(after_seq, exclude_gateway=sender_gid, after_rseq=after_rseq, viewer_gateway=sender_gid,
+                       after_eseq=after_eseq)
     return {"v": PROTOCOL_VERSION, "from": identity(), "accepted": accepted,
             "dropped": counts.get("dropped", 0), **out}
 
@@ -1596,9 +1885,11 @@ def wake_ref(channel: dict) -> str:
 
 def wake_place(channel: dict, my_gateway_id: str) -> str:
     """Plain-language place for the 'who asked where' line: ``#general`` or ``your DM with Brooklyn``."""
+    others = [m.get("name") for m in channel.get("members", []) if m.get("id") != my_gateway_id]
+    if not channel["is_dm"] and str(channel.get("id") or "").startswith(GROUP_PREFIX) and others:
+        return "your group with " + ", ".join(str(o) for o in others if o)
     if not channel["is_dm"]:
         return "#" + channel["name"]
-    others = [m.get("name") for m in channel.get("members", []) if m.get("id") != my_gateway_id]
     return "your DM with " + (others[0] if others and others[0] else "them")
 
 
@@ -2234,6 +2525,7 @@ def _peer_state(conn: sqlite3.Connection, peer: dict) -> sqlite3.Row:
             conn.execute("INSERT INTO peer_state(name, url) VALUES (?, ?)", (peer["name"], peer["url"]))
     elif row["url"] != peer["url"]:
         conn.execute("UPDATE peer_state SET url = ?, push_seq = 0, pull_seq = 0, push_rseq = 0, pull_rseq = 0, "
+                     "push_eseq = 0, pull_eseq = 0, "
                      "remote_gateway_id = '', remote_name = '' WHERE name = ?", (peer["url"], peer["name"]))
     return conn.execute("SELECT * FROM peer_state WHERE name = ?", (peer["name"],)).fetchone()
 
@@ -2269,6 +2561,9 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
     """Push our new messages to one peer and pull theirs, until both sides are drained."""
     transport = TRANSPORT or _http_sync
     me = identity()
+    is_relay = bool(peer.get("relay"))
+    if is_relay:
+        me = {**me, "token": relay_member_token()}
     with connect() as conn:
         _peer_state(conn, peer)
         conn.execute("UPDATE peer_state SET last_attempt = ? WHERE name = ?", (_now(), peer["name"]))
@@ -2282,7 +2577,8 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
             with connect() as conn:
                 st = _peer_state(conn, peer)
             out = export_batch(st["push_seq"], exclude_gateway=st["remote_gateway_id"],
-                               after_rseq=st["push_rseq"], viewer_gateway=st["remote_gateway_id"])
+                               after_rseq=st["push_rseq"], viewer_gateway=st["remote_gateway_id"],
+                               after_eseq=st["push_eseq"], everything=is_relay)
             # Until the peer has told us who it is, send no message or reaction rows. Origin exclusion (no
             # echo back to the author) needs its gateway id, and without it our own rows, and rows relayed
             # from a third gateway, would travel back to their author. Channels still go, and the next round
@@ -2290,36 +2586,49 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
             identified = bool(st["remote_gateway_id"])
             sent_messages = out["messages"] if identified else []
             sent_reactions = out["reactions"] if identified else []
+            sent_edits = out["edits"] if identified else []
             # ``first_contact`` marks the whole first pass as history, not only the round that happens to carry
             # it: the identifying round is empty, so the history arrives a request later.
             resp = transport(peer, {"v": PROTOCOL_VERSION, "from": me, "channels": out["channels"],
                                     "messages": sent_messages, "after_seq": st["pull_seq"],
                                     "reactions": sent_reactions, "after_rseq": st["pull_rseq"],
-                                    "first_contact": first_contact, "status": status_for_peers()})
+                                    "edits": sent_edits, "after_eseq": st["pull_eseq"],
+                                    "first_contact": first_contact, "status": status_for_peers(),
+                                    "typing": typing_for_peer(st["remote_gateway_id"], everything=is_relay)})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
-            pulled += ingest(resp, suppress_wakes=first_contact)
+            if is_relay and remote.get("relay") is not True:
+                raise RelayMismatchError("That address answered, but it isn't a Herd team room.")
+            pulled += ingest(resp, suppress_wakes=first_contact, relay=is_relay)
+            if is_relay:
+                _record_room(resp)
             if identified:
                 pushed += len(sent_messages)
                 rpushed += len(sent_reactions)
             next_pull = resp.get("next_seq")
             next_rpull = resp.get("next_rseq")
+            next_epull = resp.get("next_eseq")  # absent from a peer that predates edits: the cursor holds
             with connect() as conn:
                 conn.execute(
-                    "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, remote_gateway_id = ?, remote_name = ?, "
+                    "UPDATE peer_state SET push_seq = ?, pull_seq = ?, push_rseq = ?, pull_rseq = ?, "
+                    "push_eseq = ?, pull_eseq = ?, remote_gateway_id = ?, remote_name = ?, "
                     "last_ok = ?, last_error = '' WHERE name = ?",
                     (out["next_seq"] if identified else st["push_seq"],
                      int(next_pull) if isinstance(next_pull, int) else st["pull_seq"],
                      out["next_rseq"] if identified else st["push_rseq"],
                      int(next_rpull) if isinstance(next_rpull, int) else st["pull_rseq"],
+                     out["next_eseq"] if identified else st["push_eseq"],
+                     int(next_epull) if isinstance(next_epull, int) else st["pull_eseq"],
                      str(remote.get("gateway_id") or st["remote_gateway_id"])[:64],
                      _clean_name(remote.get("display_name"), st["remote_name"]), _now(), peer["name"]))
             just_identified = not identified and bool(str(remote.get("gateway_id") or "").strip())
-            if not just_identified and not (out["more"] or out["rmore"] or resp.get("more") or resp.get("rmore")):
+            if not just_identified and not (out["more"] or out["rmore"] or out["emore"] or resp.get("more")
+                                            or resp.get("rmore") or resp.get("emore")):
                 break
         return {"name": peer["name"], "url": peer["url"], "ok": True, "pushed": pushed, "pulled": pulled,
                 "reactions_pushed": rpushed}
     except Exception as exc:  # noqa: BLE001 — a peer being down is a normal state, not a crash
-        message = ("No Herd secret saved for this peer — add your teammate's Herd secret in "
+        message = (_describe_room_error(exc) if is_relay
+                   else "No Herd secret saved for this peer — add your teammate's Herd secret in "
                    "Settings → Plugins → Herd." if isinstance(exc, PermissionError)
                    else str(exc) if isinstance(exc, PeerRefusedError)
                    else _describe_error(exc))
@@ -2348,6 +2657,11 @@ def sync_all(wait: bool = False) -> list[dict]:
         return []
     try:
         peers = configured_peers()
+        room = relay_peer()
+        if room is not None and _room_sync_due():
+            peers = [*peers, room]
+        if room is not None:
+            _ensure_room_waiter()
         # The test transport swaps this process's database and settings overrides for each gateway it
         # serves, so those tests run one teammate at a time. In production each teammate gets its own
         # thread: a slow or unreachable teammate waits on its own socket and never delays the others.
@@ -2376,6 +2690,7 @@ _kicker_lock = threading.Lock()
 
 def request_sync() -> None:
     """Sync soon, off the caller's thread (posting never waits on the network)."""
+    _room_kick.set()  # the next pass includes the team room, however recently it was synced
     if not AUTO_SYNC:
         return
     with _kicker_lock:
@@ -2393,6 +2708,397 @@ def request_sync() -> None:
             pass
 
     threading.Thread(target=lambda: ctx.run(_run), name="herd-sync-kick", daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Team room: a relay every member's Herd talks to, in place of a link to each teammate
+# ---------------------------------------------------------------------------
+#
+# A team room is a small server (relay/ in this repo: a Cloudflare Worker, or `node relay/server.mjs`) that
+# speaks the same sync exchange a teammate's gateway does, at ``<room url>/herd/v1/sync``. Each member pushes
+# what they wrote and pulls what the others wrote, so nobody has to be reachable from anybody else, and a
+# message written while a teammate's computer is asleep is waiting for them in the room.
+#
+# The room link is ``https://<relay>/r/<room>#<key>``. The key is the part after ``#``: it never appears in a
+# request line or a log, only in the Authorization header. A link saved from the Herd page is kept in herd.db
+# (this plugin's own data file); the Settings form takes the address in ``relay_url`` and the key in the secret
+# field ``relay_key`` (HERD_RELAY_KEY, read through agent.secret_scope).
+
+RELAY_KEY_ENV = "HERD_RELAY_KEY"
+RELAY_PEER_NAME = "herd team room"  # this link's row in peer_state; a person's name is one word in practice
+DEFAULT_RELAY_URL = ""  # the relay "Start a team room" uses when the owner gives no address
+RELAY_IDLE_SYNC_S = 30.0  # with the wait line open, the periodic tick only needs to refresh presence
+RELAY_RETRY_SYNC_S = 10.0  # without it (the room is unreachable, or an older relay): poll, gently
+RELAY_ONLINE_WINDOW_S = 90.0
+RELAY_WAIT_TIMEOUT_S = 40.0  # the relay holds a wait for about 25 s
+RELAY_ALONE_WAIT_S = 15.0  # nobody else is in the room: the relay answers at once, and we ask again after this
+RELAY_MAX_MEMBERS = 50
+_ROOM_PATH_RE = re.compile(r"^(?P<prefix>(?:/[A-Za-z0-9._~-]+)*)/r/(?P<room>[A-Za-z0-9_-]{8,64})$")
+_ROOM_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}\Z")
+
+
+class RelayMismatchError(RuntimeError):
+    """The room address answered with something that is not a Herd relay."""
+
+
+def parse_room_link(value: Any) -> tuple[str, str]:
+    """``(room url, key)`` from a room link; ``('', '')`` when the text is not one. The key may be ''."""
+    text = str(value or "").strip()
+    try:
+        parts = urllib.parse.urlsplit(text)
+        scheme, netloc = parts.scheme.lower(), parts.netloc
+        host = parts.hostname or ""
+    except ValueError:
+        return "", ""
+    if scheme not in ("http", "https") or not host or "@" in netloc or parts.query:
+        return "", ""
+    match = _ROOM_PATH_RE.match(parts.path.rstrip("/"))
+    if not match:
+        return "", ""
+    key = parts.fragment.strip()
+    if key and not _ROOM_KEY_RE.match(key):
+        return "", ""
+    return f"{scheme}://{netloc}{match.group('prefix')}/r/{match.group('room')}", key
+
+
+def is_room_link(value: Any) -> bool:
+    return bool(parse_room_link(value)[0])
+
+
+def _saved_room_link() -> str:
+    with connect() as conn:
+        return _meta_get(conn, "room_link", "")
+
+
+def relay_config() -> dict:
+    """The team room this gateway is in: ``{url, key, source}``, or ``{}`` when it is in none.
+
+    Settings win over a link saved from the Herd page, so an owner who manages config by hand stays in charge."""
+    url, key = parse_room_link(settings().get("relay_url"))
+    if url:
+        return {"url": url, "key": key or _secret(RELAY_KEY_ENV), "source": "settings"}
+    url, key = parse_room_link(_saved_room_link())
+    if url:
+        return {"url": url, "key": key, "source": "joined"}
+    return {}
+
+
+def relay_peer() -> Optional[dict]:
+    """The team room as a sync target, or None: not joined, or its address may not carry the key."""
+    cfg = relay_config()
+    if not cfg or _peer_url_refusal(cfg["url"]):
+        return None
+    return {"name": RELAY_PEER_NAME, "url": cfg["url"], "key": cfg["key"], "relay": True}
+
+
+def relay_member_token() -> str:
+    """This gateway's own proof to the room that it is the same Herd as last time.
+
+    The room remembers the first token it sees for a gateway id and refuses that id with any other, so one
+    member cannot ask for another member's direct messages. Made once, kept in herd.db, sent only to the room."""
+    with connect() as conn:
+        token = _meta_get(conn, "room_member_token", "")
+        if not token:
+            token = secrets.token_urlsafe(32)
+            _meta_set(conn, "room_member_token", token)
+    return token
+
+
+def _forget_room_state(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM peer_state WHERE name = ?", (RELAY_PEER_NAME,))
+    conn.execute("UPDATE participants SET relay_seen = ''")
+
+
+def join_room(link: Any) -> dict:
+    """Join the team room an invite link points at. Saves the link in herd.db and starts syncing with the room."""
+    url, key = parse_room_link(link)
+    if not url:
+        raise HerdError(422, "That doesn't look like a team room link. It looks like https://…/r/…#…")
+    if not key:
+        raise HerdError(422, "That link is missing its key (the part after #). Copy the whole link again.")
+    refusal = _peer_url_refusal(url)
+    if refusal:
+        raise HerdError(422, "A team room link must start with https://.")
+    with connect() as conn:
+        if _meta_get(conn, "room_link", "") != f"{url}#{key}":
+            _forget_room_state(conn)
+        _meta_set(conn, "room_link", f"{url}#{key}")
+    _notify("channels.changed", {})
+    request_sync()
+    return status()
+
+
+def create_room(relay_address: Any = "") -> dict:
+    """Start a new team room on a relay and join it. Returns the invite link to hand to teammates.
+
+    The room does not exist anywhere until this gateway's first sync reaches the relay, which creates it and
+    binds it to the key made here."""
+    base = str(relay_address or "").strip().rstrip("/") or DEFAULT_RELAY_URL
+    try:
+        parts = urllib.parse.urlsplit(base)
+        ok = parts.scheme.lower() in ("http", "https") and bool(parts.hostname) and not parts.query \
+            and not parts.fragment and "@" not in parts.netloc
+    except ValueError:
+        ok = False
+    if not ok:
+        raise HerdError(422, "Enter the relay's address, for example https://herd-relay.your-name.workers.dev")
+    link = f"{base}/r/{secrets.token_hex(10)}#{secrets.token_urlsafe(32)}"
+    if not parse_room_link(link)[0]:
+        raise HerdError(422, "That relay address isn't usable. Use the address the relay was deployed at.")
+    join_room(link)
+    return {"invite": link, "status": status()}
+
+
+def leave_room() -> dict:
+    """Stop using the saved team room. Messages already here stay; the room keeps its own copy."""
+    with connect() as conn:
+        conn.execute("DELETE FROM meta WHERE key = 'room_link'")
+        _forget_room_state(conn)
+    _notify("channels.changed", {})
+    return status()
+
+
+def room_invite() -> dict:
+    """The link a teammate pastes to join the same room. Only for a room joined from the Herd page: a room set
+    in Settings keeps its key in the secret store, which is never read back out."""
+    cfg = relay_config()
+    if not cfg:
+        raise HerdError(404, "This Herd isn't in a team room yet.")
+    if cfg["source"] != "joined" or not cfg["key"]:
+        raise HerdError(409, "This room was set up in Settings. Share the link you were given.")
+    return {"invite": f"{cfg['url']}#{cfg['key']}"}
+
+
+def room_status(states: Optional[dict] = None) -> dict:
+    """The team room as the pane shows it. Never carries the key."""
+    cfg = relay_config()
+    if not cfg:
+        return {"joined": False}
+    if states is None:
+        with connect() as conn:
+            states = {r["name"]: dict(r) for r in conn.execute(
+                "SELECT * FROM peer_state WHERE name = ?", (RELAY_PEER_NAME,)).fetchall()}
+    st = states.get(RELAY_PEER_NAME, {})
+    refusal = _peer_url_refusal(cfg["url"])
+    error = refusal or ("" if cfg["key"] else "This team room has no key saved.") or st.get("last_error") or ""
+    return {"joined": True, "url": cfg["url"], "source": cfg["source"], "can_invite": cfg["source"] == "joined",
+            "connected": bool(st.get("last_ok")) and not error, "last_ok": st.get("last_ok") or "",
+            "last_error": error}
+
+
+def _describe_room_error(exc: Exception) -> str:
+    if isinstance(exc, PermissionError):
+        return "This team room has no key saved. Join again with the full invite link."
+    if isinstance(exc, (PeerRefusedError, RelayMismatchError)):
+        return str(exc)
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in (401, 403):
+            return "The team room refused this invite link. Ask a teammate for a fresh one."
+        if exc.code == 404:
+            return "There is no Herd relay at that address."
+        if exc.code == 413:
+            return "The team room refused a batch as too large."
+        if exc.code == 429:
+            return "The team room is full, or busy. It will be tried again."
+        return f"The team room answered HTTP {exc.code}."
+    if isinstance(exc, (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError, OSError)):
+        return "Couldn't reach the team room. It will be tried again."
+    return "Sync with the team room failed."
+
+
+_room_kick = threading.Event()
+_room_lock = threading.Lock()
+_room_last_sync = 0.0
+_room_ev = 0
+_room_wait_ok = False
+_room_waiter: Optional[threading.Thread] = None
+
+
+def _room_sync_due() -> bool:
+    """Whether this pass should include the team room. A post, an edit, typing, or the room saying something
+    changed asks for it at once; otherwise the tick only refreshes presence now and then, so an idle Herd costs
+    the relay a couple of requests a minute rather than one every tick."""
+    global _room_last_sync
+    now = time.monotonic()
+    with _room_lock:
+        kicked = _room_kick.is_set()
+        _room_kick.clear()
+        every = RELAY_IDLE_SYNC_S if _room_wait_ok else RELAY_RETRY_SYNC_S
+        if TRANSPORT is None and not kicked and now - _room_last_sync < every:
+            return False
+        _room_last_sync = now
+        return True
+
+
+def _record_room(resp: dict) -> None:
+    """Take in what a room knows beyond rows: who is in it, who is online, their agents' phrases, who is typing."""
+    global _room_ev
+    roster = resp.get("participants") if isinstance(resp.get("participants"), list) else []
+    now = _now()
+    seen: list[tuple[dict, Any, Any]] = []
+    with connect() as conn:
+        local_gid = _local_gateway_id(conn)
+        for p in roster[:RELAY_MAX_MEMBERS]:
+            if not isinstance(p, dict):
+                continue
+            gid = str(p.get("gateway_id") or "")
+            if not _MEMBER_ID_RE.match(gid) or gid == local_gid:
+                continue
+            name = _clean_name(p.get("display_name"), "teammate")
+            # A person reached only through the room has never exchanged with us directly: ``last_seen`` starts
+            # in the past, and ``relay_seen`` carries what the room says.
+            conn.execute(
+                "INSERT INTO participants(id, display_name, is_self, last_seen, relay_seen) VALUES (?, ?, 0, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, is_self = 0, "
+                "relay_seen = CASE WHEN excluded.relay_seen != '' THEN excluded.relay_seen ELSE '' END",
+                (gid, name, "1970-01-01T00:00:00.000+00:00", now if p.get("online") else ""))
+            seen.append(({"gateway_id": gid, "display_name": name}, p.get("status"), p.get("typing")))
+    for sender, phrase, typing in seen:
+        _record_peer_status(sender, phrase)
+        _record_peer_typing(sender, typing)
+    ev = resp.get("ev")
+    if isinstance(ev, int) and not isinstance(ev, bool):
+        _room_ev = ev
+    _notify("presence.changed", {})
+
+
+def _http_room_wait(peer: dict, cursors: dict) -> dict:
+    """Ask the room to answer when something changes (it holds the request for a while). No rows travel here."""
+    refusal = _peer_url_refusal(str(peer.get("url") or ""))
+    if refusal:
+        raise PeerRefusedError(refusal)
+    query = urllib.parse.urlencode(cursors)
+    req = urllib.request.Request(
+        f"{peer['url']}/herd/v1/wait?{query}", method="GET",
+        headers={"Authorization": f"Bearer {peer['key']}", "X-Herd-Member": relay_member_token(),
+                 "User-Agent": "hermes-herd/0.1"})
+    with _OPEN_PEER(req, timeout=RELAY_WAIT_TIMEOUT_S) as resp:
+        parsed = json.loads(resp.read().decode("utf-8", "replace"))
+    if not isinstance(parsed, dict):
+        raise RuntimeError("relay returned a non-object")
+    return parsed
+
+
+def _room_wait_once(peer: dict) -> dict:
+    with connect() as conn:
+        st = _peer_state(conn, peer)
+        gid = _local_gateway_id(conn)
+    return _http_room_wait(peer, {"gateway": gid, "after_seq": st["pull_seq"], "after_rseq": st["pull_rseq"],
+                                  "after_eseq": st["pull_eseq"], "ev": _room_ev})
+
+
+def _room_wait_loop() -> None:
+    """Keep one request open to the room so a teammate's message arrives in about a second, not on the next tick."""
+    global _room_wait_ok
+    failures = 0
+    while AUTO_SYNC and TRANSPORT is None:
+        peer = relay_peer()
+        if peer is None or not peer.get("key"):
+            break
+        try:
+            out = _room_wait_once(peer)
+            failures = 0
+            _room_wait_ok = True
+            if out.get("changed"):
+                _room_kick.set()
+                results = sync_all(wait=True)
+                room = next((r for r in results if r.get("name") == RELAY_PEER_NAME), None)
+                # A pass that did not run (another was in flight) or failed must not spin against the room.
+                time.sleep(0.1 if room and room.get("ok") else 2.0)
+            elif out.get("alone"):
+                time.sleep(RELAY_ALONE_WAIT_S)
+        except Exception:  # noqa: BLE001: the room being unreachable is a normal state; the tick still syncs
+            failures += 1
+            _room_wait_ok = False
+            time.sleep(min(60.0, 5.0 * failures))
+    _room_wait_ok = False
+
+
+def _ensure_room_waiter() -> None:
+    global _room_waiter
+    if not AUTO_SYNC or TRANSPORT is not None:
+        return
+    with _room_lock:
+        if _room_waiter is not None and _room_waiter.is_alive():
+            return
+        ctx = contextvars.copy_context()  # keep Hermes's per-profile secret scope in the worker
+        _room_waiter = threading.Thread(target=lambda: ctx.run(_room_wait_loop), name="herd-room-wait", daemon=True)
+        _room_waiter.start()
+
+
+# ---------------------------------------------------------------------------
+# Typing: "Riley is typing…" (in memory only, like the agent's phrase)
+# ---------------------------------------------------------------------------
+
+TYPING_TTL_S = 6.0  # the composer re-announces every few seconds while the person keeps typing
+TYPING_KICK_S = 2.5
+_typing_lock = threading.Lock()
+_typing_local: dict = {"channel_id": "", "at": 0.0, "kicked": 0.0}
+_typing_peers: dict[str, dict] = {}
+
+
+def set_typing(channel_ref: Any) -> dict:
+    """Note that this person is typing in a channel. Nothing is stored; it rides the next sync and expires."""
+    channel = resolve_channel(channel_ref)
+    if not channel:
+        raise HerdError(404, f"No channel or DM named '{channel_ref}'.")
+    now = time.monotonic()
+    with _typing_lock:
+        fresh = _typing_local["channel_id"] != channel["id"] or now - _typing_local["kicked"] >= TYPING_KICK_S
+        _typing_local.update(channel_id=channel["id"], at=now)
+        if fresh:
+            _typing_local["kicked"] = now
+    if fresh:
+        request_sync()
+    return {"ok": True}
+
+
+def clear_typing() -> None:
+    with _typing_lock:
+        _typing_local.update(channel_id="", at=0.0)
+
+
+def typing_for_peer(viewer_gateway: str = "", everything: bool = False) -> list[str]:
+    """The channel this person is typing in right now, as sent to one teammate: only a channel that teammate
+    is in. (A team room is sent it as is, and applies the same rule for each member.)"""
+    with _typing_lock:
+        channel_id, at = _typing_local["channel_id"], _typing_local["at"]
+    if not channel_id or time.monotonic() - at >= TYPING_TTL_S:
+        return []
+    if not everything:
+        channel = get_channel(channel_id)
+        if not channel or not _channel_visible(channel, viewer_gateway):
+            return []
+    return [channel_id]
+
+
+def _record_peer_typing(sender: dict, raw: Any) -> None:
+    gid = str(sender.get("gateway_id") or "").strip()[:64]
+    if not gid:
+        return
+    channels = [str(c)[:200] for c in raw[:4] if isinstance(c, str) and c] if isinstance(raw, list) else []
+    with _typing_lock:
+        had = gid in _typing_peers
+        if channels:
+            _typing_peers[gid] = {"name": _clean_name(sender.get("display_name"), "teammate"),
+                                  "channels": channels, "at": time.monotonic()}
+        else:
+            _typing_peers.pop(gid, None)
+    if channels or had:
+        _notify("typing.changed", {})
+
+
+def typing_list() -> list[dict]:
+    """Who is typing where, as teammates' gateways last said, still inside the TTL."""
+    now = time.monotonic()
+    out = []
+    with _typing_lock:
+        for gid, e in list(_typing_peers.items()):
+            if now - e["at"] >= TYPING_TTL_S + 4.0:  # their announcement, plus the time it took to get here
+                _typing_peers.pop(gid, None)
+                continue
+            out.extend({"gateway_id": gid, "name": e["name"], "channel_id": c} for c in e["channels"])
+    return out
 
 
 def set_status(phrase: Any) -> dict:
@@ -2525,4 +3231,4 @@ def status() -> dict:
     return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
             "agent_status": agent_status(), "mention_wake": wake_status(), "wake": wake_block(),
             "peer_status": peer_status_list(), "notify": notify_enabled(),
-            "herd_secret_set": herd_secret_set()}
+            "herd_secret_set": herd_secret_set(), "room": room_status(states), "typing": typing_list()}

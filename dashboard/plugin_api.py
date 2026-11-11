@@ -157,6 +157,50 @@ def post_message(channel_id: str, body: dict[str, Any]):
                  message_id=body.get("id"), thread_parent_id=body.get("thread_parent_id"))
 
 
+@router.post("/messages/{message_id}/edit")
+def post_edit(message_id: str, body: dict[str, Any]):
+    """Change the text of one of this person's own messages. The change reaches everyone through sync."""
+    return _call(store.edit_message, message_id, body.get("content"))
+
+
+@router.post("/messages/{message_id}/delete")
+def post_delete(message_id: str):
+    """Delete one of this person's own messages, here and (through sync) for everyone."""
+    return _call(store.delete_message, message_id)
+
+
+@router.post("/channels/{channel_id}/typing")
+def post_typing(channel_id: str):
+    """The composer says this person is typing here. Nothing is stored; teammates see it for a few seconds."""
+    return _call(store.set_typing, channel_id)
+
+
+@router.post("/groups")
+def post_group(body: dict[str, Any]):
+    """Open the group conversation with these people (two to four others), creating it the first time."""
+    return _call(store.open_group, body.get("participant_ids"))
+
+
+@router.post("/room")
+def post_room(body: dict[str, Any]):
+    """Join a team room from its invite link, or (``create``) start a new one on a relay. Returns the status,
+    and for a new room the invite link to hand to teammates."""
+    if body.get("create"):
+        return _call(store.create_room, body.get("relay"))
+    return {"status": _call(store.join_room, body.get("invite"))}
+
+
+@router.get("/room/invite")
+def get_room_invite():
+    """The invite link for the room this Herd joined, for the Copy button. Local to this computer."""
+    return _call(store.room_invite)
+
+
+@router.post("/room/leave")
+def post_room_leave():
+    return _call(store.leave_room)
+
+
 @router.get("/messages/{message_id}/thread")
 def get_thread(message_id: str):
     return _call(store.list_thread, message_id)

@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "herd-relay",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-06-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "HerdRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HerdRoom"] }],
+  "observability": { "enabled": true }
+}

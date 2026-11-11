@@ -39,9 +39,10 @@ class TwoGatewaysOverHttp(unittest.TestCase):
                 saved = (store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE)
                 store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = test.b_db, test.b_settings
                 try:
-                    self._send(200, store.handle_peer_sync(body))
+                    out = store.handle_peer_sync(body)
                 finally:
                     store.DB_PATH_OVERRIDE, store.SETTINGS_OVERRIDE = saved
+                self._send(200, out)
 
             def _send(self, code, obj):
                 data = json.dumps(obj).encode()
