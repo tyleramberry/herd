@@ -65,10 +65,10 @@ const rewired = source
   .replace("from 'react/jsx-runtime'", "from './jsx-runtime.mjs'")
 if (rewired === source) throw new Error('import specifiers did not match — probe needs updating')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${rewired}\nexport { MultiplayerView as probeMultiplayerView, ThreadPanel as probeThreadPanel, ThreadBody as probeThreadBody, thread as probeThread }\n`)
+  `${rewired}\nexport { MultiplayerView as probeMultiplayerView, ThreadPanel as probeThreadPanel, ThreadBody as probeThreadBody, thread as probeThread, selection as probeSelection }\n`)
 
 const { probeMultiplayerView: MultiplayerView, probeThreadPanel: ThreadPanel, probeThreadBody: ThreadBody,
-  probeThread: thread } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
+  probeThread: thread, probeSelection: selection } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 const { queries } = await import(pathToFileURL(join(work, 'sdk.mjs')).href)
 
 const failures = []
@@ -164,10 +164,11 @@ check('thread body: root, then replies in order', rows.map(r => r.props.message.
 check('thread body: root message is the parent', rows[0] && rows[0].props.message.content, 'root text')
 
 // 4. The compact pane keeps the thread in its column: no side panel there, and the column becomes the thread.
+selection.pane.set('general')
 thread.pane.set('r1')
 const pane = MultiplayerView({ compact: true })
 check('compact pane renders no side panel', findAll(pane, n => n.type === 'ThreadPanel').length, 0)
-const paneRow = findAll(pane, n => Array.isArray(n.props.children) && n.props.children.some(c => c && c.type === 'ChannelList'))[0]
+const paneRow = findAll(pane, n => Array.isArray(n.props.children) && n.props.children.some(c => c && c.type === 'MessageView'))[0]
 const paneMessage = paneRow && paneRow.props.children.find(c => c && c.type === 'MessageView')
 check('compact pane swaps the column for the thread view', paneMessage && paneMessage.props.compact, true)
 thread.pane.set(null)

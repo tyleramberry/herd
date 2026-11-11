@@ -539,26 +539,100 @@ function PlusMenu({ $open, onPick }) {
   })
 }
 
-function ChannelButton({ channel, label, selected, onSelect }) {
+// A Slack-style sidebar row: a glyph (# / lock / presence dot), the name, and an unread pill. Rows with unread
+// messages are bold; the open one is highlighted. Styles are inline so they never depend on the app's CSS scan.
+function ChannelButton({ channel, label, selected, onSelect, lead }) {
+  const unread = channel.unread && !selected ? channel.unread : 0
   return jsxs('button', {
     type: 'button',
     onClick: () => onSelect(channel.id),
     title: channel.topic || label,
-    className:
-      'flex items-center justify-between gap-2 rounded-[3px] px-1.5 py-1 text-left text-xs ' +
-      (selected ? 'font-medium text-(--ui-accent)' : 'text-(--ui-text-secondary) hover:text-(--ui-accent)'),
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      width: '100%',
+      minHeight: 28,
+      padding: '3px 10px',
+      border: 0,
+      borderRadius: 6,
+      textAlign: 'left',
+      fontSize: 13,
+      cursor: 'pointer',
+      background: selected ? 'color-mix(in srgb, var(--ui-accent, currentColor) 18%, transparent)' : 'transparent',
+      color: selected || unread ? 'var(--ui-text-primary, inherit)' : 'var(--ui-text-secondary, inherit)',
+      fontWeight: selected || unread ? 600 : 400
+    },
     children: [
-      jsx('span', { className: 'truncate', children: label }),
-      channel.unread && !selected
+      jsx('span', { style: { display: 'inline-flex', width: 14, flexShrink: 0, justifyContent: 'center', opacity: 0.7 }, children: lead }),
+      jsx('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: label }),
+      unread
         ? jsx('span', {
-            className: 'shrink-0 text-[0.6875rem] font-semibold text-(--ui-accent)',
-            'aria-label': channel.unread + ' unread',
-            children: String(channel.unread)
+            'aria-label': unread + ' unread',
+            style: {
+              flexShrink: 0,
+              minWidth: 18,
+              padding: '0 6px',
+              borderRadius: 9,
+              textAlign: 'center',
+              fontSize: 11,
+              lineHeight: '18px',
+              fontWeight: 700,
+              background: 'var(--ui-accent, currentColor)',
+              color: 'var(--ui-bg-primary, white)'
+            },
+            children: String(unread)
           })
-        : jsx('span', {
-            className: 'text-[0.6875rem] text-(--ui-text-quaternary)',
-            children: channel.message_count ? String(channel.message_count) : ''
-          })
+        : null
+    ]
+  })
+}
+
+// Collapsible sidebar section (Channels / Direct messages / People) with an optional "+" on the right.
+// The header is a div, not a button, so the "+" can sit inside it.
+const collapsedSections = atom({})
+function SidebarSection({ id, label, onAdd, addLabel, children }) {
+  const collapsed = useValue(collapsedSections)
+  const closed = Boolean(collapsed[id])
+  const toggle = () => collapsedSections.set({ ...collapsedSections.get(), [id]: !closed })
+  return jsxs('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 8 },
+    children: [
+      jsxs('div', {
+        role: 'button',
+        tabIndex: 0,
+        'aria-expanded': !closed,
+        onClick: toggle,
+        onKeyDown: e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle()),
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '4px 10px',
+          cursor: 'pointer',
+          fontSize: 12,
+          fontWeight: 600,
+          color: 'var(--ui-text-tertiary, inherit)'
+        },
+        children: [
+          jsx(Codicon, { name: closed ? 'chevron-right' : 'chevron-down', size: '0.75rem' }),
+          jsx('span', { style: { flex: 1 }, children: label }),
+          onAdd
+            ? jsx('button', {
+                type: 'button',
+                'aria-label': addLabel || 'Add',
+                title: addLabel || 'Add',
+                onClick: e => {
+                  e.stopPropagation()
+                  onAdd()
+                },
+                style: { display: 'inline-flex', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 2 },
+                children: jsx(Codicon, { name: 'add', size: '0.8rem' })
+              })
+            : null
+        ]
+      }),
+      closed ? null : children
     ]
   })
 }
@@ -591,10 +665,10 @@ function PeopleList({ status, onSelect }) {
   }
   const mine = status && status.agent_status && status.agent_status.phrase
   if (!people.length) return null
-  return jsxs('div', {
-    className: 'flex flex-col gap-0.5',
+  return jsx(SidebarSection, {
+    id: 'people',
+    label: 'People',
     children: [
-      jsx(SectionHeader, { label: 'People' }),
       ...people.map(p => {
         if (p.is_self && editing) {
           return jsxs(
@@ -635,7 +709,7 @@ function PeopleList({ status, onSelect }) {
               ? 'This is you. Click to change your name.'
               : (p.online ? p.display_name + ' is online' : p.display_name + ' is away') + '. Click to message.',
             onClick: () => (p.is_self ? renaming.set(true) : openDm.mutate({ id: p.id })),
-            className: 'flex min-w-0 items-center gap-1.5 rounded-[3px] px-1.5 py-1 text-left text-xs text-(--ui-text-secondary) hover:text-(--ui-accent)',
+            style: { display: 'flex', minWidth: 0, alignItems: 'center', gap: 8, padding: '3px 10px', border: 0, borderRadius: 6, background: 'transparent', textAlign: 'left', fontSize: 13, color: 'var(--ui-text-secondary, inherit)', cursor: 'pointer' },
             children: [
               jsx(StatusDot, { tone: p.online ? 'good' : 'muted' }),
               jsx('span', { className: 'truncate', children: p.display_name }),
@@ -647,7 +721,7 @@ function PeopleList({ status, onSelect }) {
         )
       }),
       rename.isError
-        ? jsx('div', { className: 'px-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(rename.error, "Couldn't change your name.") })
+        ? jsx('div', { className: 'px-2.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(rename.error, "Couldn't change your name.") })
         : null
     ]
   })
@@ -655,6 +729,9 @@ function PeopleList({ status, onSelect }) {
 
 function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composing, $menu, status }) {
   const mode = useValue($composing)
+  const { data: participants } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
+  const online = {}
+  for (const p of Array.isArray(participants) ? participants : []) if (p && p.id) online[p.id] = Boolean(p.online)
   const setMode = value => {
     if (value === 'invite' || value === 'join') {
       inviteLine.set('')
@@ -671,22 +748,72 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
   }
   const rooms = channels.filter(c => !isDirect(c))
   const dms = channels.filter(isDirect)
+  const totalUnread = channels.reduce((n, c) => n + (c.unread || 0), 0)
+  const dmLead = ch => {
+    const other = (Array.isArray(ch.members) ? ch.members : []).find(m => m && m.id !== selfId)
+    return jsx(StatusDot, { tone: ch.is_group || (other && online[other.id]) ? 'good' : 'muted' })
+  }
+  const roomLead = ch => (ch.is_private ? jsx(Codicon, { name: 'lock', size: '0.75rem' }) : jsx('span', { style: { fontWeight: 600 }, children: '#' }))
   return jsxs('div', {
-    className: compact
-      ? 'flex max-h-56 shrink-0 flex-col gap-1 overflow-y-auto border-b border-(--ui-stroke-secondary) p-2'
-      : 'flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-(--ui-stroke-secondary) p-2',
+    style: compact
+      ? { display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', overflowY: 'auto' }
+      : {
+          display: 'flex',
+          width: 248,
+          flexShrink: 0,
+          flexDirection: 'column',
+          overflowY: 'auto',
+          borderRight: '1px solid var(--ui-stroke-secondary)',
+          background: 'color-mix(in srgb, currentColor 4%, transparent)'
+        },
     children: [
-      jsx(PlusMenu, { $open: $menu, onPick: setMode }),
-      jsx(SectionHeader, { label: 'Channels' }),
-      mode === 'channel' ? jsx(NewChannelForm, { onDone: done }) : null,
-      ...rooms.map(ch =>
-        jsx(ChannelButton, { channel: ch, label: channelLabel(ch, selfId), selected: ch.id === selectedId, onSelect }, ch.id)
-      ),
-      jsx(SectionHeader, { label: 'Direct messages' }),
-      mode === 'dm' ? jsx(NewDmPicker, { onDone: done }) : null,
-      ...dms.map(ch =>
-        jsx(ChannelButton, { channel: ch, label: dmLabel(ch, selfId), selected: ch.id === selectedId, onSelect }, ch.id)
-      ),
+      jsxs('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '12px 10px 10px 14px',
+          borderBottom: '1px solid var(--ui-stroke-secondary)',
+          marginBottom: 8
+        },
+        children: [
+          jsxs('div', {
+            style: { display: 'flex', minWidth: 0, flexDirection: 'column' },
+            children: [
+              jsx('span', { style: { fontSize: 14, fontWeight: 700 }, children: 'Hermes Multiplayer' }),
+              totalUnread
+                ? jsx('span', { style: { fontSize: 11, color: 'var(--ui-text-tertiary, inherit)' }, children: totalUnread + ' unread' })
+                : null
+            ]
+          }),
+          jsx(PlusMenu, { $open: $menu, onPick: setMode })
+        ]
+      }),
+      jsx(SidebarSection, {
+        id: 'channels',
+        label: 'Channels',
+        addLabel: 'New channel',
+        onAdd: () => setMode(mode === 'channel' ? null : 'channel'),
+        children: [
+          mode === 'channel' ? jsx('div', { style: { padding: '0 8px' }, children: jsx(NewChannelForm, { onDone: done }) }, 'new') : null,
+          ...rooms.map(ch =>
+            jsx(ChannelButton, { channel: ch, label: ch.name, lead: roomLead(ch), selected: ch.id === selectedId, onSelect }, ch.id)
+          )
+        ]
+      }),
+      jsx(SidebarSection, {
+        id: 'dms',
+        label: 'Direct messages',
+        addLabel: 'New message',
+        onAdd: () => setMode(mode === 'dm' ? null : 'dm'),
+        children: [
+          mode === 'dm' ? jsx('div', { style: { padding: '0 8px' }, children: jsx(NewDmPicker, { onDone: done }) }, 'new') : null,
+          ...dms.map(ch =>
+            jsx(ChannelButton, { channel: ch, label: dmLabel(ch, selfId), lead: dmLead(ch), selected: ch.id === selectedId, onSelect }, ch.id)
+          )
+        ]
+      }),
       jsx(PeopleList, { status, onSelect })
     ]
   })
@@ -1829,6 +1956,16 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
           jsxs('div', {
             className: 'flex min-w-0 items-baseline gap-2',
             children: [
+              compact
+                ? jsx('button', {
+                    type: 'button',
+                    'aria-label': 'Back to channels',
+                    title: 'Back to channels',
+                    onClick: () => $selected.set(null),
+                    style: { display: 'inline-flex', alignSelf: 'center', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 2 },
+                    children: jsx(Codicon, { name: 'arrow-left', size: '0.85rem' })
+                  })
+                : null,
               jsx('span', { className: 'truncate text-sm font-medium', children: title }),
               jsx(TopicLine, { channel, $editing: compact ? topicEditing.pane : topicEditing.page })
             ]
@@ -2611,6 +2748,7 @@ function MultiplayerView({ compact }) {
   const $menu = compact ? plusMenu.pane : plusMenu.page
   const $thread = compact ? thread.pane : thread.page
   const selectedId = useValue($selected)
+  const chatOpen = Boolean(selectedId)
   const threadId = useValue($thread)
   const statusQuery = useStatus()
   const status = statusQuery.data
@@ -2652,22 +2790,28 @@ function MultiplayerView({ compact }) {
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
         children: [
-          jsx(ChannelList, {
-            channels,
-            selfId,
-            selectedId: selected ? selected.id : null,
-            onSelect: id => {
-              $thread.set(null) // switching channels closes any open thread
-              $selected.set(id)
-            },
-            compact,
-            $composing,
-            $menu,
-            status
-          }),
-          selected
+          // Narrow pane: Slack-mobile style. The channel list is the whole pane until you open one, then the
+          // chat takes the whole pane (with a back arrow). The full page keeps the list as a left sidebar.
+          !compact || !chatOpen
+            ? jsx(ChannelList, {
+                channels,
+                selfId,
+                selectedId: selected ? selected.id : null,
+                onSelect: id => {
+                  $thread.set(null) // switching channels closes any open thread
+                  $selected.set(id)
+                },
+                compact,
+                $composing,
+                $menu,
+                status
+              })
+            : null,
+          selected && (!compact || chatOpen)
             ? jsx(MessageView, { channel: selected, selfId, status, $thread, $selected, compact }, selected.id)
-            : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' }),
+            : compact
+              ? null
+              : jsx(EmptyState, { title: 'No channels yet.', description: 'Create one with the + button.' }),
           panel
         ]
       })
@@ -2799,7 +2943,7 @@ export default {
         id: 'pane',
         area: PANES_AREA,
         title: 'Hermes Multiplayer',
-        data: { placement: 'right', width: '340px' },
+        data: { placement: 'right', width: '380px' },
         render: () => jsx(MultiplayerPane, {})
       }
     ])
