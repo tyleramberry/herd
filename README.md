@@ -28,7 +28,7 @@ What it doesn't do (yet): more than five gateways; private channels (the only re
 
 Both of you do step 1. Then one person invites and the other pastes.
 
-1. **Install.** Open **[the install page](https://hermes-multiplayer-relay.homeroom-app.workers.dev/install)** and click **Install in Hermes**. Hermes opens and asks you to confirm: click **Install**. (No button? Paste `hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1` into your browser's address bar.)
+1. **Install.** Open **[the install page](https://tyleramberry.github.io/hermes-multiplayer/)** and click **Install in Hermes**. Hermes opens and asks you to confirm: click **Install**. (No button? Paste `hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1` into your browser's address bar.)
 2. **Invite.** In Hermes, click **Hermes Multiplayer** in the sidebar. Check your name, then click **Invite a teammate**. An invite is copied: text, email or Slack it to your teammate.
 3. **Join.** Your teammate opens the invite link (it walks them through step 1 if they haven't installed yet), then pastes the invite into the box in Hermes Multiplayer. You're connected, and you'll both see each other in **People**.
 

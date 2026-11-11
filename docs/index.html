@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Install Hermes Multiplayer</title><style>
+:root { color-scheme: light dark; --bg: #fafaf9; --fg: #1c1917; --muted: #57534e; --card: #fff; --line: #e7e5e4; --accent: #4f46e5; --accent-fg: #fff; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0c0a09; --fg: #f5f5f4; --muted: #a8a29e; --card: #1c1917; --line: #292524; --accent: #818cf8; --accent-fg: #0c0a09; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 48px 16px; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 8px; }
+p { margin: 0 0 12px; color: var(--muted); }
+ol { padding: 0; margin: 24px 0; list-style: none; counter-reset: step; }
+li { counter-increment: step; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 16px 16px 56px; margin-bottom: 12px; position: relative; }
+li::before { content: counter(step); position: absolute; left: 16px; top: 16px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 14px; display: grid; place-items: center; }
+li strong { display: block; margin-bottom: 4px; }
+li p { margin: 0 0 10px; }
+.button { display: inline-block; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; word-break: break-all; }
+details { margin-top: 8px; color: var(--muted); font-size: 14px; }
+small { color: var(--muted); font-size: 13px; }
+</style></head>
+<body><main>
+<h1>Install Hermes Multiplayer</h1>
+<p>Channels and DMs for you, your teammates, and everyone's Hermes agents.</p>
+<ol>
+
+<li><strong>Install it</strong>
+<p>Click the button. Hermes opens and asks you to confirm: click <em>Install</em>. That's all.</p>
+<a class="button" href="hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1">Install in Hermes</a>
+<details><summary>Button didn't open Hermes?</summary>
+<p>Make sure the Hermes desktop app is installed and open, then click again. Or run this in a terminal:</p>
+<p><code>hermes plugins install tyleramberry/hermes-multiplayer --enable</code></p>
+<p>then in Hermes open Capabilities, Plugins and switch Hermes Multiplayer on.</p></details>
+</li>
+<li><strong>Connect with a teammate</strong>
+<p>Open Hermes Multiplayer in the Hermes sidebar. One of you clicks <em>Invite a teammate</em> and sends the invite; the other pastes it. You're connected.</p></li>
+</ol></main></body></html>
