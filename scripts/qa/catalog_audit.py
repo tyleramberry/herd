@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sentry Q-3: static catalog-rules audit for the Herd plugin.
+"""Sentry Q-3: static catalog-rules audit for the Hermes Multiplayer plugin.
 
 Checks the plugin tree against the Hermes plugin-catalog admission rules
 (plugin-catalog/README.md in NousResearch/hermes-agent) that can be checked

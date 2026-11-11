@@ -1,4 +1,4 @@
-// Herd team room on Cloudflare: one Durable Object per room, with its own SQLite database.
+// Hermes Multiplayer team room on Cloudflare: one Durable Object per room, with its own SQLite database.
 import { DurableObject } from 'cloudflare:workers'
 import { MAX_BODY_BYTES, Room, bearer, route, validKey } from './core.js'
 
@@ -36,7 +36,7 @@ export default {
     const url = new URL(request.url)
     if (url.pathname === '/' || url.pathname === '/health') return json(200, { ok: true, service: 'herd-relay' })
     const target = route(url.pathname)
-    if (!target) return json(404, { error: 'Not a Herd relay path.' })
+    if (!target) return json(404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(request.headers.get('Authorization'))
     if (!validKey(key)) return json(401, { error: 'Missing or malformed room key.' })
     const stub = env.ROOMS.get(env.ROOMS.idFromName(target.roomId))

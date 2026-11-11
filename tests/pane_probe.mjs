@@ -323,14 +323,14 @@ const flat = root => nodes(root).filter(n => typeof n.type === 'string')
   check('message rows get the scroll ref', typeof row.props.ref === 'function')
 }
 {
-  // The palette entry is registered and opens the Herd page with an empty search.
+  // The palette entry is registered and opens the Hermes Multiplayer page with an empty search.
   const items = fakeCtx.items
   const entry = items.find(i => i.area === 'palette')
   check('a ⌘K palette entry is registered', Boolean(entry) && entry.data.id === 'herd.search')
   check('the palette entry is labelled', entry && entry.data.label === 'Search Hermes Multiplayer messages')
   searchQuery.set('leftover')
   entry.data.run()
-  check('running it opens the Herd page', globalThis.__navigations.at(-1) === '/herd')
+  check('running it opens the Hermes Multiplayer page', globalThis.__navigations.at(-1) === '/herd')
   check('running it starts with an empty search', searchQuery.get() === '')
 }
 
@@ -345,7 +345,7 @@ const item = (channel, author, preview, extra = {}) => ({
   check('one notification per channel burst', first === 1 && globalThis.__notified.length === 1, String(first))
   check('the notification names the channel', globalThis.__notified[0].title === '#general', JSON.stringify(globalThis.__notified[0]))
   check('the body names the author and counts the rest', globalThis.__notified[0].body === 'riley: build is green (+1 more)', globalThis.__notified[0].body)
-  check('the notification opens Herd when clicked', globalThis.__notified[0].activate === '/herd')
+  check('the notification opens Hermes Multiplayer when clicked', globalThis.__notified[0].activate === '/herd')
 
   check('the same channel within 30s is quiet', notifyIncoming({ count: 1, items: [item('general', 'riley', 'again')] }, 2000) === 0)
   const burst = ['c2', 'c3', 'c4', 'c5', 'c6', 'c7'].map(c => item(c, 'riley', 'hi ' + c))
@@ -488,11 +488,11 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('new-message keybind is registered', Boolean(fresh) && fresh.data.defaults[0] === 'mod+alt+n')
   globalThis.__navigations.length = 0
   fresh.data.run()
-  check('the new-message keybind opens Herd', globalThis.__navigations.at(-1) === '/herd')
+  check('the new-message keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/herd')
   check('and asks for the composer', probeComposeRequest.get() > 0)
   probeComposeRequest.set(0)
   open.data.run()
-  check('the open keybind opens Herd', globalThis.__navigations.at(-1) === '/herd')
+  check('the open keybind opens Hermes Multiplayer', globalThis.__navigations.at(-1) === '/herd')
 }
 {
   // Topic: viewable, editable for a public channel, never shown for a DM.
@@ -919,7 +919,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
 
 // ---- agent setup -----------------------------------------------------------------------------
 {
-  const wake = { ...base, blocked_reason: 'injection_not_allowed', blocked_message: 'needs injection', config_line: 'allow_gateway_injection: true', config_snippet: 'plugins:\n  entries:\n    herd:\n      allow_gateway_injection: true', setup_prompt: 'Please finish setting up the Herd plugin' }
+  const wake = { ...base, blocked_reason: 'injection_not_allowed', blocked_message: 'needs injection', config_line: 'allow_gateway_injection: true', config_snippet: 'plugins:\n  entries:\n    hermes-multiplayer:\n      allow_gateway_injection: true', setup_prompt: 'Please finish setting up the Hermes Multiplayer plugin' }
   const setup = banner(wake)
   const all = texts(setup).join(' ')
   check('agent setup is three numbered steps', ['1.', '2.', '3.'].every(n => texts(setup).includes(n)))
@@ -928,7 +928,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('there is exactly one copy button', copyButtons.length === 1 && copyButtons[0].props.children === 'Copy setup prompt', JSON.stringify(copyButtons.map(b => b.props.children)))
   globalThis.__copied.length = 0
   copyButtons[0].props.onClick()
-  check('it copies the prompt for your agent', globalThis.__copied[0] === 'Please finish setting up the Herd plugin')
+  check('it copies the prompt for your agent', globalThis.__copied[0] === 'Please finish setting up the Hermes Multiplayer plugin')
   check('and confirms', findAll(banner(wake), n => n.type === 'Button').some(b => b.props.children === 'Copied'))
   check('no restart button when the app has none', !findAll(setup, n => n.type === 'Button').some(b => b.props.children === 'Restart gateway'))
   let restarted = 0

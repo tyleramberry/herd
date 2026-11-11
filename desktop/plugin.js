@@ -2509,7 +2509,7 @@ function AgentSetup({ wake }) {
       jsxs('div', {
         className: 'flex min-w-0 flex-wrap items-center gap-x-1.5',
         children: [
-          jsx('span', { children: 'By hand: in config.yaml, under plugins → entries → herd, add' }),
+          jsx('span', { children: 'By hand: in config.yaml, under plugins → entries → hermes-multiplayer, add' }),
           jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
         ]
       })
@@ -2614,7 +2614,7 @@ function HerdView({ compact }) {
   if (isError) {
     return jsx(EmptyState, {
       title: 'Hermes Multiplayer is installed but its backend is off.',
-      description: 'Enable the herd plugin for this profile (Capabilities → Plugins), then restart the gateway.'
+      description: 'Enable the Hermes Multiplayer plugin for this profile (Capabilities → Plugins), then restart the gateway.'
     })
   }
   const selected =

@@ -134,7 +134,7 @@ check('no peers and no refusal is unchanged',
 check('no status at all keeps the existing no-teammate line',
   rendered(PeerLine({ status: undefined })), ['No teammate connected'])
 
-// 5. S-20: this gateway having no Herd secret is its own, distinct state — and it only renders when
+// 5. S-20: this gateway having no Hermes Multiplayer secret is its own, distinct state — and it only renders when
 //    the backend says so explicitly (older/partial payloads keep the old behaviour).
 check('no herd secret set renders the settings prompt, not a link state',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
@@ -147,7 +147,7 @@ check('herd_secret_set true is unchanged',
 check('a status missing herd_secret_set is unchanged',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }] }),
   ['Connected to riley'])
-check('peer with no stored secret asks for the Herd secret (not the gateway API key)',
+check('peer with no stored secret asks for the Hermes Multiplayer secret (not the gateway API key)',
   peerLine({ peers: [{ name: 'riley', connected: false, has_key: false, last_attempt: '' }],
              herd_secret_set: true }),
   ["Add riley's Hermes Multiplayer secret to connect"])

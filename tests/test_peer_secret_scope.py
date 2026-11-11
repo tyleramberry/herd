@@ -1,4 +1,4 @@
-"""S-20: Herd's peer routes authenticate with Herd's OWN secret, never the gateway API_SERVER_KEY."""
+"""S-20: Hermes Multiplayer's peer routes authenticate with Hermes Multiplayer's OWN secret, never the gateway API_SERVER_KEY."""
 import asyncio
 import hmac
 import importlib.util
@@ -224,7 +224,7 @@ class Routes(Base):
         [peer] = a.configured_peers()
         res = a.sync_peer(peer)
         self.assertFalse(res["ok"])
-        self.assertIn("rejected our Herd secret", res["error"])
+        self.assertIn("rejected our Hermes Multiplayer secret", res["error"])
         self.assertNotIn("API_SERVER_KEY", res["error"])
         st = a.status()
         self.assertEqual(st["peers"][0]["last_error"], res["error"])
@@ -233,11 +233,11 @@ class Routes(Base):
             self.assertNotIn(value, dumped)
             self.assertNotIn(value, res["error"])
 
-        self.unset_secret()  # now the peer itself has no Herd secret
+        self.unset_secret()  # now the peer itself has no Hermes Multiplayer secret
         a.SETTINGS_OVERRIDE["__secrets__"]["HERD_PEER_KEY"] = B_SECRET
         res = a.sync_peer(peer)
         self.assertFalse(res["ok"])
-        self.assertIn("peer has no Herd secret set", res["error"])
+        self.assertIn("peer has no Hermes Multiplayer secret set", res["error"])
         dumped = json.dumps(a.status())
         for value in (B_SECRET, A_SECRET):
             self.assertNotIn(value, dumped)

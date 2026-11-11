@@ -201,7 +201,7 @@ class TeammateListTest(_Base):
                             "__secrets__": {"HERD_PEER_KEY": "k-kai"}})
         self.assertEqual(store.configured_peers(), [])
         [refused] = store.refused_peers()
-        self.assertIn("Herd secret slot", refused["reason"])
+        self.assertIn("Hermes Multiplayer secret slot", refused["reason"])
 
     def test_duplicates_and_unknown_slots_are_refused_with_a_reason(self):
         self.with_settings({

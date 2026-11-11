@@ -99,13 +99,13 @@ class TwoGatewaysOverHttp(unittest.TestCase):
         self.use_a(key="wrong")
         [res] = store.sync_all()
         self.assertFalse(res["ok"])
-        self.assertIn("rejected our Herd secret", res["error"])
+        self.assertIn("rejected our Hermes Multiplayer secret", res["error"])
 
     def test_herd_not_enabled_on_peer(self):
         self.use_a(url=self.url + "/nothing-here")
         [res] = store.sync_all()
         self.assertFalse(res["ok"])
-        self.assertIn("doesn't have Herd", res["error"])
+        self.assertIn("doesn't have Hermes Multiplayer", res["error"])
 
     def test_unreachable_peer(self):
         self.use_a(url="http://127.0.0.1:9")

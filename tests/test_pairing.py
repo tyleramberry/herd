@@ -1,6 +1,6 @@
 """Track 5: the one-time pairing code (mint, exchange, single use, expiry, lockout, binding, downgrade refusal).
 
-The responder (a gateway holding a Herd secret) and the requester (a teammate typing the code) are two real
+The responder (a gateway holding a Hermes Multiplayer secret) and the requester (a teammate typing the code) are two real
 gateways. The exchange goes through the JSON round trip, the way the wire does it.
 """
 import io

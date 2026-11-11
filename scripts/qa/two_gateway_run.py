@@ -14,7 +14,7 @@ Topology (one machine, two processes, four loopback ports, nothing shared):
       <tmp>/a/herd.db                          <tmp>/b/herd.db
 
 Each side runs the plugin's own code: ``herd._wire_api_server`` (the peer route + the real 3 s
-background sync loop, behind Herd's OWN ``Bearer <HERD_SECRET>`` check — the gateway's Herd
+background sync loop, behind Hermes Multiplayer's OWN ``Bearer <HERD_SECRET>`` check — the gateway's Hermes Multiplayer
 secret, never its API_SERVER_KEY, which is refused on /herd/v1/*) and ``dashboard/plugin_api.py`` (the FastAPI backend the desktop half calls).
 B is spawned first with no peer (the README's one-sided link); A links to B.
 
@@ -62,7 +62,7 @@ CHANNEL = "general"
 NAME_A, NAME_B = "q11-a", "q11-b"
 KEY_A = "q11-a-api-server-key"
 KEY_B = "q11-b-api-server-key"
-# Each gateway's own Herd secret (HERD_SECRET): what a peer must present on /herd/v1/*. The
+# Each gateway's own Hermes Multiplayer secret (HERD_SECRET): what a peer must present on /herd/v1/*. The
 # API_SERVER_KEYs above only guard StubAdapter / the harness-only agent-post route.
 SECRET_A = "q11-a-herd-secret"
 SECRET_B = "q11-b-herd-secret"
@@ -272,7 +272,7 @@ class Run:
 
 
 def ping(gw: dict) -> tuple[int, dict]:
-    # Calling a gateway's OWN peer route needs its OWN Herd secret (not its API_SERVER_KEY).
+    # Calling a gateway's OWN peer route needs its OWN Hermes Multiplayer secret (not its API_SERVER_KEY).
     status, body = http("GET", gw["peer"] + "/herd/v1/ping", key=gw["secret"])
     return status, (body or {})
 
@@ -547,7 +547,7 @@ def main() -> int:
               f"A.gateway_id={a['gateway_id']} B.gateway_id={b['gateway_id']} v={ping_a.get('v')}")
         check("ENV.settings", (ping_a.get("from") or {}).get("display_name") == NAME_A,
               f"A ping display_name={(ping_a.get('from') or {}).get('display_name')!r} (spawned as {NAME_A!r})")
-        # S-20: the gateway's API_SERVER_KEY must NOT open Herd's peer routes (only its Herd secret does).
+        # S-20: the gateway's API_SERVER_KEY must NOT open Hermes Multiplayer's peer routes (only its Hermes Multiplayer secret does).
         ka, kbody_a = http("GET", a["peer"] + "/herd/v1/ping", key=a["key"])
         kb, kbody_b = http("GET", b["peer"] + "/herd/v1/ping", key=b["key"])
         codes = [((body or {}).get("error") or {}).get("code") if isinstance((body or {}).get("error"), dict)

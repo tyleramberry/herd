@@ -65,7 +65,7 @@ export default definePlugin((ctx) => {
 })
 """
 
-README = "# Herd\n\n## Disclosures\nNetwork calls: peer gateways only. Stored credentials: none.\n"
+README = "# Hermes Multiplayer\n\n## Disclosures\nNetwork calls: peer gateways only. Stored credentials: none.\n"
 
 ENTRY = """\
 name: hermes-multiplayer

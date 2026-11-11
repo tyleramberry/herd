@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Team room relay for Herd: a Cloudflare Worker (or a small node server) that holds a room's messages.",
+  "description": "Team room relay for Hermes Multiplayer: a Cloudflare Worker (or a small node server) that holds a room's messages.",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",

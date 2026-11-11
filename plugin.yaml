@@ -38,7 +38,7 @@ config_schema:
     type: secret
     env: HERD_PEER_KEY
     label: Teammate's Hermes Multiplayer secret
-    description: Your teammate's Herd secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
+    description: Your teammate's Hermes Multiplayer secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
   peer_name_2:
     type: str
     default: ""
@@ -52,8 +52,8 @@ config_schema:
   peer_key_2:
     type: secret
     env: HERD_PEER_KEY_2
-    label: Teammate 2's Herd secret
-    description: Teammate 2's Herd secret. Stored in Hermes's secret store, read only for teammate 2.
+    label: Teammate 2's Hermes Multiplayer secret
+    description: Teammate 2's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 2.
   peer_name_3:
     type: str
     default: ""
@@ -67,8 +67,8 @@ config_schema:
   peer_key_3:
     type: secret
     env: HERD_PEER_KEY_3
-    label: Teammate 3's Herd secret
-    description: Teammate 3's Herd secret. Stored in Hermes's secret store, read only for teammate 3.
+    label: Teammate 3's Hermes Multiplayer secret
+    description: Teammate 3's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 3.
   peer_name_4:
     type: str
     default: ""
@@ -82,13 +82,13 @@ config_schema:
   peer_key_4:
     type: secret
     env: HERD_PEER_KEY_4
-    label: Teammate 4's Herd secret
-    description: Teammate 4's Herd secret. Stored in Hermes's secret store, read only for teammate 4.
+    label: Teammate 4's Hermes Multiplayer secret
+    description: Teammate 4's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 4.
   peers:
     type: list
     default: []
     label: Teammates (advanced)
-    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Herd secret slot (HERD_PEER_KEY, HERD_PEER_KEY_2, HERD_PEER_KEY_3 or HERD_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
+    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Hermes Multiplayer secret slot (HERD_PEER_KEY, HERD_PEER_KEY_2, HERD_PEER_KEY_3 or HERD_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
   relay_url:
     type: str
     default: ""

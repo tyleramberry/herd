@@ -1,6 +1,6 @@
-"""Tagging an agent always gets an answer or a reason: your own agent from your own Herd, a mark everyone can
+"""Tagging an agent always gets an answer or a reason: your own agent from your own Hermes Multiplayer, a mark everyone can
 see when an agent picks a mention up, answers that stay in the thread, plus the small onboarding helpers
-(name from the Herd page, one-line invite, who is online)."""
+(name from the Hermes Multiplayer page, one-line invite, who is online)."""
 import os
 import sys
 import tempfile

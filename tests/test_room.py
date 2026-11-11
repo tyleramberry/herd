@@ -1,4 +1,4 @@
-"""The team room, end to end: real Herd stores syncing over real HTTP with the real relay (relay/server.mjs).
+"""The team room, end to end: real Hermes Multiplayer stores syncing over real HTTP with the real relay (relay/server.mjs).
 
 Nobody here is linked to anybody else. Everyone joins one room from one invite link, and the room carries
 messages, DMs, edits, deletes, reactions, presence and typing between them, and holds what was written while
@@ -119,7 +119,7 @@ class RoomTest(unittest.TestCase):
         woken = []
         with self.A:
             store.post_message("general", "@riley can you look at this when you are back?")
-        self.sync(self.A)  # riley's Herd is not running: nothing of theirs syncs
+        self.sync(self.A)  # riley's Hermes Multiplayer is not running: nothing of theirs syncs
         store.WAKE_HANDLER = lambda key, text: woken.append(text) or True
         with self.B:
             store.set_mention_target("chat-1", "this chat")

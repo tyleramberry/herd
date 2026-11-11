@@ -1,6 +1,6 @@
-"""Herd core: SQLite store + two-gateway sync. Framework-free (stdlib only).
+"""Hermes Multiplayer core: SQLite store + two-gateway sync. Framework-free (stdlib only).
 
-Shared by every Herd surface:
+Shared by every Hermes Multiplayer surface:
 
 * ``dashboard/plugin_api.py`` (FastAPI router at ``/api/plugins/herd/``, the desktop half's backend)
 * ``tools.py`` (agent tools ``herd_list_channels`` / ``herd_post`` / ``herd_read_channel`` /
@@ -56,8 +56,8 @@ MAX_CONTENT = 20_000
 MAX_NAME = 64
 BATCH_LIMIT = 200
 SYNC_TIMEOUT_S = 10
-SECRET_ENV = "HERD_PEER_KEY"  # the PEER's Herd secret: what we present to their /herd/v1/*
-LOCAL_SECRET_ENV = "HERD_SECRET"  # THIS gateway's Herd secret: what a peer must present to ours
+SECRET_ENV = "HERD_PEER_KEY"  # the PEER's Hermes Multiplayer secret: what we present to their /herd/v1/*
+LOCAL_SECRET_ENV = "HERD_SECRET"  # THIS gateway's Hermes Multiplayer secret: what a peer must present to ours
 # Mesh limits (spec §1): this gateway plus up to four teammates is five gateways; a channel holds up to
 # five people (gateways) plus any number of their agents.
 MAX_PEERS = 4
@@ -72,9 +72,9 @@ _PEER_SLOTS = (  # (name field, url field, key slot) — the numbered Settings f
     ("peer_name_3", "peer_url_3", PEER_KEY_ENVS[2]),
     ("peer_name_4", "peer_url_4", PEER_KEY_ENVS[3]),
 )
-# The 401 message our peer routes send when no local Herd secret is set. ``_describe_error`` looks
+# The 401 message our peer routes send when no local Hermes Multiplayer secret is set. ``_describe_error`` looks
 # for this exact text in a peer's 401 body to tell "they have no secret" from "our secret is wrong".
-NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
+NO_LOCAL_SECRET = "This gateway has no Hermes Multiplayer secret set (HERD_SECRET)."
 
 # 👀 is the one the picker offers and the mark an agent leaves on a mention it picked up. 👁️ was offered before it
 # and stays accepted (LEGACY_REACTIONS, shown after the others) so reactions already stored still show.
@@ -126,7 +126,7 @@ _AUTHOR_TYPES = {"human", "agent"}
 DB_PATH_OVERRIDE: Optional[Path] = None
 # Tests replace the peer transport; production uses ``_http_sync``.
 TRANSPORT: Optional[Callable[[dict, dict], dict]] = None
-# Tests replace the settings source; production reads ``plugins.entries.herd.settings``.
+# Tests replace the settings source; production reads ``plugins.entries.hermes-multiplayer.settings``.
 SETTINGS_OVERRIDE: Optional[dict] = None
 # Tests turn off the post-triggered background sync and drive ``sync_all()`` explicitly.
 AUTO_SYNC = True
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS read_cursors (
 _init_lock = threading.Lock()
 _initialized: set[str] = set()
 
-# What a usable Herd DB must have. Checked per connect so a database replaced under a live
+# What a usable Hermes Multiplayer DB must have. Checked per connect so a database replaced under a live
 # process (restore, copy, rm, a fresh file at the same path) is re-initialized instead of
 # erroring on every query until the gateway restarts.
 _REQUIRED_TABLES = ("meta", "channels", "messages", "participants", "peer_state", "reactions", "wake_skips",
@@ -320,7 +320,7 @@ def db_path() -> Path:
 
 
 def _schema_usable(conn: sqlite3.Connection) -> bool:
-    """Does this connection actually have the schema Herd queries assume? Never raises.
+    """Does this connection actually have the schema Hermes Multiplayer queries assume? Never raises.
 
     A fresh or replaced file answers no, so ``_ensure_schema`` runs its idempotent
     create/migrate pass again; a live database answers yes from the cheap sqlite_master
@@ -446,7 +446,7 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 
 def settings() -> dict:
-    """``plugins.entries.herd.settings`` from config.yaml (Settings → Plugins → Herd form)."""
+    """``plugins.entries.hermes-multiplayer.settings`` from config.yaml (Settings → Plugins → Hermes Multiplayer form)."""
     if SETTINGS_OVERRIDE is not None:
         return dict(SETTINGS_OVERRIDE)
     try:
@@ -473,12 +473,12 @@ def _secret(name: str) -> str:
 
 
 def herd_secret() -> str:
-    """This gateway's own Herd secret: what a peer must present on /herd/v1/*. Never the API key."""
+    """This gateway's own Hermes Multiplayer secret: what a peer must present on /herd/v1/*. Never the API key."""
     return _secret(LOCAL_SECRET_ENV)
 
 
 def herd_secret_set() -> bool:
-    """Whether this gateway has a Herd secret configured. Never returns or logs the value."""
+    """Whether this gateway has a Hermes Multiplayer secret configured. Never returns or logs the value."""
     return bool(herd_secret())
 
 
@@ -493,9 +493,9 @@ def bearer_token(authorization: Any) -> str:
 
 
 def inbound_authorized(authorization: Any) -> bool:
-    """Constant-time check of a request's Bearer against this gateway's Herd secret.
+    """Constant-time check of a request's Bearer against this gateway's Hermes Multiplayer secret.
 
-    Fails closed: no local Herd secret set means nothing is authorized. The gateway
+    Fails closed: no local Hermes Multiplayer secret set means nothing is authorized. The gateway
     API_SERVER_KEY is never accepted here.
     """
     secret = herd_secret()
@@ -518,14 +518,14 @@ def identity() -> dict:
         gateway_id = conn.execute("SELECT value FROM meta WHERE key='gateway_id'").fetchone()[0]
         chosen = conn.execute("SELECT value FROM meta WHERE key='display_name'").fetchone()
     default_name = socket.gethostname().split(".")[0] or "me"
-    # A name set from the Herd page wins; then the Settings field; then the computer's name.
+    # A name set from the Hermes Multiplayer page wins; then the Settings field; then the computer's name.
     picked = _clean_name(chosen[0] if chosen else "", "")
     return {"gateway_id": gateway_id,
             "display_name": picked or _clean_name(settings().get("display_name"), default_name)}
 
 
 def set_display_name(name: Any) -> dict:
-    """Set how this gateway's person appears, from the Herd page (no trip to Settings). An empty name clears it,
+    """Set how this gateway's person appears, from the Hermes Multiplayer page (no trip to Settings). An empty name clears it,
     which falls back to the Settings field and then the computer's name. Not a credential: kept in herd.db."""
     clean = _clean_name(_one_line(name), "")
     with connect() as conn:
@@ -681,7 +681,7 @@ def create_channel(name: Any, topic: Any = "", members: Any = None) -> dict:
         me = identity()
         member_list = _clean_members([me["gateway_id"], *members])
         if member_list is None:
-            raise HerdError(422, f"A channel holds up to {MAX_HUMANS} people, including you, by their Herd id.")
+            raise HerdError(422, f"A channel holds up to {MAX_HUMANS} people, including you, by their Hermes Multiplayer id.")
         with connect() as conn:
             known = {r["id"]: r["display_name"] for r in conn.execute("SELECT id, display_name FROM participants")}
         for m in member_list:
@@ -1079,7 +1079,7 @@ def _own_message(conn: sqlite3.Connection, message_id: Any) -> sqlite3.Row:
     if row is None or row["deleted"]:
         raise HerdError(404, "That message isn't here any more.")
     if row["gateway_id"] != _local_gateway_id(conn):
-        raise HerdError(403, "You can only change messages written on this Herd.")
+        raise HerdError(403, "You can only change messages written on this Hermes Multiplayer.")
     return row
 
 
@@ -1382,7 +1382,7 @@ def list_participants() -> list[dict]:
         # ``last_seen`` moves on every sync exchange with that gateway (every few seconds while both run), so a
         # recent one means their Hermes is up. A person we only know through a relay has no direct exchange.
         # Someone reached through a team room is online when the room said so recently (the room hears from every
-        # running Herd at least once a minute).
+        # running Hermes Multiplayer at least once a minute).
         relay_age = (now - _ts(r["relay_seen"])).total_seconds() if r["relay_seen"] else -1.0
         row = {k: v for k, v in dict(r).items() if k != "relay_seen"}
         out.append({**row, "is_self": bool(r["is_self"]),
@@ -1676,7 +1676,7 @@ def export_batch(after_seq: int, exclude_gateway: str = "", limit: int = BATCH_L
 
 
 def _record_incoming(sender: dict) -> None:
-    """Remember who synced to us. The route is already authenticated with our Herd secret (HERD_SECRET)."""
+    """Remember who synced to us. The route is already authenticated with our Hermes Multiplayer secret (HERD_SECRET)."""
     gid = str(sender.get("gateway_id") or "").strip()[:64]
     if not gid:
         return
@@ -1749,32 +1749,32 @@ _wake_blocked: dict = {"reason": None, "at": None}  # most recent refused inject
 # Why a mention did not reach the agent. The code is stored in wake_skips; the text is what the pane and
 # herd_read_channel show. Every skip path below records one of these: a mention is never dropped silently.
 WAKE_REASONS = {
-    "wake_off": "Agent doesn't answer @mentions yet: turn on \"Let my agent answer @mentions\" in Settings > Plugins > Herd.",
-    "no_target": "Agent doesn't answer @mentions yet: no chat is set. Use \"Answer @mentions here\" in the Herd pane, or type /herd-listen in the chat.",
-    "injection_not_allowed": "Agent doesn't answer @mentions yet: gateway injection is off. Add allow_gateway_injection: true under plugins: entries: herd in config.yaml, then restart the gateway.",
+    "wake_off": "Agent doesn't answer @mentions yet: turn on \"Let my agent answer @mentions\" in Settings > Plugins > Hermes Multiplayer.",
+    "no_target": "Agent doesn't answer @mentions yet: no chat is set. Use \"Answer @mentions here\" in the Hermes Multiplayer pane, or type /herd-listen in the chat.",
+    "injection_not_allowed": "Agent doesn't answer @mentions yet: gateway injection is off. Add allow_gateway_injection: true under plugins: entries: hermes-multiplayer in config.yaml, then restart the gateway.",
     "host_refused": "The gateway refused to start the agent's turn. Check allow_gateway_injection, and that the chat is still open.",
     "rate_limited": "Not handed to the agent: too many @mentions in one minute (limit 6). Read it in the channel.",
     "no_channel": "Not handed to the agent: its channel is missing here, so there is nowhere to reply.",
-    "wake_error": "Not handed to the agent: Herd's wake handler isn't running in this gateway.",
+    "wake_error": "Not handed to the agent: Hermes Multiplayer's wake handler isn't running in this gateway.",
     "agent_author": "Not handed to the agent: another agent wrote it, and agents never wake each other.",
     "history": "Not handed to the agent: it arrived as history when this teammate first linked.",
 }
 INJECTION_CONFIG_LINE = "allow_gateway_injection: true"
-INJECTION_CONFIG_SNIPPET = "plugins:\n  entries:\n    herd:\n      allow_gateway_injection: true"
+INJECTION_CONFIG_SNIPPET = "plugins:\n  entries:\n    hermes-multiplayer:\n      allow_gateway_injection: true"
 # What "Copy setup prompt" puts on the clipboard: pasted into any Hermes chat, the owner's own agent makes the one
 # config change, so nobody has to find or hand-edit a YAML file.
 INJECTION_SETUP_PROMPT = (
-    "Please finish setting up the Herd plugin so you can answer when teammates @mention you.\n\n"
+    "Please finish setting up the Hermes Multiplayer plugin so you can answer when teammates @mention you.\n\n"
     "1. Open my Hermes config file (~/.hermes/config.yaml, or config.yaml in the active profile's folder).\n"
-    "2. Under plugins -> entries -> herd, set allow_gateway_injection to true. Keep every other line exactly as "
-    "it is, and create the plugins/entries/herd keys only if they are missing. The result should contain:\n\n"
+    "2. Under plugins -> entries -> hermes-multiplayer, set allow_gateway_injection to true. Keep every other line exactly as "
+    "it is, and create the plugins/entries/hermes-multiplayer keys only if they are missing. The result should contain:\n\n"
     + INJECTION_CONFIG_SNIPPET + "\n\n"
-    "3. Show me the lines you changed, then tell me to restart the gateway (Herd has a Restart gateway button)."
+    "3. Show me the lines you changed, then tell me to restart the gateway (Hermes Multiplayer has a Restart gateway button)."
 )
 
 
 def gateway_injection_allowed() -> Optional[bool]:
-    """``plugins.entries.herd.allow_gateway_injection`` from config.yaml. ``None`` when the config can't be read
+    """``plugins.entries.hermes-multiplayer.allow_gateway_injection`` from config.yaml. ``None`` when the config can't be read
     (then the host's own refusal decides, and is recorded as ``host_refused``). Never raises."""
     if SETTINGS_OVERRIDE is not None:  # tests drive the wake path through their own handler, not the real config
         return None
@@ -1967,7 +1967,7 @@ def wake_text(m: dict, channel: dict, my_gateway_id: str = "", local: bool = Fal
     if local:
         return (
             f"[Hermes Multiplayer assignment] WHO: your own user ({_prompt_field(m['author_name'])}) asked you, in {place}, "
-            f"from their Herd.\nWHAT: their message is quoted below.\n\n{quoted}\n\n"
+            f"from their Hermes Multiplayer.\nWHAT: their message is quoted below.\n\n{quoted}\n\n"
             f"WHERE to report back: call herd_post with {args} and your reply as content "
             f"({read_hint}). Teammates in {place} will see your reply."
         )
@@ -2144,7 +2144,7 @@ def _wake_one(m: dict, me_id: str, local: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pairing code (Track 5). A short, single-use code lets a teammate fetch this gateway's Herd secret without
+# Pairing code (Track 5). A short, single-use code lets a teammate fetch this gateway's Hermes Multiplayer secret without
 # anyone reading out a long key. The code is the credential for the one exchange; the reply is proven with it.
 # ---------------------------------------------------------------------------
 
@@ -2194,9 +2194,9 @@ def _meta_set(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def mint_pairing_code() -> dict:
-    """A new single-use code for this gateway's Herd secret. Replaces any code still live."""
+    """A new single-use code for this gateway's Hermes Multiplayer secret. Replaces any code still live."""
     if not herd_secret_set():
-        raise HerdError(409, "Set this gateway's Herd secret (HERD_SECRET) first; a code can't share a secret that isn't set.")
+        raise HerdError(409, "Set this gateway's Hermes Multiplayer secret (HERD_SECRET) first; a code can't share a secret that isn't set.")
     code = "".join(secrets.choice(PAIR_CODE_ALPHABET) for _ in range(PAIR_CODE_LEN))
     digest = _pair_digest(code)
     expires = time.time() + PAIR_TTL_S
@@ -2218,7 +2218,7 @@ def _pair_failure(conn: sqlite3.Connection) -> None:
 
 
 def handle_pair_request(body: Any) -> dict:
-    """Server side of ``POST /herd/v1/pair``: exchange a live code for this gateway's Herd secret, once.
+    """Server side of ``POST /herd/v1/pair``: exchange a live code for this gateway's Hermes Multiplayer secret, once.
 
     The code is checked first and only then consumed. A wrong, expired, used or unknown code gets the same reply.
     The reply's MAC is keyed by the code over the requester's nonce and both gateway ids and the secret's digest, so
@@ -2252,7 +2252,7 @@ def handle_pair_request(body: Any) -> dict:
                 _pair_failure(conn)
                 problem = (403, PAIR_REFUSED)
             elif not secret:  # checked before the code is spent: a setup gap does not burn it
-                problem = (409, "This gateway has no Herd secret to share yet. Set one in Settings, then ask for a new code.")
+                problem = (409, "This gateway has no Hermes Multiplayer secret to share yet. Set one in Settings, then ask for a new code.")
             else:
                 # The spend is the decision: a conditional UPDATE, so two requests that both read the code
                 # unspent cannot both win. Only the one that changes the row gets the secret.
@@ -2295,7 +2295,7 @@ def _http_pair(url: str, body: dict) -> dict:
 
 
 def _http_error_text(exc: urllib.error.HTTPError) -> str:
-    """The ``error`` message a Herd route put in its JSON body, or "". Never raises."""
+    """The ``error`` message a Hermes Multiplayer route put in its JSON body, or "". Never raises."""
     try:
         raw = exc.read(2048)
         body = json.loads(raw.decode("utf-8", "replace")) if raw else {}
@@ -2327,7 +2327,7 @@ def make_invite(address: Any, code: str) -> str:
 
 
 def redeem_pairing(url: str, code: Any) -> dict:
-    """Requester side: exchange a teammate's code for their Herd secret, and verify the reply before trusting it.
+    """Requester side: exchange a teammate's code for their Hermes Multiplayer secret, and verify the reply before trusting it.
 
     Returns ``{name, gateway_id, url, herd_secret}``. Saves nothing: Hermes's secret store is written by its own
     settings form, so the caller shows the secret once for the owner to paste. Refuses (HerdError 502) any reply that
@@ -2372,7 +2372,7 @@ def redeem_pairing(url: str, code: Any) -> dict:
 
 CLEARTEXT_REFUSED = ("peer_url is http:// on a non-loopback host — refused. Use https, a VPN/tailnet, "
                      "or turn on 'Send the peer key in cleartext (unsafe)'.")
-PEER_URL_INVALID = "peer_url is not a valid URL — refused. Check the address in Settings → Plugins → Herd."
+PEER_URL_INVALID = "peer_url is not a valid URL — refused. Check the address in Settings → Plugins → Hermes Multiplayer."
 
 
 class PeerRefusedError(RuntimeError):
@@ -2467,15 +2467,15 @@ def _peer_table() -> list[dict]:
         accepted = sum(1 for t in table if not t["reason"])
         reason = ""
         if e["key_env"] not in PEER_KEY_ENVS:
-            reason = "Give this teammate one Herd secret slot: " + ", ".join(PEER_KEY_ENVS) + "."
+            reason = "Give this teammate one Hermes Multiplayer secret slot: " + ", ".join(PEER_KEY_ENVS) + "."
         elif e["key_env"] in slots:
-            reason = "Another teammate already uses this Herd secret slot."
+            reason = "Another teammate already uses this Hermes Multiplayer secret slot."
         elif e["url"] in urls:
             reason = "This gateway URL is already listed for another teammate."
         elif e["name"] in names:
             reason = "Another teammate already has this name. Give each teammate a different name."
         elif accepted >= MAX_PEERS:
-            reason = f"Herd links at most {MAX_PEERS} teammates (a mesh of {MAX_PEERS + 1} gateways)."
+            reason = f"Hermes Multiplayer links at most {MAX_PEERS} teammates (a mesh of {MAX_PEERS + 1} gateways)."
         if not reason:
             names.add(e["name"])
             urls.add(e["url"])
@@ -2491,7 +2491,7 @@ def _peer_candidates() -> list[dict]:
 
 
 def configured_peers() -> list[dict]:
-    """The teammates Herd may sync with, from Herd's own settings (Settings → Plugins → Herd).
+    """The teammates Hermes Multiplayer may sync with, from Hermes Multiplayer's own settings (Settings → Plugins → Hermes Multiplayer).
 
     A teammate whose URL may not carry the key in the clear off loopback is NOT here: no request is ever
     built for it (see ``refused_peers()`` for the visible, actionable reason). Keys are declared
@@ -2501,7 +2501,7 @@ def configured_peers() -> list[dict]:
 
 
 def refused_peers() -> list[dict]:
-    """Configured teammates Herd will not talk to, with the reason — for ``status()``/the pane.
+    """Configured teammates Hermes Multiplayer will not talk to, with the reason — for ``status()``/the pane.
 
     Carries no secret: ``has_key`` is a boolean, never the key itself.
     """
@@ -2570,7 +2570,7 @@ def _peer_state(conn: sqlite3.Connection, peer: dict) -> sqlite3.Row:
 
 
 def _peer_reports_no_secret(exc: urllib.error.HTTPError) -> bool:
-    """Whether a peer's 401 body says it has no Herd secret set. Never raises."""
+    """Whether a peer's 401 body says it has no Hermes Multiplayer secret set. Never raises."""
     try:
         raw = exc.read(4096)
         body = json.loads(raw.decode("utf-8", "replace")) if raw else {}
@@ -2585,11 +2585,11 @@ def _describe_error(exc: Exception) -> str:
     if isinstance(exc, urllib.error.HTTPError):
         if exc.code == 401:
             if _peer_reports_no_secret(exc):
-                return "The peer has no Herd secret set — ask them to set one in Settings → Plugins → Herd."
-            return ("The peer rejected our Herd secret (check the secret you saved for them in "
-                    "Settings → Plugins → Herd).")
+                return "The peer has no Hermes Multiplayer secret set — ask them to set one in Settings → Plugins → Hermes Multiplayer."
+            return ("The peer rejected our Hermes Multiplayer secret (check the secret you saved for them in "
+                    "Settings → Plugins → Hermes Multiplayer).")
         if exc.code == 404:
-            return "The peer doesn't have Herd enabled yet."
+            return "The peer doesn't have Hermes Multiplayer enabled yet."
         return f"The peer answered HTTP {exc.code}."
     if isinstance(exc, (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError, OSError)):
         return "Couldn't reach the peer."
@@ -2636,7 +2636,7 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                                     "typing": typing_for_peer(st["remote_gateway_id"], everything=is_relay)})
             remote = resp.get("from") if isinstance(resp.get("from"), dict) else {}
             if is_relay and remote.get("relay") is not True:
-                raise RelayMismatchError("That address answered, but it isn't a Herd team room.")
+                raise RelayMismatchError("That address answered, but it isn't a Hermes Multiplayer team room.")
             pulled += ingest(resp, suppress_wakes=first_contact, relay=is_relay)
             if is_relay:
                 _record_room(resp)
@@ -2667,8 +2667,8 @@ def sync_peer(peer: dict, rounds: int = 5) -> dict:
                 "reactions_pushed": rpushed}
     except Exception as exc:  # noqa: BLE001 — a peer being down is a normal state, not a crash
         message = (_describe_room_error(exc) if is_relay
-                   else "No Herd secret saved for this peer — add your teammate's Herd secret in "
-                   "Settings → Plugins → Herd." if isinstance(exc, PermissionError)
+                   else "No Hermes Multiplayer secret saved for this peer — add your teammate's Hermes Multiplayer secret in "
+                   "Settings → Plugins → Hermes Multiplayer." if isinstance(exc, PermissionError)
                    else str(exc) if isinstance(exc, PeerRefusedError)
                    else _describe_error(exc))
         with connect() as conn:
@@ -2750,7 +2750,7 @@ def request_sync() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Team room: a relay every member's Herd talks to, in place of a link to each teammate
+# Team room: a relay every member's Hermes Multiplayer talks to, in place of a link to each teammate
 # ---------------------------------------------------------------------------
 #
 # A team room is a small server (relay/ in this repo: a Cloudflare Worker, or `node relay/server.mjs`) that
@@ -2759,7 +2759,7 @@ def request_sync() -> None:
 # message written while a teammate's computer is asleep is waiting for them in the room.
 #
 # The room link is ``https://<relay>/r/<room>#<key>``. The key is the part after ``#``: it never appears in a
-# request line or a log, only in the Authorization header. A link saved from the Herd page is kept in herd.db
+# request line or a log, only in the Authorization header. A link saved from the Hermes Multiplayer page is kept in herd.db
 # (this plugin's own data file); the Settings form takes the address in ``relay_url`` and the key in the secret
 # field ``relay_key`` (HERD_RELAY_KEY, read through agent.secret_scope).
 
@@ -2777,7 +2777,7 @@ _ROOM_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}\Z")
 
 
 class RelayMismatchError(RuntimeError):
-    """The room address answered with something that is not a Herd relay."""
+    """The room address answered with something that is not a Hermes Multiplayer relay."""
 
 
 def parse_room_link(value: Any) -> tuple[str, str]:
@@ -2812,7 +2812,7 @@ def _saved_room_link() -> str:
 def relay_config() -> dict:
     """The team room this gateway is in: ``{url, key, source}``, or ``{}`` when it is in none.
 
-    Settings win over a link saved from the Herd page, so an owner who manages config by hand stays in charge."""
+    Settings win over a link saved from the Hermes Multiplayer page, so an owner who manages config by hand stays in charge."""
     url, key = parse_room_link(settings().get("relay_url"))
     if url:
         return {"url": url, "key": key or _secret(RELAY_KEY_ENV), "source": "settings"}
@@ -2831,7 +2831,7 @@ def relay_peer() -> Optional[dict]:
 
 
 def relay_member_token() -> str:
-    """This gateway's own proof to the room that it is the same Herd as last time.
+    """This gateway's own proof to the room that it is the same Hermes Multiplayer as last time.
 
     The room remembers the first token it sees for a gateway id and refuses that id with any other, so one
     member cannot ask for another member's direct messages. Made once, kept in herd.db, sent only to the room."""
@@ -2898,11 +2898,11 @@ def leave_room() -> dict:
 
 
 def room_invite() -> dict:
-    """The link a teammate pastes to join the same room. Only for a room joined from the Herd page: a room set
+    """The link a teammate pastes to join the same room. Only for a room joined from the Hermes Multiplayer page: a room set
     in Settings keeps its key in the secret store, which is never read back out."""
     cfg = relay_config()
     if not cfg:
-        raise HerdError(404, "This Herd isn't in a team room yet.")
+        raise HerdError(404, "This Hermes Multiplayer isn't in a team room yet.")
     if cfg["source"] != "joined" or not cfg["key"]:
         raise HerdError(409, "This room was set up in Settings. Share the link you were given.")
     return {"invite": f"{cfg['url']}#{cfg['key']}"}
@@ -2935,7 +2935,7 @@ def _describe_room_error(exc: Exception) -> str:
         if exc.code in (401, 403):
             return "The team room refused this invite link. Ask a teammate for a fresh one."
         if exc.code == 404:
-            return "There is no Herd relay at that address."
+            return "There is no Hermes Multiplayer relay at that address."
         if exc.code == 413:
             return "The team room refused a batch as too large."
         if exc.code == 429:
@@ -2956,7 +2956,7 @@ _room_waiter: Optional[threading.Thread] = None
 
 def _room_sync_due() -> bool:
     """Whether this pass should include the team room. A post, an edit, typing, or the room saying something
-    changed asks for it at once; otherwise the tick only refreshes presence now and then, so an idle Herd costs
+    changed asks for it at once; otherwise the tick only refreshes presence now and then, so an idle Hermes Multiplayer costs
     the relay a couple of requests a minute rather than one every tick."""
     global _room_last_sync
     now = time.monotonic()

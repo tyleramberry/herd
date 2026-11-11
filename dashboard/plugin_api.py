@@ -1,4 +1,4 @@
-"""Herd backend for the desktop half: FastAPI routes mounted at ``/api/plugins/herd/``.
+"""Hermes Multiplayer backend for the desktop half: FastAPI routes mounted at ``/api/plugins/herd/``.
 
 Thin HTTP wrappers around ``herd_store`` (the same code the agent tools and the peer endpoint
 use, so the surfaces cannot drift). The dashboard imports this file by path, so the sibling
@@ -74,7 +74,7 @@ def get_search(q: str = Query(default=""), channel: Optional[str] = Query(defaul
 
 @router.post("/profile")
 def post_profile(body: dict[str, Any]):
-    """Set this person's name from the Herd page (empty clears it). Returns the fresh status."""
+    """Set this person's name from the Hermes Multiplayer page (empty clears it). Returns the fresh status."""
     _call(store.set_display_name, body.get("display_name"))
     return _call(store.status)
 
@@ -87,7 +87,7 @@ def post_pairing_code():
 
 @router.post("/pair")
 def post_pair(body: dict[str, Any]):
-    """Exchange a teammate's code for their Herd secret. Returns it once, for the owner to paste into Settings."""
+    """Exchange a teammate's code for their Hermes Multiplayer secret. Returns it once, for the owner to paste into Settings."""
     return _call(store.redeem_pairing, body.get("invite") or body.get("url"), body.get("code"))
 
 
@@ -193,7 +193,7 @@ def post_room(body: dict[str, Any]):
 
 @router.get("/room/invite")
 def get_room_invite():
-    """The invite link for the room this Herd joined, for the Copy button. Local to this computer."""
+    """The invite link for the room this Hermes Multiplayer joined, for the Copy button. Local to this computer."""
     return _call(store.room_invite)
 
 

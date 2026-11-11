@@ -1,8 +1,8 @@
-"""Herd — multiplayer Hermes. Agent-side registration.
+"""Hermes Multiplayer — multiplayer Hermes. Agent-side registration.
 
 * Four agent tools (``herd_list_channels``, ``herd_post``, ``herd_read_channel``, ``herd_set_status``).
 * The peer endpoints ``POST /herd/v1/sync`` and ``GET /herd/v1/ping`` on this gateway's
-  ``api_server``, authenticated with Herd's OWN credential: this gateway's Herd secret
+  ``api_server``, authenticated with Hermes Multiplayer's OWN credential: this gateway's Hermes Multiplayer secret
   (``HERD_SECRET``), never the gateway-wide ``API_SERVER_KEY``. Plus a background sync loop that
   keeps this gateway and its configured teammates (up to four) converged.
 """
@@ -55,27 +55,27 @@ def _sync_pass(store) -> None:
 
 
 def _wire_api_server(app, adapter) -> None:
-    """Add Herd's peer route to the api_server aiohttp app (called at connect, before freeze).
+    """Add Hermes Multiplayer's peer route to the api_server aiohttp app (called at connect, before freeze).
 
-    ``adapter`` is intentionally unused: the platform handler factory passes it, but Herd no
+    ``adapter`` is intentionally unused: the platform handler factory passes it, but Hermes Multiplayer no
     longer borrows the adapter's gateway-wide API_SERVER_KEY check — it checks its own secret.
     """
     from aiohttp import web
 
     def _denied(request: "web.Request"):
-        """Herd's own Bearer check: the request must carry THIS gateway's Herd secret."""
+        """Hermes Multiplayer's own Bearer check: the request must carry THIS gateway's Hermes Multiplayer secret."""
         store = _store()
         if store.inbound_authorized(request.headers.get("Authorization")):
             return None
-        message = "Invalid Herd secret (HERD_SECRET)" if store.herd_secret_set() else store.NO_LOCAL_SECRET
+        message = "Invalid Hermes Multiplayer secret (HERD_SECRET)" if store.herd_secret_set() else store.NO_LOCAL_SECRET
         # Same shape as the api_server adapter's 401: the desktop pane keys off error.code.
         return web.json_response(
             {"error": {"message": message, "type": "gateway_auth_error",
                        "code": "gateway_auth_failed"}}, status=401)
 
     async def herd_sync(request: "web.Request") -> "web.Response":
-        # Only a gateway holding this gateway's Herd secret (the linked peer) can read or write
-        # Herd data here. The gateway API_SERVER_KEY is not accepted.
+        # Only a gateway holding this gateway's Hermes Multiplayer secret (the linked peer) can read or write
+        # Hermes Multiplayer data here. The gateway API_SERVER_KEY is not accepted.
         denied = _denied(request)
         if denied is not None:
             return denied
@@ -90,11 +90,11 @@ def _wire_api_server(app, adapter) -> None:
             return web.json_response({"error": exc.message}, status=exc.status)
         except Exception:  # noqa: BLE001 — never leak a stack trace to the network
             logger.exception("herd: peer sync failed")
-            return web.json_response({"error": "Herd sync failed on this gateway."}, status=500)
+            return web.json_response({"error": "Hermes Multiplayer sync failed on this gateway."}, status=500)
         return web.json_response(result)
 
     async def herd_pair(request: "web.Request") -> "web.Response":
-        # No Herd secret here: the one-time pairing code is the credential for this exchange. Wrong, used and expired
+        # No Hermes Multiplayer secret here: the one-time pairing code is the credential for this exchange. Wrong, used and expired
         # codes all get one reply, and five wrong tries pause pairing (see herd_store.handle_pair_request).
         try:
             body = await request.json()
@@ -107,7 +107,7 @@ def _wire_api_server(app, adapter) -> None:
             return web.json_response({"error": exc.message}, status=exc.status)
         except Exception:  # noqa: BLE001 — never leak a stack trace to the network
             logger.exception("herd: pairing failed")
-            return web.json_response({"error": "Herd pairing failed on this gateway."}, status=500)
+            return web.json_response({"error": "Hermes Multiplayer pairing failed on this gateway."}, status=500)
         return web.json_response(result)
 
     async def herd_ping(request: "web.Request") -> "web.Response":
@@ -149,12 +149,12 @@ def _listen_command(raw_args: str, session_key: str = "", **_kw) -> str:
     store = _store()
     if raw_args.strip().lower() in {"off", "stop", "none"}:
         store.set_mention_target("")
-        return "Herd will no longer pass @mentions to an agent."
+        return "Hermes Multiplayer will no longer pass @mentions to an agent."
     if not session_key:
-        return "Run /herd-listen inside the chat you want your agent to answer Herd mentions in."
+        return "Run /herd-listen inside the chat you want your agent to answer Hermes Multiplayer mentions in."
     store.set_mention_target(session_key, "this chat")
-    on = "on" if store.wake_enabled() else "OFF (turn on \"Let my agent answer @mentions\" in Settings > Plugins > Herd)"
-    return ("Done. @mentions of you in Herd will be handed to this chat. "
+    on = "on" if store.wake_enabled() else "OFF (turn on \"Let my agent answer @mentions\" in Settings > Plugins > Hermes Multiplayer)"
+    return ("Done. @mentions of you in Hermes Multiplayer will be handed to this chat. "
             f"Mention wake is {on}. It also needs allow_gateway_injection: true for herd in config.yaml.")
 
 
@@ -172,7 +172,7 @@ def register(ctx):
     # four tools. Registering it means re-approving that scope first.
     ctx.register_platform_handler("api_server", _wire_api_server)
     ctx.register_command("herd-listen", _listen_command,
-                         description="Let your agent in this chat answer Herd @mentions (or: off)",
+                         description="Let your agent in this chat answer Hermes Multiplayer @mentions (or: off)",
                          args_hint="[off]")
 
     def _wake(session_key: str, text: str) -> bool:

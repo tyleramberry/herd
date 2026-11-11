@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Herd team room as a plain node server: the same room logic as the Cloudflare Worker (src/core.js), for
+// Hermes Multiplayer team room as a plain node server: the same room logic as the Cloudflare Worker (src/core.js), for
 // running a relay on your own machine or server, and for tests. Needs node 22.5+ (built-in node:sqlite).
 //
 //   node relay/server.mjs --port 8787 --data ./rooms      (one SQLite file per room; omit --data for memory only)
 //
-// Put it behind https (a tunnel or a reverse proxy) before sharing a room link: Herd refuses plain http off
+// Put it behind https (a tunnel or a reverse proxy) before sharing a room link: Hermes Multiplayer refuses plain http off
 // this machine.
 import http from 'node:http'
 import fs from 'node:fs'
@@ -47,7 +47,7 @@ export function createRelay({ dataDir = '', holdMs } = {}) {
     const url = new URL(req.url, 'http://relay.local')
     if (url.pathname === '/' || url.pathname === '/health') return send(res, 200, { ok: true, service: 'herd-relay' })
     const target = route(url.pathname)
-    if (!target) return send(res, 404, { error: 'Not a Herd relay path.' })
+    if (!target) return send(res, 404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(req.headers.authorization)
     if (!validKey(key)) return send(res, 401, { error: 'Missing or malformed room key.' })
     if (target.action === 'wait') {

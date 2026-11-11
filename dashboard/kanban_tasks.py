@@ -1,8 +1,8 @@
-"""Read-only Kanban task titles for Herd's task badge (S-16 / F4).
+"""Read-only Kanban task titles for Hermes Multiplayer's task badge (S-16 / F4).
 
 What it reads: exactly one value — ``SELECT title FROM tasks WHERE id = ?`` — from the local Hermes
 Kanban database (``<hermes root>/kanban.db`` or ``<root>/kanban/boards/<slug>/kanban.db``), so the
-Herd pane can label an agent's answer with the title of the task the agent explicitly linked.
+Hermes Multiplayer pane can label an agent's answer with the title of the task the agent explicitly linked.
 
 Read-only: the file is opened with the SQLite ``mode=ro`` URI and a short busy timeout; it is never
 written, migrated or created, and no private core module is imported.

@@ -1,6 +1,6 @@
-// Herd team room: the logic of the relay, with no dependency on where it runs.
+// Hermes Multiplayer team room: the logic of the relay, with no dependency on where it runs.
 //
-// A room speaks the same sync exchange a Herd gateway does (dashboard/herd_store.py, handle_peer_sync): a
+// A room speaks the same sync exchange a Hermes Multiplayer gateway does (dashboard/herd_store.py, handle_peer_sync): a
 // member POSTs what it wrote plus its cursors, and gets back what the others wrote. The room keeps every row,
 // so members never need to reach each other, and a message written while a teammate is offline waits here.
 //
@@ -366,7 +366,7 @@ export class Room {
     const typing = (Array.isArray(body.typing) ? body.typing : [])
       .filter(c => typeof c === 'string' && c).slice(0, 4).map(c => c.slice(0, 200))
     const typingJson = typing.length ? JSON.stringify(typing) : ''
-    // While someone keeps typing their Herd re-sends it every few seconds: pass that on often enough that the
+    // While someone keeps typing their Hermes Multiplayer re-sends it every few seconds: pass that on often enough that the
     // others' indicator does not lapse, without waking them for every keystroke.
     if (typingJson !== row.typing || (typingJson && now - row.typing_at >= 3000)) this.bump()
     this.db.all('UPDATE members SET status = ?, status_at = ?, typing = ?, typing_at = ? WHERE gateway_id = ?',
@@ -487,8 +487,8 @@ export class Room {
 
 const TABLE_OF = { seq: 'messages', rseq: 'reactions', eseq: 'edits' }
 const ADMIT_ERRORS = {
-  401: 'This Herd did not say who it is. Update Herd and join the room again.',
-  403: 'This room already knows that Herd id with a different token.',
+  401: 'This Hermes Multiplayer did not say who it is. Update Hermes Multiplayer and join the room again.',
+  403: 'This room already knows that Hermes Multiplayer id with a different token.',
   422: 'from.gateway_id is missing or malformed.',
   429: 'This room is full.',
 }
