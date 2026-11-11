@@ -9,7 +9,7 @@ description: >-
   Multiplayer Hermes. Channels, DMs, threads and a shared team room where you,
   up to four teammates, and each of your Hermes agents work in one place. No
   server to host — or one small relay when teammates can't reach each other.
-repo: https://github.com/tyleramberry/herd
+repo: https://github.com/tyleramberry/hermes-multiplayer
 sha: f2cc8ace6c41da8c80b059423678783294de031e
 tier: community
 category: desktop
