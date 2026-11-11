@@ -44,11 +44,12 @@ class ThreadPanelSourceTest(unittest.TestCase):
         self.assertIn("if (openThreadId && compact) {", SOURCE)  # the compact pane keeps its in-column thread
 
     def test_panel_width_is_a_share_of_the_row(self):
+        # A fixed-basis right sidebar set with inline styles (arbitrary Tailwind widths are not in the
+        # host's CSS scan), capped at 45% of the row so the messages keep most of the space.
         body = _function_body("ThreadPanel")
-        match = re.search(r"w-\[(\d+)%\]", body)
-        self.assertIsNotNone(match)
-        self.assertTrue(35 <= int(match.group(1)) <= 40, match.group(0))
-        self.assertIn("max-w-[45%]", body)
+        self.assertIn("flex: '0 0 380px'", body)
+        self.assertIn("width: 380", body)
+        self.assertIn("maxWidth: '45%'", body)
 
     def test_close_and_escape_live_on_the_panel(self):
         body = _function_body("ThreadPanel")

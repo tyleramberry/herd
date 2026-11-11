@@ -29,7 +29,6 @@ import logging
 import ipaddress
 import json
 import math
-import os
 import re
 import secrets
 import socket
@@ -2170,14 +2169,14 @@ def _maybe_wake(messages: list[dict], history: bool = False) -> None:
 
 WAKE_ACK_EMOJI = "👀"
 # The 👀 is a "read it" receipt, so it lands a few seconds after the wake rather than the instant the message
-# arrives. Tests set HERMES_MULTIPLAYER_NO_ACK_DELAY=1 to get the mark synchronously.
+# arrives. The test suite sets this to (0.0, 0.0) (tests/conftest.py) to get the mark synchronously.
 WAKE_ACK_DELAY_S = (3.0, 7.0)
 
 
 def _ack_wake_later(m: dict, me_id: str) -> None:
     """Leave the 👀 after a short, human-feeling pause instead of immediately. Never raises."""
     try:
-        lo, hi = (0.0, 0.0) if os.environ.get("HERMES_MULTIPLAYER_NO_ACK_DELAY") else WAKE_ACK_DELAY_S
+        lo, hi = WAKE_ACK_DELAY_S
         delay = secrets.SystemRandom().uniform(lo, hi) if hi > 0 else 0.0
         if delay <= 0:
             _ack_wake(m, me_id)

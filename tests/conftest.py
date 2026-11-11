@@ -9,11 +9,11 @@ independent of the checkout directory name. Test infrastructure only: pytest is
 never imported by the installed plugin.
 """
 import importlib.util
-import os
 import sys
 from pathlib import Path
 
-os.environ["HERMES_MULTIPLAYER_NO_ACK_DELAY"] = "1"
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 if "__init__" not in sys.modules:
@@ -22,3 +22,12 @@ if "__init__" not in sys.modules:
     module = importlib.util.module_from_spec(spec)
     sys.modules["__init__"] = module
     spec.loader.exec_module(module)
+
+
+@pytest.fixture(autouse=True)
+def _no_wake_ack_delay(monkeypatch):
+    """Land the 👀 delivery mark synchronously. The store is loaded under more than one package
+    identity (``__init__`` and ``hermes_multiplayer``), so patch every loaded copy."""
+    for name, mod in list(sys.modules.items()):
+        if name.endswith("dashboard.multiplayer_store") and hasattr(mod, "WAKE_ACK_DELAY_S"):
+            monkeypatch.setattr(mod, "WAKE_ACK_DELAY_S", (0.0, 0.0))
