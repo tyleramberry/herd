@@ -1013,9 +1013,16 @@ function MentionMenu({ items, index, onPick }) {
     role: 'listbox',
     'aria-label': 'Mention suggestions',
     className:
-      'absolute bottom-full left-2 right-2 z-50 mb-1 flex max-h-48 flex-col overflow-y-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) p-1 shadow-lg',
+      'absolute bottom-full left-2 right-2 z-50 mb-1 flex max-h-48 flex-col overflow-y-auto rounded-md border border-(--ui-stroke-secondary) p-1 shadow-lg',
     // Inline fallback: the surface tokens can be translucent, which let chat text show through.
-    style: { backgroundColor: 'var(--ui-bg-primary, Canvas)', opacity: 1, isolation: 'isolate' },
+    // --ui-bg-primary is a color-mix with transparent, so it can never be the only fill: stack the theme's
+    // elevated tint over an opaque Canvas base so chat text can't show through.
+    style: {
+      backgroundColor: 'Canvas',
+      backgroundImage: 'linear-gradient(var(--ui-bg-elevated, transparent), var(--ui-bg-elevated, transparent))',
+      opacity: 1,
+      isolation: 'isolate'
+    },
     children: items.map((c, i) =>
       jsxs(
         'div',
