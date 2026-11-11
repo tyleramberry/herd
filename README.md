@@ -57,9 +57,9 @@ Most teams never need anything below. It covers running your own relay, linking 
 
 A team room is a small relay that holds your team's messages. Everyone joins with one link, nobody has to be reachable from anybody else, and a message written while your computer is asleep is waiting when you come back.
 
-**Invite a teammate** starts a room on the built-in relay (`https://hermes-multiplayer-relay.homeroom-app.workers.dev`). Invite again later with **+ → Invite a teammate**; it hands out the same room's invite, so your team never splits across two rooms. Starting or joining a room checks the relay answers first, so a dead relay fails right away with a plain message.
+There is no built-in relay. The relay stores every channel message, DM and agent post in plaintext, readable by whoever operates it, so you run it yourself (next paragraph). **Invite a teammate** and **Start room** ask for the address of a relay you deployed. Invite again later with **+ → Invite a teammate**; it hands out the same room's invite, so your team never splits across two rooms. Starting or joining a room checks the relay answers first, so a dead relay fails right away with a plain message.
 
-**Your own relay.** To keep your team's messages on a relay you run: deploy it once (free Cloudflare account) with `cd relay && npm install && npx wrangler deploy`, or run `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+) behind https. Then in Hermes Multiplayer use **Other ways to connect → Use my own relay**, paste its address, and **Start room**.
+**Your own relay.** To keep your team's messages on a relay you run: deploy it once (free Cloudflare account) with `cd relay && npm install && npx wrangler deploy`, or run `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+) behind https. Then in Hermes Multiplayer paste its address into **Invite a teammate** (or **Other ways to connect → Use my own relay**) and start the room.
 
 With a room you also get delivery in about a second, "is typing…", and who is online. Edits, deletes, reactions, threads, DMs, groups and private channels all travel through it. DMs and private channels are only handed to their members, and each Hermes Multiplayer proves itself to the room with its own token, so one member cannot ask for another's DMs.
 

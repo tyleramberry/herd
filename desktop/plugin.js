@@ -2408,6 +2408,7 @@ async function saveFirstName(name) {
 }
 
 const joinedNote = atom('') // "You're in." after a join, until the next panel opens
+const welcomeRelay = atom(null) // the relay field on the welcome card (null: not touched yet)
 const welcomeName = atom(null) // the first-run name field while it is being typed (null: not touched yet)
 
 // Starting a team room, and handing out its link. A room is the easy way to connect: everyone pastes one link, and
@@ -2458,10 +2459,10 @@ function RoomPanel({ status }) {
       },
       children: [
         jsx('div', { className: 'text-sm font-medium', children: 'Start a team room on your own relay' }),
-        note('Only needed if you run your own relay. “Invite a teammate” already uses the built-in one.'),
+        note('Hermes Multiplayer has no built-in relay. Enter the address of a relay you deployed (see “Your own relay” in the README). The relay can read the messages it holds, so run it yourself.'),
         jsx(Input, {
           name: 'relay',
-          defaultValue: (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : '') || room.relay_default || '',
+          defaultValue: (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : ''),
           placeholder: 'Relay address, e.g. https://hermes-multiplayer-relay.your-name.workers.dev',
           'aria-label': 'Relay address',
           autoComplete: 'off',
@@ -2749,11 +2750,12 @@ function Welcome({ status, joinRoom, onClose }) {
     onSuccess: r => pairingResult.set(r)
   })
   const invite = useMutation({
-    mutationFn: async name => {
+    mutationFn: async ({ name, relay }) => {
       await saveFirstName(name)
-      return api('/room', { method: 'POST', body: { create: true } })
+      return api('/room', { method: 'POST', body: { create: true, relay } })
     },
-    onSuccess: made => {
+    onSuccess: (made, vars) => {
+      if (ctx && vars && vars.relay) ctx.storage.set(RELAY_KEY, vars.relay)
       roomInvite.set((made && made.invite) || '')
       if (made && made.invite) copyText(inviteMessage(made.invite))
       pairingView.set('room-invite')
@@ -2780,6 +2782,18 @@ function Welcome({ status, joinRoom, onClose }) {
       })
     : null
   const readName = () => (askName ? nameValue : '')
+  const typedRelay = useValue(welcomeRelay)
+  const relayValue = typedRelay === null ? (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : '') : typedRelay
+  // Your own relay's address. The example is only a placeholder and is never submitted.
+  const relayInput = jsx(Input, {
+    name: 'relay',
+    value: relayValue,
+    onChange: e => welcomeRelay.set(e.currentTarget.value),
+    placeholder: 'Your relay address, e.g. https://hermes-multiplayer-relay.your-name.workers.dev',
+    'aria-label': 'Relay address',
+    autoComplete: 'off',
+    className: 'h-7 text-xs'
+  })
   return jsxs('div', {
     className: 'flex w-full flex-col gap-2.5 text-xs text-(--ui-text-secondary)',
     children: [
@@ -2797,16 +2811,17 @@ function Welcome({ status, joinRoom, onClose }) {
       jsxs('div', {
         className: 'flex flex-col gap-1',
         children: [
+          relayInput,
           jsx(Button, {
             type: 'button',
             size: 'sm',
             disabled: invite.isPending,
-            onClick: () => invite.mutate(readName()),
+            onClick: () => invite.mutate({ name: readName(), relay: String(relayValue || '').trim() }),
             children: invite.isPending ? 'Creating your invite…' : 'Invite a teammate'
           }),
           jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-            children: 'Copies an invite you can text or email to them.'
+            children: 'Needs a relay you run (it holds your team’s messages in readable form). Copies an invite you can text or email.'
           }),
           invite.isError ? jsx('div', { role: 'alert', className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(invite.error, "Couldn't create the invite. Check that you're online and try again.") }) : null
         ]

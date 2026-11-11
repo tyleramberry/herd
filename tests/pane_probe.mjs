@@ -922,19 +922,21 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   const welcome = probePairingPanel({ status: { room: { joined: false }, self: { name_chosen: true, display_name: 'tyler' } } })
   const start = nodes(welcome)
   check('first run leads with inviting a teammate', start.find(n => n.type === 'Button').props.children === 'Invite a teammate')
-  check('first run has one box to paste an invite', start.filter(n => n.type === 'Input').length === 1)
-  check('first run shows no relay address, secret or gateway URL',
-    !texts(welcome).join(' ').match(/relay address|secret|gateway URL/i))
+  check('first run has a relay box and a box to paste an invite', start.filter(n => n.type === 'Input').map(n => n.props.name).sort().join() === 'invite,relay')
+  const relayBoxW = start.find(n => n.type === 'Input' && n.props.name === 'relay')
+  check('the relay box starts empty: the example is a placeholder only', !relayBoxW.props.value && /^Your relay address/.test(relayBoxW.props.placeholder))
+  check('first run shows no secret or gateway URL',
+    !texts(welcome).join(' ').match(/secret|gateway URL/i))
   globalThis.__mutations.length = 0
   start.find(n => n.type === 'Button' && n.props.children === 'Invite a teammate').props.onClick()
-  check('inviting needs no typing', globalThis.__mutations.length === 1 && globalThis.__mutations[0] === '', JSON.stringify(globalThis.__mutations))
+  check('inviting with no relay typed sends no address (the server refuses)', globalThis.__mutations.length === 1 && globalThis.__mutations[0].relay === '', JSON.stringify(globalThis.__mutations))
 
   const named = nodes(probePairingPanel({ status: { room: { joined: false }, self: { name_chosen: false, display_name: 'tylers-macbook-air', suggested_name: 'Tyler' } } }))
   const nameBox = named.find(n => n.type === 'Input' && n.props.name === 'display_name')
   check('a first run with no name asks once, prefilled with a friendly name', nameBox && nameBox.props.value === 'Tyler')
   globalThis.__mutations.length = 0
   named.find(n => n.type === 'Button' && n.props.children === 'Invite a teammate').props.onClick()
-  check('inviting saves that name first', globalThis.__mutations[0] === 'Tyler', JSON.stringify(globalThis.__mutations))
+  check('inviting saves that name first', globalThis.__mutations[0].name === 'Tyler', JSON.stringify(globalThis.__mutations))
 
   // Pasting an invite into the welcome box joins at once.
   const box = start.find(n => n.type === 'Input' && n.props.name === 'invite')
@@ -949,9 +951,9 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('pasting something else does nothing yet', globalThis.__mutations.length === 0)
 
   probePairingView.set('room')
-  const form = probePairingPanel({ status: { room: { joined: false, relay_default: 'https://relay.default.example' } } })
+  const form = probePairingPanel({ status: { room: { joined: false, } } })
   const roomForm = find(form, n => n.type === 'form')
-  check('the own-relay form offers the default relay', find(form, n => n.type === 'Input').props.defaultValue === 'https://relay.default.example')
+  check('the own-relay form has no prefilled relay', !find(form, n => n.type === 'Input').props.defaultValue)
   globalThis.__mutations.length = 0
   roomForm.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { relay: ['https://relay.mine.example'] } } })
   check('starting a room sends the relay address', globalThis.__mutations[0] === 'https://relay.mine.example')

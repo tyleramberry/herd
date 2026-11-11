@@ -2902,7 +2902,6 @@ def request_sync() -> None:
 
 RELAY_KEY_ENV = "HERMES_MULTIPLAYER_RELAY_KEY"
 RELAY_PEER_NAME = "hermes-multiplayer team room"  # this link's row in peer_state; a person's name is one word in practice
-DEFAULT_RELAY_URL = "https://hermes-multiplayer-relay.homeroom-app.workers.dev"  # the relay "Start a team room" uses when the owner gives no address
 RELAY_IDLE_SYNC_S = 30.0  # with the wait line open, the periodic tick only needs to refresh presence
 RELAY_RETRY_SYNC_S = 10.0  # without it (the room is unreachable, or an older relay): poll, gently
 RELAY_ONLINE_WINDOW_S = 90.0
@@ -3058,12 +3057,16 @@ def create_room(relay_address: Any = "") -> dict:
 
     The room does not exist anywhere until this gateway's first sync reaches the relay, which creates it and
     binds it to the key made here."""
-    base = str(relay_address or "").strip().rstrip("/") or DEFAULT_RELAY_URL
+    base = str(relay_address or "").strip().rstrip("/")
     # "Invite a teammate" twice must not split a team across two rooms: already in a room joined from this page,
     # hand out that room's link again. Only an explicit relay address starts a different room.
     cfg = relay_config()
-    if cfg and cfg.get("source") == "joined" and cfg.get("key") and not str(relay_address or "").strip():
+    if cfg and cfg.get("source") == "joined" and cfg.get("key") and not base:
         return {"invite": f"{cfg['url']}#{cfg['key']}", "status": status(), "existing": True}
+    if not base:
+        # No built-in relay: a room's messages sit in plaintext on the relay, so the user must name one they run.
+        raise MultiplayerError(422, "Enter the address of a relay you deployed. Hermes Multiplayer has no built-in relay. "
+                                    "See \"Your own relay\" in the README.")
     try:
         parts = urllib.parse.urlsplit(base)
         ok = parts.scheme.lower() in ("http", "https") and bool(parts.hostname) and not parts.query \
@@ -3103,7 +3106,7 @@ def room_status(states: Optional[dict] = None) -> dict:
     """The team room as the pane shows it. Never carries the key."""
     cfg = relay_config()
     if not cfg:
-        return {"joined": False, "relay_default": DEFAULT_RELAY_URL}
+        return {"joined": False}
     if states is None:
         with connect() as conn:
             states = {r["name"]: dict(r) for r in conn.execute(
@@ -3112,7 +3115,6 @@ def room_status(states: Optional[dict] = None) -> dict:
     refusal = _peer_url_refusal(cfg["url"])
     error = refusal or ("" if cfg["key"] else "This team room has no key saved.") or st.get("last_error") or ""
     return {"joined": True, "url": cfg["url"], "source": cfg["source"], "can_invite": cfg["source"] == "joined",
-            "relay_default": DEFAULT_RELAY_URL,
             "connected": bool(st.get("last_ok")) and not error, "last_ok": st.get("last_ok") or "",
             "last_error": error}
 
