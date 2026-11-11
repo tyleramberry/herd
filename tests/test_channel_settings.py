@@ -135,12 +135,12 @@ class TopicRouteTest(TwoGateways):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = FastAPI()
-        app.include_router(module.router, prefix="/api/plugins/herd")
+        app.include_router(module.router, prefix="/api/plugins/hermes-multiplayer")
         self.client = TestClient(app)
 
     def test_post_topic_sets_it(self):
         with self.A:
-            res = self.client.post("/api/plugins/herd/channels/general/topic", json={"topic": "via the pane"})
+            res = self.client.post("/api/plugins/hermes-multiplayer/channels/general/topic", json={"topic": "via the pane"})
             self.assertEqual(res.status_code, 200)
             self.assertEqual(store.get_channel("general")["topic"], "via the pane")
 
@@ -149,12 +149,12 @@ class TopicRouteTest(TwoGateways):
             with store.connect() as conn:
                 conn.execute("INSERT INTO channels(id, name, topic, is_dm, members, created_at) "
                              "VALUES ('dm:x+y', 'X & Y', '', 1, '[]', '2026-11-01T00:00:00Z')")
-            res = self.client.post("/api/plugins/herd/channels/dm:x+y/topic", json={"topic": "no"})
+            res = self.client.post("/api/plugins/hermes-multiplayer/channels/dm:x+y/topic", json={"topic": "no"})
             self.assertEqual(res.status_code, 422)
 
     def test_there_is_no_rename_route(self):
         with self.A:
-            res = self.client.patch("/api/plugins/herd/channels/general", json={"name": "lobby"})
+            res = self.client.patch("/api/plugins/hermes-multiplayer/channels/general", json={"name": "lobby"})
             self.assertIn(res.status_code, (404, 405))
             self.assertEqual(store.get_channel("general")["name"], "general")
 

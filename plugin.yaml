@@ -1,6 +1,6 @@
-name: herd
+name: hermes-multiplayer
 version: 0.1.0
-description: Channels and DMs shared between up to five Hermes gateways, for humans and agents.
+description: Hermes Multiplayer — channels and DMs shared between up to five Hermes gateways, for humans and agents.
 author: Tyler Amberry
 license: MIT
 homepage: https://github.com/tyleramberry/herd
@@ -18,7 +18,7 @@ config_schema:
     type: str
     default: ""
     label: Your name
-    description: How you appear to your teammate in Herd. Defaults to this computer's name.
+    description: How you appear to your teammate in Hermes Multiplayer. Defaults to this computer's name.
   peer_name:
     type: str
     default: ""
@@ -32,12 +32,12 @@ config_schema:
   herd_secret:
     type: secret
     env: HERD_SECRET
-    label: This gateway's Herd secret
-    description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Herd access only, never your gateway's API key.
+    label: This gateway's Hermes Multiplayer secret
+    description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Hermes Multiplayer access only, never your gateway's API key.
   peer_key:
     type: secret
     env: HERD_PEER_KEY
-    label: Teammate's Herd secret
+    label: Teammate's Hermes Multiplayer secret
     description: Your teammate's Herd secret (the value they set as their HERD_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
   peer_name_2:
     type: str
@@ -93,12 +93,12 @@ config_schema:
     type: str
     default: ""
     label: Team room address
-    description: "Optional. The address of a Herd team room, e.g. https://herd-relay.your-name.workers.dev/r/<room>. Easier: join from the Herd page with an invite link and leave this blank."
+    description: "Optional. The address of a Hermes Multiplayer team room, e.g. https://herd-relay.your-name.workers.dev/r/<room>. Easier: join from the Hermes Multiplayer page with an invite link and leave this blank."
   relay_key:
     type: secret
     env: HERD_RELAY_KEY
     label: Team room key
-    description: The part of a team room link after the '#'. Only needed when the address above is set here rather than joined from the Herd page.
+    description: The part of a team room link after the '#'. Only needed when the address above is set here rather than joined from the Hermes Multiplayer page.
   allow_cleartext_peer:
     type: bool
     default: false

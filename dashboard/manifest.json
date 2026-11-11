@@ -1,7 +1,7 @@
 {
-  "name": "herd",
-  "label": "Herd",
-  "description": "Backend for the Herd desktop pane (channels, DMs, peer sync).",
+  "name": "hermes-multiplayer",
+  "label": "Hermes Multiplayer",
+  "description": "Backend for the Hermes Multiplayer pane (channels, DMs, peer sync).",
   "version": "0.1.0",
   "tab": { "hidden": true },
   "api": "plugin_api.py"

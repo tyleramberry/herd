@@ -139,7 +139,7 @@ check('no status at all keeps the existing no-teammate line',
 check('no herd secret set renders the settings prompt, not a link state',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
              herd_secret_set: false }),
-  ['This gateway has no Herd secret set. Set one in Settings → Plugins → Herd.'])
+  ['This gateway has no Hermes Multiplayer secret set. Set one in Settings → Plugins → Hermes Multiplayer.'])
 check('herd_secret_set true is unchanged',
   peerLine({ peers: [{ name: 'riley', remote_name: 'riley', connected: true, has_key: true }],
              herd_secret_set: true }),
@@ -150,7 +150,7 @@ check('a status missing herd_secret_set is unchanged',
 check('peer with no stored secret asks for the Herd secret (not the gateway API key)',
   peerLine({ peers: [{ name: 'riley', connected: false, has_key: false, last_attempt: '' }],
              herd_secret_set: true }),
-  ["Add riley's Herd secret to connect"])
+  ["Add riley's Hermes Multiplayer secret to connect"])
 
 // 6. One line per teammate (spec §1.5): a dead teammate never hides a live one, and a refusal still shows.
 check('two teammates: one line each, in order',

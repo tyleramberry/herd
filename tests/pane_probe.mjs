@@ -327,7 +327,7 @@ const flat = root => nodes(root).filter(n => typeof n.type === 'string')
   const items = fakeCtx.items
   const entry = items.find(i => i.area === 'palette')
   check('a ⌘K palette entry is registered', Boolean(entry) && entry.data.id === 'herd.search')
-  check('the palette entry is labelled', entry && entry.data.label === 'Search Herd messages')
+  check('the palette entry is labelled', entry && entry.data.label === 'Search Hermes Multiplayer messages')
   searchQuery.set('leftover')
   entry.data.run()
   check('running it opens the Herd page', globalThis.__navigations.at(-1) === '/herd')
@@ -363,13 +363,13 @@ const item = (channel, author, preview, extra = {}) => ({
   fakeCtx.os = saved
 
   globalThis.__notified.length = 0
-  fakeCtx.handlers['plugin.herd.incoming.messages']({ payload: { count: 1, items: [item('c12', 'riley', 'routed')] } })
+  fakeCtx.handlers['plugin.hermes-multiplayer.incoming.messages']({ payload: { count: 1, items: [item('c12', 'riley', 'routed')] } })
   check('the incoming event reaches the notifier', globalThis.__notified.length === 1 && globalThis.__notified[0].body.includes('routed'))
 }
 {
   globalThis.__query = { data: [{ unread: 2 }, { unread: 3 }, { unread: 0 }] }
   const bar = UnreadCount({})
-  check('the status bar totals unread messages', texts(bar).includes('Herd · 5 unread'), JSON.stringify(texts(bar)))
+  check('the status bar totals unread messages', texts(bar).includes('Hermes Multiplayer · 5 unread'), JSON.stringify(texts(bar)))
   globalThis.__query = { data: [{ unread: 0 }] }
   check('the status bar is empty when nothing is unread', UnreadCount({}) === null)
   globalThis.__query = null

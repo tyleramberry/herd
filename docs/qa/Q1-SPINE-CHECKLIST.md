@@ -74,7 +74,7 @@ Preconditions to verify BEFORE testing (a failure here is env, not product):
       (`var(--ui-text-secondary)` etc.); no core-UI restyling; our UI lives
       in our pane/route only
 - [ ] TC-0.7 No secrets in code; no network calls except the gateway and our
-      `/api/plugins/herd/` namespace
+      `/api/plugins/hermes-multiplayer/` namespace
 - [ ] TC-0.8 `plugin.yaml` `provides_tools` lists exactly what `register()`
       registers via `ctx.register_tool` (locked scope, N-1: herd_list_channels,
       herd_post, herd_read_channel — no more, no fewer). Automated:
@@ -104,7 +104,7 @@ Preconditions to verify BEFORE testing (a failure here is env, not product):
       `herd_post` to `general` succeeds and the message (author_type=agent)
       appears in the channel view.
 - [ ] TC-1.6 **Backend namespace scoping.** All backend calls hit
-      `/api/plugins/herd/*` only (verify in devtools network tab); a
+      `/api/plugins/hermes-multiplayer/*` only (verify in devtools network tab); a
       path-traversal attempt (`ctx.rest('../…')`) is rejected, not proxied.
 - [ ] TC-1.7 **Timers/listeners** go through `ctx.setTimeout` /
       `ctx.setInterval` / `ctx.addEventListener` — no bare `window.*` globals
@@ -393,7 +393,7 @@ ends with both sides showing the SAME reaction state.
 - [ ] TC-8.7 **Scope guard.** No new agent tool for reactions without a
       scope-change ruling (N-1 locks 3 tools): TC-0.8 catalog audit must
       still pass with 3 tools; any new endpoint stays in the
-      `/api/plugins/herd/` + `/herd/v1/` namespaces (TC-0.7); reaction UI
+      `/api/plugins/hermes-multiplayer/` + `/herd/v1/` namespaces (TC-0.7); reaction UI
       is human-only.
 
 ## 6g. TC-9 — Single + button (S-10; due Nov 6; polish)
@@ -559,7 +559,7 @@ Ground rules:
       is S2.
 - [ ] TC-11.8 **Scope + namespace guards.** The setter is a registered tool with a
       schema, returns a JSON string, accepts `**kwargs` (TC-0.9); any new endpoint
-      stays under `/api/plugins/herd/` (TC-0.7); no hardcoded colors in the new
+      stays under `/api/plugins/hermes-multiplayer/` (TC-0.7); no hardcoded colors in the new
       pane code (TC-0.6); timers via `ctx.*` (TC-1.7); `catalog_audit.py` 0 FAIL
       with the declared tool count; rule-13 text for the status write path lands
       with Herald (H-6) and is signed off by Sentry before merge (gate item).

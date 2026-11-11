@@ -3,3 +3,8 @@ __pycache__/
 *.py[co]
 .pytest_cache/
 .worktrees/
+
+# relay build artefacts (never committed)
+node_modules/
+relay/node_modules/
+relay/.wrangler/

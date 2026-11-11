@@ -14,7 +14,7 @@ def _store():
 
 
 def _fail(exc: Exception) -> str:
-    message = getattr(exc, "message", None) or "Herd couldn't do that right now."
+    message = getattr(exc, "message", None) or "Hermes Multiplayer couldn't do that right now."
     return json.dumps({"ok": False, "error": message})
 
 

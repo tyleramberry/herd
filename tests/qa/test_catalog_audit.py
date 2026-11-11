@@ -16,7 +16,7 @@ sys.modules["catalog_audit"] = audit
 _spec.loader.exec_module(audit)
 
 GOOD_YAML = """\
-name: herd
+name: hermes-multiplayer
 version: "0.1.0"
 requires_hermes: ">=0.22.7"
 provides_tools:
@@ -68,7 +68,7 @@ export default definePlugin((ctx) => {
 README = "# Herd\n\n## Disclosures\nNetwork calls: peer gateways only. Stored credentials: none.\n"
 
 ENTRY = """\
-name: herd
+name: hermes-multiplayer
 repo: https://github.com/tyleramberry/herd
 sha: {sha}
 description: Multiplayer Hermes.

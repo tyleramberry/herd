@@ -44,7 +44,7 @@ no relay to host.
 - **Ours today:** `herd_read_channel` only, capped at 100 messages, one channel,
   no query parameter. No search surface anywhere in the UI.
 - **Minimum to compete:** SQLite FTS5 virtual table over message bodies + a
-  `herd_search` agent tool + `GET /api/plugins/herd/search?q=` + a ⌘K surface.
+  `herd_search` agent tool + `GET /api/plugins/hermes-multiplayer/search?q=` + a ⌘K surface.
   FTS5 is already available in the store; this is the highest-leverage item here.
 - **Why it matters:** without search the agent is a parrot in the current
   channel. With it, it becomes the thing Buzz is actually selling.

@@ -104,5 +104,5 @@ Rules that follow from this:
 
 - Plugin id: `herd` · Display name: **Herd**
 - Tools: `herd_list_channels`, `herd_post`, `herd_read_channel`
-- API namespace: `/api/plugins/herd/`
+- API namespace: `/api/plugins/hermes-multiplayer/`
 - Default channel: `general` (no `#` in data; UI shows `#general`)

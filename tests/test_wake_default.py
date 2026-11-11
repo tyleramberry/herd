@@ -217,11 +217,11 @@ class WakeTargetRouteTest(_Base):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = FastAPI()
-        app.include_router(module.router, prefix="/api/plugins/herd")
+        app.include_router(module.router, prefix="/api/plugins/hermes-multiplayer")
         self.client = TestClient(app)
 
     def test_pane_sets_the_target_from_its_session_key(self):
-        res = self.client.post("/api/plugins/herd/wake-target",
+        res = self.client.post("/api/plugins/hermes-multiplayer/wake-target",
                                json={"session_key": "ses_pane", "label": "this chat"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(store.mention_target(), "ses_pane")
@@ -229,12 +229,12 @@ class WakeTargetRouteTest(_Base):
 
     def test_empty_key_clears_the_target_like_listen_off(self):
         store.set_mention_target("ses_pane")
-        res = self.client.post("/api/plugins/herd/wake-target", json={"session_key": ""})
+        res = self.client.post("/api/plugins/hermes-multiplayer/wake-target", json={"session_key": ""})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(store.mention_target(), "")
 
     def test_a_control_character_in_the_key_is_refused(self):
-        res = self.client.post("/api/plugins/herd/wake-target", json={"session_key": "ses\nx"})
+        res = self.client.post("/api/plugins/hermes-multiplayer/wake-target", json={"session_key": "ses\nx"})
         self.assertEqual(res.status_code, 422)
         self.assertEqual(store.mention_target(), "")
 

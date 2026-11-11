@@ -196,14 +196,14 @@ class StatusTest(unittest.TestCase):
         pkg = sys.modules.get("hermes_cli") or types.ModuleType("hermes_cli")
         with mock.patch.dict(sys.modules, {"hermes_cli": pkg, "hermes_cli.plugin_events": stub}):
             store._notify("status.changed", {})
-        self.assertEqual(sent, [("herd", "status.changed", {})])
+        self.assertEqual(sent, [("hermes-multiplayer", "status.changed", {})])
 
     def test_status_survives_event_path_down(self):
         with mock.patch.object(store, "_notify", lambda e, p: None):
             store.set_status("reviewing")
         self.assertEqual(store.status()["agent_status"]["phrase"], "reviewing")
         # The pane reads the phrase from the /status query, never from the event payload.
-        handler = re.search(r"ctx\.onEvent\('plugin\.herd\.status\.changed'.*?\}\)", SOURCE, re.S).group(0)
+        handler = re.search(r"ctx\.onEvent\('plugin\.hermes-multiplayer\.status\.changed'.*?\}\)", SOURCE, re.S).group(0)
         self.assertIn("invalidateQueries({ queryKey: KEYS.status })", handler)
         self.assertNotIn("payload", handler)
         self.assertNotIn("phrase", handler)
@@ -238,7 +238,7 @@ class DesktopSourceTest(unittest.TestCase):
                 self.assertNotIn(phrase, lowered, phrase)
 
     def test_one_new_event_and_no_new_timer(self):
-        events = re.findall(r"ctx\.onEvent\('plugin\.herd\.([a-z_.]+)'", SOURCE)
+        events = re.findall(r"ctx\.onEvent\('plugin\.hermes-multiplayer\.([a-z_.]+)'", SOURCE)
         # Four pre-existing handlers (message.created, reactions.changed, channels.changed,
         # settings.changed), status.changed (S-15) and incoming.messages (Track 2, notifications).
         # typing.changed and presence.changed (team room) only invalidate queries the pane already polls.
@@ -249,7 +249,7 @@ class DesktopSourceTest(unittest.TestCase):
 
 
 class StatusRouteTest(unittest.TestCase):
-    """The pane's real transport: GET /api/plugins/herd/status, with the event path down (TC-11.7)."""
+    """The pane's real transport: GET /api/plugins/hermes-multiplayer/status, with the event path down (TC-11.7)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -270,9 +270,9 @@ class StatusRouteTest(unittest.TestCase):
         import herd.dashboard.plugin_api as api
 
         app = FastAPI()
-        app.include_router(api.router, prefix="/api/plugins/herd")
+        app.include_router(api.router, prefix="/api/plugins/hermes-multiplayer")
         client = TestClient(app)
-        url = "/api/plugins/herd/status"
+        url = "/api/plugins/hermes-multiplayer/status"
 
         self.assertIsNone(client.get(url).json()["agent_status"])          # never set -> nothing
         self.assertEqual(json.loads(tools.herd_set_status({"status": "reviewing"}))["ok"], True)
@@ -291,9 +291,9 @@ class StatusRouteTest(unittest.TestCase):
         import herd.dashboard.plugin_api as api
 
         app = FastAPI()
-        app.include_router(api.router, prefix="/api/plugins/herd")
+        app.include_router(api.router, prefix="/api/plugins/hermes-multiplayer")
         client = TestClient(app)
-        url = "/api/plugins/herd/status"
+        url = "/api/plugins/hermes-multiplayer/status"
 
         for record in ({"phrase": "idle"}, {"phrase": "idle", "at": "oops"}):
             with self.subTest(record=record):

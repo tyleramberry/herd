@@ -1,4 +1,6 @@
-# Herd — multiplayer Hermes
+# Hermes Multiplayer
+
+Multiplayer Hermes: channels and DMs for you, your teammates, and everyone's agents.
 
 Channels and DMs where you, up to four teammates, and each of your Hermes agents work together across up to five machines.
 
@@ -26,7 +28,7 @@ What it doesn't do (yet): more than five gateways; private channels (the only re
 
 ```bash
 hermes plugins install tyleramberry/herd --no-enable
-hermes plugins enable herd
+hermes plugins enable hermes-multiplayer
 ```
 
 Then in the desktop app, turn on Herd's desktop half in **Capabilities → Plugins** (it ships off by default) and restart the gateway so the backend loads. Herd shows up as **Herd** in the sidebar and as a right-hand pane.
@@ -47,7 +49,7 @@ The older ways below (linking two gateways directly) still work, and can be mixe
 
 Only one of you needs to do this. Say Tyler connects to Brooklyn:
 
-1. **On Brooklyn's machine**, with the herd plugin enabled:
+1. **On Brooklyn's machine**, with the Hermes Multiplayer plugin enabled:
    - Open **Settings → Plugins → Herd** and set *This gateway's Herd secret* (`HERD_SECRET`) to a long random value. This is Herd's own credential: it only opens Herd's `/herd/v1/*` routes, never the rest of the gateway. Tell Tyler this value — and only this value. Never share your `API_SERVER_KEY`.
    - Make the Hermes API server reachable from Tyler's machine (port `8642` by default). Prefer a tailnet/VPN address; if you set `API_SERVER_HOST=0.0.0.0` in `~/.hermes/.env`, know that this opens the **whole** Hermes API surface to your network, and the Herd secret does **not** protect any of it — only `/herd/v1/*`. Keep `API_SERVER_KEY` set to its own long random key, and firewall the port to your teammate if you can. Restart the gateway.
 2. **On Tyler's machine**, open **Settings → Plugins → Herd** (or click **Connect a teammate** in the Herd pane) and fill in:
@@ -88,7 +90,7 @@ Every teammate has its own status line in the pane (connected, can't reach, or n
 
 Wake is on by default. When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Herd hands that message to your agent as a normal chat turn, so it runs under your usual approvals. Two things must be in place, because this lets another person's message start an agent turn on your machine:
 
-1. In `~/.hermes/config.yaml`, allow Herd to start turns: under `plugins: entries: herd:` set `allow_gateway_injection: true`.
+1. In `~/.hermes/config.yaml`, allow Hermes Multiplayer to start turns: under `plugins: entries: hermes-multiplayer:` set `allow_gateway_injection: true`.
 2. Choose the chat that answers. In the Herd pane, open the chat your agent should answer in and click **Answer @mentions here**; or type `/herd-listen` in that chat. (`/herd-listen off`, or **Stop** in the pane, clears it.)
 
 **Tagging your own agent.** You don't need a teammate to try it: type `@hermes` (or `@your-name-hermes`) in any channel on your own Herd and your agent gets the message the same way, with the same two requirements. `@hermes` only ever means the agent on the machine it was typed on; it never wakes a teammate's agent. Writing your own name alone (`@tyler`) is not a request to your agent.

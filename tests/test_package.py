@@ -62,13 +62,13 @@ class ManifestTest(unittest.TestCase):
 
     def test_manifest_fields(self):
         m = _manifest()
-        self.assertEqual(m["name"], "herd")
+        self.assertEqual(m["name"], "hermes-multiplayer")
         self.assertIsInstance(m["version"], str)
         self.assertRegex(m["requires_hermes"], r"^>=\d+\.\d+\.\d+$")
         self.assertEqual(m["config_schema"]["peer_key"]["type"], "secret")
         self.assertEqual(m["config_schema"]["peer_key"]["env"], store.SECRET_ENV)
         dash = json.loads((ROOT / "dashboard" / "manifest.json").read_text())
-        self.assertEqual((dash["name"], dash["api"]), ("herd", "plugin_api.py"))
+        self.assertEqual((dash["name"], dash["api"]), ("hermes-multiplayer", "plugin_api.py"))
         self.assertTrue(dash["tab"]["hidden"])
 
     def test_no_env_or_dotenv_reads(self):
@@ -113,8 +113,8 @@ class DesktopLintTest(unittest.TestCase):
             self.assertTrue(comp in imported or local, f"{comp} used but not imported/defined")
 
     def test_contract(self):
-        for needle in ("id: PLUGIN_ID", "const PLUGIN_ID = 'herd'", "defaultEnabled: false", "ROUTES_AREA",
-                       "SIDEBAR_NAV_AREA", "PANES_AREA", "ctx.onEvent('plugin.herd.message.created'",
+        for needle in ("id: PLUGIN_ID", "const PLUGIN_ID = 'hermes-multiplayer'", "defaultEnabled: false", "ROUTES_AREA",
+                       "SIDEBAR_NAV_AREA", "PANES_AREA", "ctx.onEvent('plugin.hermes-multiplayer.message.created'",
                        "ctx.setInterval", "pluginSettingsHref(PLUGIN_ID)"):
             self.assertIn(needle, SOURCE, needle)
 

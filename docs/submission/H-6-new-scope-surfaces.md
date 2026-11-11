@@ -134,7 +134,7 @@ For any block **not** applied (currently only S-13's beat), confirm **none** of 
 ### 3.1 — S-13  ·  **APPLIED (disclosure only)**  *(names corrected Nov 7 per Sentry Q-7)*
 - **`capabilities:` — NO CHANGE.** Promote adds no tool; `herd_list_channels` already lists the new channel.
 - **Write path (code of record, verified):** the desktop half calls a **local-only** backend route
-  **`POST /api/plugins/herd/channels/{channel_id}/share`** (`dashboard/plugin_api.py`); the teammate's
+  **`POST /api/plugins/hermes-multiplayer/channels/{channel_id}/share`** (`dashboard/plugin_api.py`); the teammate's
   gateway is reached by the **same** `POST /herd/v1/sync` call already disclosed. **`PROTOCOL_VERSION`
   1 → 2**; the message row gains **`promoted_from`** (the source DM id) so both gateways converge.
   *(The earlier staged names `…/promote` and `origin_channel_id` were **wrong** — do not use them.)*

@@ -292,12 +292,12 @@ class SearchRouteTest(SearchBase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         app = FastAPI()
-        app.include_router(module.router, prefix="/api/plugins/herd")
+        app.include_router(module.router, prefix="/api/plugins/hermes-multiplayer")
         self.client = TestClient(app)
 
     def test_get_search_returns_results(self):
         store.ingest(peer_msg("route check phrase", "api1"))
-        res = self.client.get("/api/plugins/herd/search", params={"q": "route check"})
+        res = self.client.get("/api/plugins/hermes-multiplayer/search", params={"q": "route check"})
         self.assertEqual(res.status_code, 200)
         body = res.json()
         self.assertEqual(body["query"], "route check")
@@ -305,16 +305,16 @@ class SearchRouteTest(SearchBase):
 
     def test_channel_and_limit_params(self):
         store.ingest(peer_msg("param check", "api2"))
-        res = self.client.get("/api/plugins/herd/search", params={"q": "param", "channel": "general", "limit": 1})
+        res = self.client.get("/api/plugins/hermes-multiplayer/search", params={"q": "param", "channel": "general", "limit": 1})
         self.assertEqual(len(res.json()["results"]), 1)
 
     def test_empty_query_is_an_empty_list(self):
-        res = self.client.get("/api/plugins/herd/search", params={"q": ""})
+        res = self.client.get("/api/plugins/hermes-multiplayer/search", params={"q": ""})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["results"], [])
 
     def test_unknown_channel_is_404(self):
-        res = self.client.get("/api/plugins/herd/search", params={"q": "x", "channel": "nope"})
+        res = self.client.get("/api/plugins/hermes-multiplayer/search", params={"q": "x", "channel": "nope"})
         self.assertEqual(res.status_code, 404)
 
 

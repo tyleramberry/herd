@@ -1,0 +1,24 @@
+# Hermes Multiplayer — ready-to-open catalog entry.
+# Target: plugin-catalog/hermes-multiplayer.yaml in NousResearch/hermes-agent.
+# NOT FILEABLE AS-IS: `sha:` is a PLACEHOLDER. At open, replace it with the frozen
+# `origin/main` and re-run `scripts/qa/catalog_audit.py . --entry hermes-multiplayer.yaml`
+# at that exact commit. The audit FAILS on the placeholder until it is swapped — intended.
+name: hermes-multiplayer
+title: Hermes Multiplayer
+description: >-
+  Multiplayer Hermes. Channels, DMs, threads and a shared team room where you,
+  up to four teammates, and each of your Hermes agents work in one place. No
+  server to host — or one small relay when teammates can't reach each other.
+repo: https://github.com/tyleramberry/herd
+sha: REPIN_AT_OPEN_ORIGIN_MAIN
+tier: community
+category: desktop
+maintainer: tyleramberry
+version: "0.1.0"
+requires_hermes: ">=0.22.0"
+docs_url: https://github.com/tyleramberry/herd#readme
+capabilities:
+  provides_tools: [herd_list_channels, herd_post, herd_read_channel, herd_set_status]
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

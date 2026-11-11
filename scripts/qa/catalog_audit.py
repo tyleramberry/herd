@@ -6,7 +6,7 @@ Checks the plugin tree against the Hermes plugin-catalog admission rules
 statically, BEFORE `hermes plugins validate` runs. It complements validate; it
 does not replace it. Stdlib only, so it runs on a clean machine.
 
-    python scripts/qa/catalog_audit.py [PLUGIN_ROOT] [--entry path/to/herd.yaml]
+    python scripts/qa/catalog_audit.py [PLUGIN_ROOT] [--entry path/to/hermes-multiplayer.yaml]
                                        [--expect-tools a,b,c]
 
 Exit code 0 = no FAIL findings (WARN findings still need a human read),
@@ -459,8 +459,8 @@ def check_manifest(root: Path, tools, hooks, mws, expect_tools):
         add("FAIL", "load", "plugin.yaml", "missing — no loadable plugin at this commit")
         return None
     man = load_yaml(man_path)
-    if man.get("name") != "herd":
-        add("WARN", "names", "plugin.yaml", f"name is {man.get('name')!r}, expected 'herd'")
+    if man.get("name") != "hermes-multiplayer":
+        add("WARN", "names", "plugin.yaml", f"name is {man.get('name')!r}, expected 'hermes-multiplayer'")
     rh = man.get("requires_hermes")
     if not rh:
         add("FAIL", "14", "plugin.yaml", "requires_hermes missing — declare the SemVer floor here AND in the catalog entry")
@@ -494,8 +494,8 @@ def check_manifest(root: Path, tools, hooks, mws, expect_tools):
 def check_entry(entry_path: Path, man: dict | None):
     e = load_yaml(entry_path)
     where = str(entry_path)
-    if e.get("name") != "herd":
-        add("FAIL", "schema", where, "name must be 'herd'")
+    if e.get("name") != "hermes-multiplayer":
+        add("FAIL", "schema", where, "name must be 'hermes-multiplayer'")
     sha = str(e.get("sha") or "")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         add("FAIL", "2", where, f"sha {sha!r} is not a full 40-hex commit")
@@ -526,7 +526,7 @@ def check_entry(entry_path: Path, man: dict | None):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("root", nargs="?", default=".")
-    ap.add_argument("--entry", help="catalog entry yaml (herd.yaml) to cross-check")
+    ap.add_argument("--entry", help="catalog entry yaml (hermes-multiplayer.yaml) to cross-check")
     ap.add_argument("--expect-tools", default="herd_list_channels,herd_post,herd_read_channel,herd_set_status",
                     help="comma list of tools the locked scope expects (S-15 added herd_set_status; '' to skip)")
     a = ap.parse_args(argv)

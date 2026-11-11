@@ -1,4 +1,4 @@
-// Herd — desktop half. Loaded uncompiled: plain ESM, jsx()/jsxs() calls, no JSX syntax.
+// Hermes Multiplayer — desktop half. Loaded uncompiled: plain ESM, jsx()/jsxs() calls, no JSX syntax.
 // Imports are limited to '@hermes/plugin-sdk' and 'react/jsx-runtime' by design (catalog rule 8).
 import {
   Badge,
@@ -28,7 +28,7 @@ import {
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
-const PLUGIN_ID = 'herd'
+const PLUGIN_ID = 'hermes-multiplayer'
 const ROUTE_PATH = '/herd'
 const REFRESH_MS = 3000 // re-read local data (events are the fast path; this is the fallback)
 const SYNC_MS = 10000 // ask the backend to sync with the peer (the gateway also syncs on its own)
@@ -60,7 +60,7 @@ const reactionPicker = atom(null)
 // Composer emoji tray per surface, and the channel whose topic is being edited (or null).
 const emojiTray = { page: atom(false), pane: atom(false) }
 const topicEditing = { page: atom(null), pane: atom(null) }
-// Set by the "New Herd message" keybind: the composer that mounts next takes focus (see Composer).
+// Set by the "New Hermes Multiplayer message" keybind: the composer that mounts next takes focus (see Composer).
 const composeRequest = atom(0)
 const COMPOSE_FOCUS_MS = 3000
 // Your own message being edited (its id), and the one waiting for "Delete?" to be confirmed. One at a time.
@@ -72,12 +72,12 @@ const reactionMore = atom(false)
 const HISTORY_PAGE = 200
 const historyLimit = new Map()
 let historyAnchor = null
-// When this Herd last told the backend "typing in <channel>", so a burst of keystrokes is one request.
+// When this Hermes Multiplayer last told the backend "typing in <channel>", so a burst of keystrokes is one request.
 const TYPING_PING_MS = 3000
 const typingSent = { channel: '', at: 0 }
 
 function api(path, opts) {
-  if (!rest) return Promise.reject(new Error('Herd is turned off.'))
+  if (!rest) return Promise.reject(new Error('Hermes Multiplayer is turned off.'))
   return rest(path, opts)
 }
 
@@ -186,7 +186,7 @@ function refusedPeers(status) {
   return list.filter(entry => entry && entry.reason)
 }
 
-// The team room's own health line, or null when this Herd is in none.
+// The team room's own health line, or null when this Hermes Multiplayer is in none.
 function roomLine(status) {
   const room = status && status.room
   if (!room || !room.joined) return null
@@ -211,12 +211,12 @@ function PeerLine({ status }) {
   if (status && status.herd_secret_set === false) {
     return jsxs('div', {
       className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
-      title: "Teammates can't sync with this gateway until it has a Herd secret.",
+      title: "Teammates can't sync with this gateway until it has a Hermes Multiplayer secret.",
       children: [
         jsx(StatusDot, { tone: 'bad' }),
         jsx('span', {
           className: 'truncate',
-          children: 'This gateway has no Herd secret set. Set one in Settings → Plugins → Herd.'
+          children: 'This gateway has no Hermes Multiplayer secret set. Set one in Settings → Plugins → Hermes Multiplayer.'
         })
       ]
     })
@@ -240,7 +240,7 @@ function PeerLine({ status }) {
       const who = incoming.name || 'A teammate'
       return jsxs('div', {
         className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
-        title: 'Add ' + who + ' back under Settings → Plugins → Herd to see link health here.',
+        title: 'Add ' + who + ' back under Settings → Plugins → Hermes Multiplayer to see link health here.',
         children: [jsx(StatusDot, { tone: 'good' }), jsx('span', { className: 'truncate', children: who + ' is connected' })]
       })
     }
@@ -265,7 +265,7 @@ function peerLine(peer) {
   const label = peer.connected
     ? 'Connected to ' + name
     : !peer.has_key
-      ? 'Add ' + name + "'s Herd secret to connect"
+      ? 'Add ' + name + "'s Hermes Multiplayer secret to connect"
       : peer.last_attempt
         ? "Can't reach " + name + ". Messages will send when they're back."
         : 'Connecting to ' + name + '…'
@@ -325,8 +325,8 @@ function UnreadCount() {
   if (!total) return null
   return jsx('span', {
     className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-    title: 'Unread messages in Herd',
-    children: 'Herd · ' + total + ' unread'
+    title: 'Unread messages in Hermes Multiplayer',
+    children: 'Hermes Multiplayer · ' + total + ' unread'
   })
 }
 
@@ -659,7 +659,7 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
     if (value === 'invite' || value === 'join') {
       inviteLine.set('')
       roomInvite.set('')
-      // Inviting goes through the team room: its link if this Herd is in one, the form to start one if not.
+      // Inviting goes through the team room: its link if this Hermes Multiplayer is in one, the form to start one if not.
       pairingView.set(value === 'join' ? 'enter' : status && status.room && status.room.joined ? 'room-invite' : 'room')
       return
     }
@@ -758,7 +758,7 @@ function mentionCandidates(participants, query) {
   ;(Array.isArray(participants) ? participants : []).forEach(p => {
     const handle = mentionHandle(p.display_name)
     if (p.is_self) {
-      // Your own agent: tagging it from your own Herd wakes it (the backend's mentions_own_agent).
+      // Your own agent: tagging it from your own Hermes Multiplayer wakes it (the backend's mentions_own_agent).
       out.push({ key: p.id + ':agent', handle: handle ? handle + '-hermes' : 'hermes', label: 'Your Hermes', agent: true })
       return
     }
@@ -1287,7 +1287,7 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped, 
   const editingId = useValue(editingMessage)
   const deletingId = useValue(deletingMessage)
   const deleted = Boolean(message.deleted)
-  // Yours to change: written on this Herd (by you or your agent) and still there.
+  // Yours to change: written on this Hermes Multiplayer (by you or your agent) and still there.
   const own = Boolean(selfId && message.gateway_id === selfId && !deleted)
   const isEditing = own && editingId === message.id
   const isDeleting = own && deletingId === message.id
@@ -1454,7 +1454,7 @@ function ThreadBody({ rootId }) {
     return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
   }
   if (isError || !data || !data.parent) {
-    return jsx(EmptyState, { title: "Couldn't load this thread.", description: 'Herd will retry in a moment.' })
+    return jsx(EmptyState, { title: "Couldn't load this thread.", description: 'Hermes Multiplayer will retry in a moment.' })
   }
   return jsxs('div', {
     className: 'flex flex-col py-1',
@@ -1566,7 +1566,7 @@ function ThreadWorkspace({ channel, rootId }) {
                 thread.page.set(rootId)
                 host.navigate(ROUTE_PATH)
               },
-              children: 'Open in Herd'
+              children: 'Open in Hermes Multiplayer'
             })
           })
         ]
@@ -1781,7 +1781,7 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   if (isLoading) {
     body = jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading…' })
   } else if (isError) {
-    body = jsx(EmptyState, { title: "Couldn't load messages.", description: 'Herd will retry in a moment.' })
+    body = jsx(EmptyState, { title: "Couldn't load messages.", description: 'Hermes Multiplayer will retry in a moment.' })
   } else if (messages.length === 0) {
     body = jsx(EmptyState, { title: 'No messages yet.', description: 'Say hi, or type @hermes to ask your own agent here.' })
   } else {
@@ -2023,7 +2023,7 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Search: the ⌘K palette entry and the search box on the Herd page
+// Search: the ⌘K palette entry and the search box on the Hermes Multiplayer page
 // ---------------------------------------------------------------------------
 
 const searchQuery = atom('') // what the page's search box holds; '' means no search
@@ -2161,8 +2161,8 @@ function SearchBar() {
 }
 
 // Pairing (Track 5): a one-time code instead of a long key. "Show" mints a code on this gateway; "Enter" exchanges a
-// teammate's code for their Herd secret. The secret is kept only in this atom and shown once, for the owner to paste
-// into Settings: Herd has no way to write Hermes's secret store, so it does not save the key for you.
+// teammate's code for their Hermes Multiplayer secret. The secret is kept only in this atom and shown once, for the owner to paste
+// into Settings: Hermes Multiplayer has no way to write Hermes's secret store, so it does not save the key for you.
 const pairingView = atom(null) // null | 'show' | 'enter' | 'room' (start a team room) | 'room-invite' (its link)
 // The team room's invite link while it is on screen. It holds the room key, so it is cleared with the panel.
 const roomInvite = atom('')
@@ -2251,9 +2251,9 @@ function RoomPanel({ status }) {
         ? jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: invite })
         : null,
       invite
-        ? note((canCopy() ? 'Copied. ' : '') + 'Send this link to a teammate. In Herd they click + and then “Join with an invite”, and paste it. Anyone with the link can read and post in this room, so share it like a password.')
+        ? note((canCopy() ? 'Copied. ' : '') + 'Send this link to a teammate. In Hermes Multiplayer they click + and then “Join with an invite”, and paste it. Anyone with the link can read and post in this room, so share it like a password.')
         : room.can_invite === false
-          ? note('This room was set up in Settings, so Herd can’t show its link. Share the link you were given.')
+          ? note('This room was set up in Settings, so Hermes Multiplayer can’t show its link. Share the link you were given.')
           : note('One link brings a teammate into this room.'),
       fetchInvite.isError ? note(errorText(fetchInvite.error, "Couldn't get the link.")) : null,
       jsxs('div', {
@@ -2319,9 +2319,9 @@ function PairingPanel({ status }) {
     return jsxs('div', {
       className: 'flex flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
       children: [
-        jsx('div', { children: 'Paired with ' + result.name + '. Copy this key once, then paste it into Settings → Plugins → Herd → Teammate’s Herd secret, with the gateway address ' + result.url + '.' }),
+        jsx('div', { children: 'Paired with ' + result.name + '. Copy this key once, then paste it into Settings → Plugins → Hermes Multiplayer → Teammate’s Hermes Multiplayer secret, with the gateway address ' + result.url + '.' }),
         jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: result.herd_secret }),
-        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Herd can’t save this for you yet. Hide it once you have pasted it.' }),
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Hermes Multiplayer can’t save this for you yet. Hide it once you have pasted it.' }),
         btn('Hide key', () => pairingResult.set(null))
       ]
     })
@@ -2443,7 +2443,7 @@ function copyText(text) {
   }
 }
 
-// The one step Herd can't do for you: Hermes only lets a plugin start an agent turn when config.yaml says so. So
+// The one step Hermes Multiplayer can't do for you: Hermes only lets a plugin start an agent turn when config.yaml says so. So
 // the banner hands you a prompt for your own agent, which makes the change, and a button to restart afterwards.
 const agentSetupCopied = atom(false)
 
@@ -2577,7 +2577,7 @@ function NoTeammate({ incoming }) {
           jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
             children:
-              "Settings → Plugins → Herd → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and Teammate's Herd secret (the HERD_SECRET they set — not their API key)."
+              "Settings → Plugins → Hermes Multiplayer → Teammate's name, gateway URL (e.g. http://tyler-mac.local:8642) and Teammate's Hermes Multiplayer secret (the HERD_SECRET they set — not their API key)."
           })
         ]
       : [
@@ -2609,11 +2609,11 @@ function HerdView({ compact }) {
   const pairingDone = useValue(pairingResult)
 
   if (isLoading) {
-    return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading Herd…' })
+    return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading Hermes Multiplayer…' })
   }
   if (isError) {
     return jsx(EmptyState, {
-      title: 'Herd is installed but its backend is off.',
+      title: 'Hermes Multiplayer is installed but its backend is off.',
       description: 'Enable the herd plugin for this profile (Capabilities → Plugins), then restart the gateway.'
     })
   }
@@ -2674,7 +2674,7 @@ function HerdPane() {
 
 export default {
   id: PLUGIN_ID,
-  name: 'Herd',
+  name: 'Hermes Multiplayer',
   defaultEnabled: false,
 
   register(hostCtx) {
@@ -2734,7 +2734,7 @@ export default {
       {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
-        data: { path: ROUTE_PATH, label: 'Herd', codicon: 'comment-discussion' }
+        data: { path: ROUTE_PATH, label: 'Hermes Multiplayer', codicon: 'comment-discussion' }
       },
       {
         id: 'open',
@@ -2743,7 +2743,7 @@ export default {
           id: 'herd.open',
           category: 'navigation',
           defaults: ['mod+alt+h'],
-          label: 'Open Herd',
+          label: 'Open Hermes Multiplayer',
           run: () => host.navigate(ROUTE_PATH)
         }
       },
@@ -2754,7 +2754,7 @@ export default {
           id: 'herd.newMessage',
           category: 'composer',
           defaults: ['mod+alt+n'],
-          label: 'New Herd message',
+          label: 'New Hermes Multiplayer message',
           run: () => {
             composeRequest.set(Date.now())
             host.navigate(ROUTE_PATH)
@@ -2772,7 +2772,7 @@ export default {
         area: PALETTE_AREA,
         data: {
           id: 'herd.search',
-          label: 'Search Herd messages',
+          label: 'Search Hermes Multiplayer messages',
           keywords: ['herd', 'search', 'find', 'messages', 'history'],
           run: () => {
             searchQuery.set('')
@@ -2783,42 +2783,42 @@ export default {
       {
         id: 'pane',
         area: PANES_AREA,
-        title: 'Herd',
+        title: 'Hermes Multiplayer',
         data: { placement: 'right', width: '340px' },
         render: () => jsx(HerdPane, {})
       }
     ])
 
     // Fast path: the backend broadcasts on every local post and every message pulled from the peer.
-    ctx.onEvent('plugin.herd.message.created', event => {
+    ctx.onEvent('plugin.hermes-multiplayer.message.created', event => {
       const payload = (event && event.payload) || {}
       if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
       queryClient.invalidateQueries({ queryKey: KEYS.threads }) // any open thread (and reply previews) may have grown
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
     })
-    ctx.onEvent('plugin.herd.reactions.changed', event => {
+    ctx.onEvent('plugin.hermes-multiplayer.reactions.changed', event => {
       const payload = (event && event.payload) || {}
       if (payload.channel_id) queryClient.invalidateQueries({ queryKey: KEYS.messages(payload.channel_id) })
     })
-    ctx.onEvent('plugin.herd.incoming.messages', event => {
+    ctx.onEvent('plugin.hermes-multiplayer.incoming.messages', event => {
       notifyIncoming(event && event.payload)
     })
-    ctx.onEvent('plugin.herd.channels.changed', () => {
+    ctx.onEvent('plugin.hermes-multiplayer.channels.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
       queryClient.invalidateQueries({ queryKey: KEYS.participants })
     })
     // Accelerator only: the phrase itself always arrives via the /status query (polled every 3 s).
-    ctx.onEvent('plugin.herd.status.changed', () => {
+    ctx.onEvent('plugin.hermes-multiplayer.status.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.status })
     })
     // Someone started or stopped typing, or came online: both ride the status and people queries.
-    ctx.onEvent('plugin.herd.typing.changed', () => {
+    ctx.onEvent('plugin.hermes-multiplayer.typing.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.status })
     })
-    ctx.onEvent('plugin.herd.presence.changed', () => {
+    ctx.onEvent('plugin.hermes-multiplayer.presence.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.participants })
     })
-    ctx.onEvent('plugin.herd.settings.changed', () => {
+    ctx.onEvent('plugin.hermes-multiplayer.settings.changed', () => {
       api('/sync', { method: 'POST' }).catch(() => {}).finally(refreshAll)
     })
 

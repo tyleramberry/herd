@@ -47,7 +47,7 @@ class DefaultRelayTests(unittest.TestCase):
         self.assertEqual(parts.scheme, "https")
 
     def test_the_default_is_actually_reachable_as_a_room_base(self):
-        """A room link built from the default must parse as a Herd room link."""
+        """A room link built from the default must parse as a Hermes Multiplayer room link."""
         link = f"{store.DEFAULT_RELAY_URL}/r/{'a' * 20}#{'k' * 43}"
         url, key = store.parse_room_link(link)
         self.assertTrue(url.startswith("https://"), url)

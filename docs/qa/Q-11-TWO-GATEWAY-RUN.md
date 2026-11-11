@@ -78,7 +78,7 @@ interfere.
 |---|---|---|
 | Process | `two_gateway_run.py --gateway` (its own Python process) | same, separate process |
 | Peer port (aiohttp `AppRunner`) | `/herd/v1/sync`, `/herd/v1/ping` via `herd._wire_api_server(peer_app, StubAdapter())`, plus the real 3 s `_start_sync_loop` → `_sync_pass` → `store.sync_all`; and `POST /harness/agent-post` (§1.3) | same |
-| API port (uvicorn) | `plugin_api.router` mounted at `/api/plugins/herd` | same |
+| API port (uvicorn) | `plugin_api.router` mounted at `/api/plugins/hermes-multiplayer` | same |
 | SQLite | `<tmp>/a/herd.db` | `<tmp>/b/herd.db` |
 | Own key (checked by `StubAdapter._check_auth`, `Bearer <key>`) | `KEY_A` | `KEY_B` |
 | Peer settings (`store.SETTINGS_OVERRIDE`) | `peer_name=q11-b`, `peer_url=<B.peer>`, `__secrets__.HERD_PEER_KEY=KEY_B` | **none** (the README's one-sided link) |
@@ -162,7 +162,7 @@ Identities: **A.gateway_id = `fd9ec989326b44b9ae3945e1213af2c9`**, **B.gateway_i
   PASS  TC-2.1.A->B (3 consecutive)  landed=3/3 in-order-on-B=True
 ```
 
-Each post goes to **A's own backend** (`POST /api/plugins/herd/channels/general/messages`, body
+Each post goes to **A's own backend** (`POST /api/plugins/hermes-multiplayer/channels/general/messages`, body
 `{"id": "q11-a2b-i", "content": "Q-11 A->B exchange i"}`). The driver then polls **B's backend**
 (`GET /channels/general/messages`) every 0.1 s, for up to 10 s. That's the same list B's channel
 view reads, with no reload or refocus. Each check requires: exactly one row with that id,
