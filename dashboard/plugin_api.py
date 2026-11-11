@@ -153,6 +153,7 @@ def post_message(channel_id: str, body: dict[str, Any]):
     channel = _call(store.get_channel, channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="That channel doesn't exist.")
+    store.clear_typing()  # sent: this person is no longer "typing…" for anyone
     return _call(store.post_message, channel["id"], body.get("content"), author_type="human",
                  message_id=body.get("id"), thread_parent_id=body.get("thread_parent_id"))
 

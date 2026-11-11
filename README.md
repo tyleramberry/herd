@@ -31,6 +31,18 @@ hermes plugins enable herd
 
 Then in the desktop app, turn on Herd's desktop half in **Capabilities → Plugins** (it ships off by default) and restart the gateway so the backend loads. Herd shows up as **Herd** in the sidebar and as a right-hand pane.
 
+## The easy way: a team room
+
+A team room is a small relay that holds your team's messages. Everyone joins with one link, nobody has to be reachable from anybody else, and a message written while your computer is asleep is waiting when you come back.
+
+1. **Deploy the relay once** (free Cloudflare account): `cd relay && npm install && npx wrangler deploy`. Note the address it prints, like `https://herd-relay.your-name.workers.dev`. To run it on your own machine instead: `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+), behind https.
+2. **Start a room:** in Herd click **+ → Invite a teammate**, paste the relay address, **Start room**. The invite link is copied.
+3. **Teammates join:** **+ → Join with an invite**, paste the link. That is all.
+
+With a room you also get delivery in about a second, "is typing…", and who is online. Edits, deletes, reactions, threads, DMs, groups and private channels all travel through it. DMs and private channels are only handed to their members, and each Herd proves itself to the room with its own token, so one member cannot ask for another's DMs.
+
+The older ways below (linking two gateways directly) still work, and can be mixed with a room.
+
 ## Connect with a teammate
 
 Only one of you needs to do this. Say Tyler connects to Brooklyn:
@@ -111,6 +123,7 @@ Once the first sync lands, the other side's Herd shows "{name} is connected" in 
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
 - **Pairing codes:** a code is kept on your gateway only as a keyed digest, in herd.db. The exchange is `POST <url>/herd/v1/pair` on the teammate's gateway, which needs no Herd secret, only a live code: it returns your teammate's Herd secret to a correct code, once. Wrong, used and expired codes get one reply. The key the pairing shows is held in the pane's memory until you hide it and is never written to storage.
 - **Stored credentials:** one `config_schema` secret per teammate — `HERD_PEER_KEY`, then `HERD_PEER_KEY_2` to `_4`, each sent only to its own teammate's gateway — and this gateway's own Herd secret (`HERD_SECRET`, required from them) — saved by Hermes's own settings form and read only through `agent.secret_scope.get_secret`. Herd never reads `.env` or other credential stores.
+- **Team room (only if you join one):** the room link is the key. Anyone holding it can read and post in the room, so share it like a password. A link joined from the Herd page is saved in Herd's own data file (`herd.db`), not in Hermes's secret store; to keep the key in the secret store instead, put the room address in the Settings field *Team room address* and the key in *Team room key* (`HERD_RELAY_KEY`). Once joined, Herd sends everything it holds (channels, DMs, reactions, edits) to the relay, which keeps a copy and whose operator can read it. Herd keeps one request open to the relay and syncs with it on a post or about twice a minute.
 - **Local data:** messages, channels, and sync cursors live in `<HERMES_HOME>/plugin-data/herd/herd.db`. Herd reads nothing outside its own data folder except its settings in `config.yaml` and the task title of a Kanban card an agent linked to its answer (next bullet).
 - **Read state:** which channels you have read (a cursor per channel, `read_cursors` in herd.db) stays on this gateway. It is never synced. Opening a channel in the pane marks it read.
 - **Notifications:** off by default. When you turn on **Notify me about new messages**, Herd raises a desktop notification for a teammate's new message while Hermes is in the background: the sender's name, the channel or DM, and a preview of up to 120 characters. Hermes shows it through its own notifier (`ctx.os.notify`); Herd sends nothing outside your machine for it.

@@ -261,7 +261,7 @@ class RoomTest(unittest.TestCase):
         self.sync(self.A, self.B)
         with self.B:
             store.leave_room()
-            self.assertEqual(store.status()["room"], {"joined": False})
+            self.assertFalse(store.status()["room"]["joined"])
             self.assertEqual(store.sync_all(), [])
         self.assertEqual(self.texts(self.B), ["before"])
 

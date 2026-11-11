@@ -1255,7 +1255,23 @@ def search_messages(text: Any, *, channel: Optional[str] = None, limit: Any = No
                 args).fetchall()
         except sqlite3.OperationalError:  # a query shape FTS5 still rejects: say so, never a stack trace
             raise HerdError(422, "That search couldn't be run. Try fewer or simpler words.")
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    for hit in out:
+        if str(hit["channel_id"]).startswith(GROUP_PREFIX):
+            channel = get_channel(hit["channel_id"])
+            if channel and channel["is_group"]:
+                hit["channel_name"] = channel_title(channel)
+                hit["is_dm"] = 1
+    return out
+
+
+def channel_title(channel: dict, my_gateway_id: Optional[str] = None) -> str:
+    """What a person calls this conversation: ``general``, ``Riley`` for a DM, ``Riley, Sam`` for a group."""
+    if not (channel.get("is_dm") or channel.get("is_group")):
+        return str(channel.get("name") or "")
+    me = my_gateway_id if my_gateway_id is not None else identity()["gateway_id"]
+    others = [str(m.get("name") or "") for m in channel.get("members", []) if m.get("id") != me]
+    return ", ".join(o for o in others if o) or str(channel.get("name") or "")
 
 
 def _with_wake_notes(rows: list[dict]) -> list[dict]:
@@ -1265,6 +1281,9 @@ def _with_wake_notes(rows: list[dict]) -> list[dict]:
     return rows
 
 
+# A deleted message disappears, unless a thread hangs off it: then its place is kept (the pane shows "This message
+# was deleted") so the replies still have somewhere to live. In SQL, so a page of N rows is N rows on screen.
+_SHOWN = ("(m.deleted = 0 OR EXISTS (SELECT 1 FROM messages r WHERE r.thread_parent_id = m.id AND r.deleted = 0))")
 MESSAGES_MAX_LIMIT = 5000  # the pane starts at 200 and asks for more as the reader loads older messages
 
 
@@ -1280,18 +1299,16 @@ def list_messages(channel_ref: str, *, after_seq: Optional[int] = None, limit: i
         if after_seq is not None:
             rows = conn.execute(
                 f"SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.channel_id = ? AND m.seq > ? "
-                "AND m.thread_parent_id IS NULL ORDER BY m.created_at, m.id LIMIT ?",
+                f"AND m.thread_parent_id IS NULL AND {_SHOWN} ORDER BY m.created_at, m.id LIMIT ?",
                 (channel["id"], int(after_seq), limit)).fetchall()
         else:
             rows = conn.execute(
                 f"SELECT * FROM (SELECT {_MESSAGE_SELECT} FROM messages m WHERE m.channel_id = ? "
-                "AND m.thread_parent_id IS NULL ORDER BY m.created_at DESC, m.id DESC LIMIT ?) "
+                f"AND m.thread_parent_id IS NULL AND {_SHOWN} ORDER BY m.created_at DESC, m.id DESC LIMIT ?) "
                 "ORDER BY created_at, id",
                 (channel["id"], limit)).fetchall()
         reactions = _reaction_map(conn, channel["id"])
-    # A deleted message disappears, unless a thread hangs off it: then its place is kept (the pane shows
-    # "This message was deleted") so the replies still have somewhere to live.
-    out = _with_wake_notes([dict(r) for r in rows if not r["deleted"] or r["reply_count"]])
+    out = _with_wake_notes([dict(r) for r in rows])
     for m in out:
         m["reactions"] = [] if m["deleted"] else reactions.get(m["id"], [])
     return out
@@ -1743,6 +1760,17 @@ WAKE_REASONS = {
     "history": "Not handed to the agent: it arrived as history when this teammate first linked.",
 }
 INJECTION_CONFIG_LINE = "allow_gateway_injection: true"
+INJECTION_CONFIG_SNIPPET = "plugins:\n  entries:\n    herd:\n      allow_gateway_injection: true"
+# What "Copy setup prompt" puts on the clipboard: pasted into any Hermes chat, the owner's own agent makes the one
+# config change, so nobody has to find or hand-edit a YAML file.
+INJECTION_SETUP_PROMPT = (
+    "Please finish setting up the Herd plugin so you can answer when teammates @mention you.\n\n"
+    "1. Open my Hermes config file (~/.hermes/config.yaml, or config.yaml in the active profile's folder).\n"
+    "2. Under plugins -> entries -> herd, set allow_gateway_injection to true. Keep every other line exactly as "
+    "it is, and create the plugins/entries/herd keys only if they are missing. The result should contain:\n\n"
+    + INJECTION_CONFIG_SNIPPET + "\n\n"
+    "3. Show me the lines you changed, then tell me to restart the gateway (Herd has a Restart gateway button)."
+)
 
 
 def gateway_injection_allowed() -> Optional[bool]:
@@ -1805,6 +1833,8 @@ def wake_block() -> dict:
             "blocked_message": WAKE_REASONS.get(code, ""),
             "blocked_at": _wake_blocked.get("at") if code == "host_refused" else None,
             "config_line": INJECTION_CONFIG_LINE if code == "injection_not_allowed" else "",
+            "config_snippet": INJECTION_CONFIG_SNIPPET if code == "injection_not_allowed" else "",
+            "setup_prompt": INJECTION_SETUP_PROMPT if code == "injection_not_allowed" else "",
         }
     except Exception:  # noqa: BLE001
         return {"enabled": False, "target_set": False, "target_label": "", "blocked_reason": "wake_error",
@@ -1829,6 +1859,13 @@ def mentions_me(content: str, display_name: str) -> bool:
 # The bare ``@tyler`` is not here: writing your own name is not a request to your agent. ``@hermes`` only ever
 # means the agent on the machine it was typed on, so it never wakes a teammate's agent.
 OWN_AGENT_SHORTCUT = "hermes"
+EVERYONE_HANDLES = frozenset({"channel", "here", "everyone"})
+
+
+def mentions_everyone(content: str) -> bool:
+    """``@channel``, ``@here`` or ``@everyone``: a heads-up to every person in the conversation. It marks the
+    notification as a mention; it never wakes an agent (five agents answering one message is nobody's wish)."""
+    return bool(_mentioned_handles(content) & EVERYONE_HANDLES)
 
 
 def mentions_own_agent(content: str, display_name: str) -> bool:
@@ -1967,8 +2004,10 @@ def _announce_incoming(fresh: list[dict]) -> None:
             channel = get_channel(m["channel_id"])
             items.append({
                 "id": m["id"], "channel_id": m["channel_id"],
-                "channel_name": (channel or {}).get("name", ""), "is_dm": bool((channel or {}).get("is_dm")),
-                "author_name": m["author_name"], "mention": mentions_me(m["content"], me),
+                "channel_name": channel_title(channel) if channel else "",
+                "is_dm": bool(channel and (channel["is_dm"] or channel["is_group"])),
+                "author_name": m["author_name"],
+                "mention": mentions_me(m["content"], me) or mentions_everyone(m["content"]),
                 "preview": " ".join(str(m["content"]).split())[:120],
             })
         _notify("incoming.messages", {"items": items, "count": len(fresh)})
@@ -2873,7 +2912,7 @@ def room_status(states: Optional[dict] = None) -> dict:
     """The team room as the pane shows it. Never carries the key."""
     cfg = relay_config()
     if not cfg:
-        return {"joined": False}
+        return {"joined": False, "relay_default": DEFAULT_RELAY_URL}
     if states is None:
         with connect() as conn:
             states = {r["name"]: dict(r) for r in conn.execute(
@@ -2882,6 +2921,7 @@ def room_status(states: Optional[dict] = None) -> dict:
     refusal = _peer_url_refusal(cfg["url"])
     error = refusal or ("" if cfg["key"] else "This team room has no key saved.") or st.get("last_error") or ""
     return {"joined": True, "url": cfg["url"], "source": cfg["source"], "can_invite": cfg["source"] == "joined",
+            "relay_default": DEFAULT_RELAY_URL,
             "connected": bool(st.get("last_ok")) and not error, "last_ok": st.get("last_ok") or "",
             "last_error": error}
 

@@ -63,6 +63,18 @@ const topicEditing = { page: atom(null), pane: atom(null) }
 // Set by the "New Herd message" keybind: the composer that mounts next takes focus (see Composer).
 const composeRequest = atom(0)
 const COMPOSE_FOCUS_MS = 3000
+// Your own message being edited (its id), and the one waiting for "Delete?" to be confirmed. One at a time.
+const editingMessage = atom(null)
+const deletingMessage = atom(null)
+// Whether the open reaction picker shows the larger emoji tray.
+const reactionMore = atom(false)
+// How many messages each channel has loaded ("Load older messages" raises it), and the row to stay on after a load.
+const HISTORY_PAGE = 200
+const historyLimit = new Map()
+let historyAnchor = null
+// When this Herd last told the backend "typing in <channel>", so a burst of keystrokes is one request.
+const TYPING_PING_MS = 3000
+const typingSent = { channel: '', at: 0 }
 
 function api(path, opts) {
   if (!rest) return Promise.reject(new Error('Herd is turned off.'))
@@ -94,8 +106,66 @@ function refreshAll() {
 
 function dmLabel(channel, selfId) {
   const members = Array.isArray(channel.members) ? channel.members : []
+  if (channel.is_group) {
+    // A group conversation is named after the other people in it.
+    const names = members.filter(m => m && m.id !== selfId && m.name).map(m => m.name)
+    return names.length ? names.join(', ') : channel.name
+  }
   const other = members.find(m => m && m.id !== selfId)
   return other ? other.name : channel.name
+}
+
+// A DM or a group conversation: named after people, with no topic and no '#'.
+function isDirect(channel) {
+  return Boolean(channel && (channel.is_dm || channel.is_group))
+}
+
+// How a channel is written in a title: its people for a DM or a group, a lock for a private channel, '#' otherwise.
+function channelLabel(channel, selfId) {
+  if (isDirect(channel)) return dmLabel(channel, selfId)
+  return (channel.is_private ? '🔒 ' : '# ') + channel.name
+}
+
+function openLink(url) {
+  if (!ctx || !ctx.os || typeof ctx.os.openExternal !== 'function') return
+  try {
+    const done = ctx.os.openExternal(url)
+    if (done && typeof done.catch === 'function') done.catch(() => {})
+  } catch (_err) {
+    // the address is still readable in the message
+  }
+}
+
+function pingTyping(channelId, value) {
+  if (!String(value || '').trim()) return false
+  const now = Date.now()
+  if (typingSent.channel === channelId && now - typingSent.at < TYPING_PING_MS) return false
+  typingSent.channel = channelId
+  typingSent.at = now
+  api('/channels/' + encodeURIComponent(channelId) + '/typing', { method: 'POST' }).catch(() => {})
+  return true
+}
+
+function typingText(status, channelId) {
+  const list = status && Array.isArray(status.typing) ? status.typing : []
+  const names = []
+  for (const entry of list) {
+    if (entry && entry.channel_id === channelId && entry.name && !names.includes(entry.name)) names.push(entry.name)
+  }
+  if (names.length === 0) return ''
+  if (names.length === 1) return names[0] + ' is typing…'
+  if (names.length === 2) return names[0] + ' and ' + names[1] + ' are typing…'
+  return 'Several people are typing…'
+}
+
+function TypingLine({ channel, status }) {
+  const text = typingText(status, channel.id)
+  if (!text) return null
+  return jsx('div', {
+    'aria-live': 'polite',
+    className: 'px-3 pb-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+    children: text
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +186,27 @@ function refusedPeers(status) {
   return list.filter(entry => entry && entry.reason)
 }
 
+// The team room's own health line, or null when this Herd is in none.
+function roomLine(status) {
+  const room = status && status.room
+  if (!room || !room.joined) return null
+  const tone = room.connected ? 'good' : room.last_error ? 'bad' : 'muted'
+  const label = room.connected ? 'Team room connected' : room.last_error || 'Connecting to the team room…'
+  return jsxs(
+    'div',
+    {
+      className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+      title: room.last_error || room.url,
+      children: [jsx(StatusDot, { tone }), jsx('span', { className: 'truncate', children: label })]
+    },
+    'room'
+  )
+}
+
 function PeerLine({ status }) {
   const peers = (status && status.peers) || []
+  const room = roomLine(status)
+  if (room && peers.length === 0 && refusedPeers(status).length === 0) return room
   // Only an explicit false: older/partial status payloads without the key render as before.
   if (status && status.herd_secret_set === false) {
     return jsxs('div', {
@@ -164,7 +253,7 @@ function PeerLine({ status }) {
     })
   }
   // One line per teammate (spec §1.5): each one's own health, so a dead teammate never hides a live one.
-  const lines = peers.map(peerLine).concat(refusedPeers(status).map(refusedLine))
+  const lines = (room ? [room] : []).concat(peers.map(peerLine), refusedPeers(status).map(refusedLine))
   return lines.length === 1
     ? lines[0]
     : jsxs('div', { className: 'flex min-w-0 flex-col gap-0.5', children: lines })
@@ -282,7 +371,7 @@ function NewChannelForm({ onDone }) {
         ? jsxs('fieldset', {
             className: 'flex flex-col gap-1 text-xs text-(--ui-text-secondary)',
             children: [
-              jsx('legend', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Only these people (optional, up to four)' }),
+              jsx('legend', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Make it private: only the people you tick (up to four)' }),
               others.map(p =>
                 jsxs(
                   'label',
@@ -295,7 +384,7 @@ function NewChannelForm({ onDone }) {
               ),
               jsx('div', {
                 className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-                children: 'Leave all unticked and everyone in the mesh receives it. The list is fixed once the channel exists. Private channels aren\u2019t supported yet.'
+                children: 'Leave all unticked and everyone receives it. A private channel shows a lock, and its people are fixed once it exists.'
               })
             ]
           })
@@ -334,35 +423,51 @@ function NewDmPicker({ onDone }) {
   const { data } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
   const others = (Array.isArray(data) ? data : []).filter(p => !p.is_self)
   const open = useMutation({
-    mutationFn: ({ id }) => api('/dms', { method: 'POST', body: { participant_id: id } }),
+    // One person is a direct message; two to four make a group conversation.
+    mutationFn: ({ ids }) =>
+      ids.length === 1
+        ? api('/dms', { method: 'POST', body: { participant_id: ids[0] } })
+        : api('/groups', { method: 'POST', body: { participant_ids: ids } }),
     onSuccess: channel => {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
       onDone(channel && channel.id)
     }
   })
-  return jsxs('div', {
-    className: 'flex flex-col gap-1',
+  if (others.length === 0) {
+    return jsxs('div', {
+      className: 'flex flex-col gap-1',
+      children: [
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Nobody here yet. Connect a teammate first.' }),
+        jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => onDone(null), children: 'Cancel' })
+      ]
+    })
+  }
+  return jsxs('form', {
+    className: 'flex flex-col gap-1 text-xs text-(--ui-text-secondary)',
+    onSubmit: e => {
+      e.preventDefault()
+      const ids = pickedMembers(e.currentTarget)
+      if (ids.length && !open.isPending) open.mutate({ ids })
+    },
     children: [
-      others.length === 0
-        ? jsx('div', {
-            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-            children: 'Nobody here yet. Connect a teammate first.'
-          })
-        : others.map(p =>
-            jsx(
-              Button,
-              {
-                type: 'button',
-                size: 'xs',
-                variant: 'secondary',
-                disabled: open.isPending,
-                onClick: () => open.mutate({ id: p.id }),
-                children: p.display_name
-              },
-              p.id
-            )
-          ),
-      jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => onDone(null), children: 'Cancel' }),
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Tick one person, or several for a group.' }),
+      ...others.map(p =>
+        jsxs(
+          'label',
+          {
+            className: 'flex items-center gap-1.5',
+            children: [jsx('input', { type: 'checkbox', name: 'member', value: p.id }), jsx('span', { children: p.display_name })]
+          },
+          p.id
+        )
+      ),
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(Button, { type: 'submit', size: 'xs', disabled: open.isPending, children: 'Open' }),
+          jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => onDone(null), children: 'Cancel' })
+        ]
+      }),
       open.isError
         ? jsx('div', {
             className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
@@ -553,7 +658,9 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
   const setMode = value => {
     if (value === 'invite' || value === 'join') {
       inviteLine.set('')
-      pairingView.set(value === 'invite' ? 'show' : 'enter')
+      roomInvite.set('')
+      // Inviting goes through the team room: its link if this Herd is in one, the form to start one if not.
+      pairingView.set(value === 'join' ? 'enter' : status && status.room && status.room.joined ? 'room-invite' : 'room')
       return
     }
     $composing.set(value)
@@ -562,8 +669,8 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
     setMode(null)
     if (id) onSelect(id)
   }
-  const rooms = channels.filter(c => !c.is_dm)
-  const dms = channels.filter(c => c.is_dm)
+  const rooms = channels.filter(c => !isDirect(c))
+  const dms = channels.filter(isDirect)
   return jsxs('div', {
     className: compact
       ? 'flex max-h-56 shrink-0 flex-col gap-1 overflow-y-auto border-b border-(--ui-stroke-secondary) p-2'
@@ -573,7 +680,7 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
       jsx(SectionHeader, { label: 'Channels' }),
       mode === 'channel' ? jsx(NewChannelForm, { onDone: done }) : null,
       ...rooms.map(ch =>
-        jsx(ChannelButton, { channel: ch, label: '# ' + ch.name, selected: ch.id === selectedId, onSelect }, ch.id)
+        jsx(ChannelButton, { channel: ch, label: channelLabel(ch, selfId), selected: ch.id === selectedId, onSelect }, ch.id)
       ),
       jsx(SectionHeader, { label: 'Direct messages' }),
       mode === 'dm' ? jsx(NewDmPicker, { onDone: done }) : null,
@@ -659,6 +766,11 @@ function mentionCandidates(participants, query) {
     out.push({ key: p.id + ':human', handle, label: p.display_name, agent: false })
     out.push({ key: p.id + ':agent', handle: handle + '-hermes', label: p.display_name + "'s Hermes", agent: true })
   })
+  if (out.some(c => !c.agent)) {
+    // A heads-up to every person in the conversation. It notifies people; it never wakes an agent.
+    out.push({ key: 'everyone:channel', handle: 'channel', label: 'Everyone in this conversation', agent: false })
+    out.push({ key: 'everyone:here', handle: 'here', label: 'Everyone who is online', agent: false })
+  }
   return out.filter(c => !q || c.handle.toLowerCase().includes(q) || c.label.toLowerCase().includes(q))
 }
 
@@ -689,7 +801,7 @@ function insertMention(textarea, state, handle, $mention) {
 // Plain strings + <span>s only (React escapes text), so message bodies stay XSS-safe.
 // A safe markdown subset for message bodies: `code`, **bold** and *italic* (or _italic_). Built as React elements
 // and text, never as HTML, so a message cannot inject markup. Underscores and asterisks inside a word don't count
-// (snake_case_name stays as typed). Links are not rendered: their text is shown as typed.
+// (snake_case_name stays as typed). Web addresses become links (renderContent).
 const MARKUP_TOKEN = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|((?<![\p{L}\p{N}*])\*[^*\s][^*\n]*\*(?![\p{L}\p{N}*]))|((?<![\p{L}\p{N}_])_[^_\s][^_\n]*_(?![\p{L}\p{N}_]))/gu
 
 function mentionParts(segment, offset) {
@@ -704,14 +816,59 @@ function mentionParts(segment, offset) {
   return parts
 }
 
+// A web address in a message becomes a link that opens in the system browser. Only http(s), found before any
+// other markup so an underscore or a star inside an address is never read as formatting. Code spans stay code.
+const LINK_OR_CODE = /(`[^`\n]+`)|(https?:\/\/[^\s<>"'`]+)/g
+const LINK_STYLE = { color: 'var(--ui-accent)', textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }
+
+function trimLink(raw) {
+  let url = raw
+  // Punctuation that ends a sentence is not part of the address; neither is a closing bracket with no opener.
+  while (url.length > 8 && /[.,;:!?'"]$/.test(url)) url = url.slice(0, -1)
+  while (url.endsWith(')') && !url.includes('(')) url = url.slice(0, -1)
+  return url
+}
+
 function renderContent(text) {
   const str = String(text == null ? '' : text)
+  if (!str.includes('://')) return renderMarkup(str, 0)
+  const parts = []
+  let last = 0
+  for (const m of str.matchAll(LINK_OR_CODE)) {
+    if (m[1]) continue // a code span: left for renderMarkup, which already draws it
+    const url = trimLink(m[2])
+    if (m.index > last) parts.push(...renderMarkup(str.slice(last, m.index), last))
+    parts.push(
+      jsx(
+        'a',
+        {
+          href: url,
+          title: 'Open ' + url,
+          style: LINK_STYLE,
+          rel: 'noreferrer noopener',
+          onClick: e => {
+            e.preventDefault()
+            e.stopPropagation()
+            openLink(url)
+          },
+          children: url
+        },
+        'l' + m.index
+      )
+    )
+    last = m.index + url.length
+  }
+  if (last < str.length) parts.push(...renderMarkup(str.slice(last), last))
+  return parts
+}
+
+function renderMarkup(str, base) {
   const parts = []
   let last = 0
   for (const m of str.matchAll(MARKUP_TOKEN)) {
-    if (m.index > last) parts.push(...mentionParts(str.slice(last, m.index), last))
+    if (m.index > last) parts.push(...mentionParts(str.slice(last, m.index), base + last))
     const raw = m[0]
-    const key = 'f' + m.index
+    const key = 'f' + (base + m.index)
     if (raw.startsWith('`')) {
       parts.push(jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono text-[0.85em]', children: raw.slice(1, -1) }, key))
     } else if (raw.startsWith('**')) {
@@ -721,7 +878,7 @@ function renderContent(text) {
     }
     last = m.index + raw.length
   }
-  if (last < str.length) parts.push(...mentionParts(str.slice(last), last))
+  if (last < str.length) parts.push(...mentionParts(str.slice(last), base + last))
   return parts
 }
 
@@ -921,10 +1078,48 @@ const REACTION_EMOJIS = ['👍', '❤️', '👀', '🎉']
 // The reaction affordance. It is always in the row: faded in on hover and on keyboard focus (opacity, not
 // display, so the trigger stays tabbable). The trigger opens a picker; arrow keys move between the emoji,
 // Esc closes it and returns focus to the trigger, and leaving the picker closes it too.
-function ReactionPicker({ message, react, onReply }) {
+function ReactionPicker({ message, react, onReply, own }) {
   const openId = useValue(reactionPicker)
+  const more = useValue(reactionMore)
   const open = openId === message.id
-  const close = () => reactionPicker.set(null)
+  const close = () => {
+    reactionPicker.set(null)
+    reactionMore.set(false)
+  }
+  const action = (label, title, onClick) =>
+    jsx('button', {
+      type: 'button',
+      'aria-label': title,
+      title,
+      className: 'rounded px-1 text-[0.6875rem] text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
+      onClick,
+      children: label
+    })
+  const emojiButton = (emoji, first) =>
+    jsx(
+      'button',
+      {
+        type: 'button',
+        'data-herd-emoji': '',
+        autoFocus: first,
+        title: 'React ' + emoji,
+        'aria-label': 'React ' + emoji,
+        disabled: react.isPending,
+        className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
+        onClick: () => {
+          close()
+          react.mutate(emoji)
+        },
+        onKeyDown: e => {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(e, 1)
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(e, -1)
+          else return
+          e.preventDefault()
+        },
+        children: emoji
+      },
+      emoji
+    )
   const move = (e, delta) => {
     const items = Array.from(e.currentTarget.parentElement.querySelectorAll('[data-herd-emoji]'))
     items[(items.indexOf(e.currentTarget) + delta + items.length) % items.length].focus()
@@ -954,59 +1149,148 @@ function ReactionPicker({ message, react, onReply }) {
         title: 'Add reaction',
         disabled: react.isPending,
         className: 'rounded px-1 text-sm text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
-        onClick: () => reactionPicker.set(open ? null : message.id),
+        onClick: () => {
+          reactionMore.set(false)
+          reactionPicker.set(open ? null : message.id)
+        },
         children: '+'
       }),
-      onReply && !open
-        ? jsx('button', {
-            type: 'button',
-            'aria-label': 'Reply in thread',
-            title: 'Reply in thread',
-            className: 'rounded px-1 text-[0.6875rem] text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
-            onClick: () => onReply(message.id),
-            children: 'Reply'
+      onReply && !open ? action('Reply', 'Reply in thread', () => onReply(message.id)) : null,
+      // Only the person who wrote a message can change or remove it.
+      own && !open
+        ? action('Edit', 'Edit your message', () => {
+            deletingMessage.set(null)
+            editingMessage.set(message.id)
+          })
+        : null,
+      own && !open
+        ? action('Delete', 'Delete your message', () => {
+            editingMessage.set(null)
+            deletingMessage.set(message.id)
           })
         : null,
       open
         ? jsx('div', {
             role: 'group',
             'aria-label': 'Pick a reaction',
-            className: 'flex gap-0.5',
-            children: REACTION_EMOJIS.map((emoji, i) =>
-              jsx(
-                'button',
-                {
-                  type: 'button',
-                  'data-herd-emoji': '',
-                  autoFocus: i === 0,
-                  title: 'React ' + emoji,
-                  'aria-label': 'React ' + emoji,
-                  disabled: react.isPending,
-                  className: 'rounded px-1 text-sm hover:bg-(--ui-surface-secondary)',
-                  onClick: () => {
-                    close()
-                    react.mutate(emoji)
+            // The quick four on one line; "More" opens the full tray, which wraps.
+            style: more ? { display: 'flex', flexWrap: 'wrap', gap: '0.125rem', maxWidth: '13rem' } : { display: 'flex', gap: '0.125rem' },
+            children: (more ? EMOJI_TRAY : REACTION_EMOJIS)
+              .map((emoji, i) => emojiButton(emoji, i === 0 && !more))
+              .concat([
+                // One button, kept in place when it is pressed: it holds the keyboard focus, so opening the tray
+                // never looks like "focus left the picker" (which closes it).
+                jsx(
+                  'button',
+                  {
+                    type: 'button',
+                    'data-herd-emoji': '',
+                    'aria-label': more ? 'Fewer emoji' : 'More emoji',
+                    title: more ? 'Fewer emoji' : 'More emoji',
+                    className: 'rounded px-1 text-[0.6875rem] text-(--ui-text-tertiary) hover:bg-(--ui-surface-secondary)',
+                    onClick: () => reactionMore.set(!more),
+                    children: more ? 'Less' : 'More'
                   },
-                  onKeyDown: e => {
-                    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(e, 1)
-                    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(e, -1)
-                    else return
-                    e.preventDefault()
-                  },
-                  children: emoji
-                },
-                emoji
-              )
-            )
+                  'more'
+                )
+              ])
           })
         : null
     ]
   })
 }
 
-function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped }) {
+// The inline editor that replaces one of your own messages while you change it. Enter saves, Esc cancels.
+function EditForm({ message, channelId }) {
+  const save = useMutation({
+    mutationFn: content => api('/messages/' + encodeURIComponent(message.id) + '/edit', { method: 'POST', body: { content } }),
+    onSuccess: () => {
+      editingMessage.set(null)
+      queryClient.invalidateQueries({ queryKey: KEYS.messages(channelId) })
+      queryClient.invalidateQueries({ queryKey: KEYS.threads })
+    }
+  })
+  return jsxs('form', {
+    className: 'flex flex-col gap-1',
+    onSubmit: e => {
+      e.preventDefault()
+      const content = String(new FormData(e.currentTarget).get('edited') || '')
+      if (!content.trim() || save.isPending) return
+      if (content === message.content) editingMessage.set(null)
+      else save.mutate(content)
+    },
+    children: [
+      jsx(Textarea, {
+        name: 'edited',
+        rows: 2,
+        defaultValue: message.content,
+        autoFocus: true,
+        'aria-label': 'Edit message',
+        className: 'min-h-0 resize-none text-sm',
+        onKeyDown: e => {
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            e.stopPropagation() // Esc leaves the editor, not the thread panel around it
+            editingMessage.set(null)
+          } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault()
+            if (e.currentTarget.form) e.currentTarget.form.requestSubmit()
+          }
+        }
+      }),
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(Button, { type: 'submit', size: 'xs', disabled: save.isPending, children: save.isPending ? 'Saving…' : 'Save' }),
+          jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => editingMessage.set(null), children: 'Cancel' }),
+          save.isError
+            ? jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(save.error, "Couldn't save the change.") })
+            : null
+        ]
+      })
+    ]
+  })
+}
+
+// "Delete?" asked in the row itself, so a message is never removed by one stray click.
+function DeleteConfirm({ message, channelId }) {
+  const remove = useMutation({
+    mutationFn: () => api('/messages/' + encodeURIComponent(message.id) + '/delete', { method: 'POST' }),
+    onSuccess: () => {
+      deletingMessage.set(null)
+      queryClient.invalidateQueries({ queryKey: KEYS.messages(channelId) })
+      queryClient.invalidateQueries({ queryKey: KEYS.threads })
+      queryClient.invalidateQueries({ queryKey: KEYS.channels })
+    }
+  })
+  return jsxs('div', {
+    className: 'flex flex-wrap items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+    children: [
+      jsx('span', { children: remove.isError ? errorText(remove.error, "Couldn't delete it.") : 'Delete this message for everyone?' }),
+      jsx(Button, { type: 'button', size: 'xs', disabled: remove.isPending, onClick: () => remove.mutate(), children: remove.isPending ? 'Deleting…' : 'Delete' }),
+      jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => deletingMessage.set(null), children: 'Cancel' })
+    ]
+  })
+}
+
+// After "Load older messages" the reader stays on the message they were looking at, not at the top of the new page.
+function keepPlace(node, id) {
+  if (!node || !historyAnchor || !historyAnchor.ready || historyAnchor.id !== id) return false
+  historyAnchor = null
+  node.scrollIntoView({ block: 'start' })
+  return true
+}
+
+function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped, selfId }) {
   const channelId = channelIdProp || message.channel_id // thread panel rows carry their own channel
   useValue(scrollTarget) // re-render when a search jump is pending, so the ref below sees it
+  const editingId = useValue(editingMessage)
+  const deletingId = useValue(deletingMessage)
+  const deleted = Boolean(message.deleted)
+  // Yours to change: written on this Herd (by you or your agent) and still there.
+  const own = Boolean(selfId && message.gateway_id === selfId && !deleted)
+  const isEditing = own && editingId === message.id
+  const isDeleting = own && deletingId === message.id
   // Only agent-authored messages carry a badge: humans read as the default, unbadged case (spec §3).
   const agent = message.author_type === 'agent'
   const reactions = Array.isArray(message.reactions) ? message.reactions : []
@@ -1025,15 +1309,21 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped }
     className: 'group relative flex flex-col gap-0.5 px-3 ' + (grouped ? 'py-0.5' : 'py-1.5'),
     'data-herd-message-id': message.id,
     title: grouped ? exactTime(message.created_at) : undefined,
-    ref: node => arriveAt(node, message.id),
+    ref: node => {
+      arriveAt(node, message.id)
+      keepPlace(node, message.id)
+    },
     children: [
-      jsx(ReactionPicker, { message, react, onReply: onOpenThread }),
+      deleted || isEditing ? null : jsx(ReactionPicker, { message, react, onReply: onOpenThread, own }),
       grouped ? null : jsxs('div', {
         className: 'flex items-center gap-2 text-[0.6875rem]',
         children: [
           jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: message.author_name || 'someone' }),
           agent ? jsx(Badge, { variant: 'muted', size: 'xs', children: 'agent' }) : null,
           jsx('span', { className: 'text-(--ui-text-quaternary)', title: exactTime(message.created_at), children: timeLabel(message.created_at) }),
+          message.edited_at && !deleted
+            ? jsx('span', { className: 'text-(--ui-text-quaternary)', title: 'Edited ' + exactTime(message.edited_at), children: '(edited)' })
+            : null,
           message.task_id ? jsx(TaskBadge, { taskId: message.task_id }) : null,
           onOpenThread
             ? jsx('button', {
@@ -1045,7 +1335,21 @@ function MessageRow({ message, channelId: channelIdProp, onOpenThread, grouped }
             : null
         ]
       }),
-      jsx('div', { className: 'whitespace-pre-wrap break-words text-sm', children: renderBody(message.content) }),
+      deleted
+        ? jsx('div', { className: 'text-sm italic text-(--ui-text-tertiary)', children: 'This message was deleted.' })
+        : isEditing
+          ? jsx(EditForm, { message, channelId })
+          : jsxs('div', {
+              className: 'whitespace-pre-wrap break-words text-sm',
+              children: [
+                renderBody(message.content),
+                // A grouped row has no header to carry the mark, so it sits after the text.
+                grouped && message.edited_at
+                  ? jsx('span', { className: 'ml-1 text-[0.6875rem] text-(--ui-text-quaternary)', title: 'Edited ' + exactTime(message.edited_at), children: '(edited)' }, 'edited')
+                  : null
+              ]
+            }),
+      isDeleting ? jsx(DeleteConfirm, { message, channelId }) : null,
       message.wake_note
         ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: message.wake_note })
         : null,
@@ -1087,7 +1391,7 @@ function TopicLine({ channel, $editing }) {
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
     }
   })
-  if (channel.is_dm) return null
+  if (isDirect(channel)) return null
   if (editingId !== channel.id) {
     return jsxs('span', {
       className: 'flex min-w-0 items-baseline gap-1.5',
@@ -1133,12 +1437,14 @@ function TopicLine({ channel, $editing }) {
 }
 
 function threadTitle(channel, selfId) {
-  return channel.is_dm ? dmLabel(channel, selfId) : '# ' + channel.name
+  return channelLabel(channel, selfId)
 }
 
 // The root message and its replies, oldest first. Shared by the side panel (route) and the in-column
 // thread view (compact pane), so both read the same thread state through the same query.
 function ThreadBody({ rootId }) {
+  const status = useStatus().data
+  const selfId = status && status.self ? status.self.gateway_id : null
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.thread(rootId),
     queryFn: () => api('/messages/' + encodeURIComponent(rootId) + '/thread')
@@ -1153,13 +1459,13 @@ function ThreadBody({ rootId }) {
   return jsxs('div', {
     className: 'flex flex-col py-1',
     children: [
-      jsx(MessageRow, { message: data.parent }, data.parent.id),
+      jsx(MessageRow, { message: data.parent, selfId }, data.parent.id),
       jsx('div', { className: 'mx-3 my-1 border-t border-(--ui-stroke-secondary)' }),
       replies.length === 0
         ? jsx('div', { className: 'px-3 py-1.5 text-xs text-(--ui-text-tertiary)', children: 'No replies yet.' })
         : null,
-      ...messageRows(replies, {}),
-      jsx(NewestMarker, { listKey: 'thread:' + rootId, messages: replies.length ? replies : [data.parent], selfId: null })
+      ...messageRows(replies, { selfId }),
+      jsx(NewestMarker, { listKey: 'thread:' + rootId, messages: replies.length ? replies : [data.parent], selfId })
     ]
   })
 }
@@ -1220,7 +1526,7 @@ function canOpenWorkspace() {
 function openThreadWorkspace(channel, rootId) {
   if (!canOpenWorkspace() || !rootId) return false
   const close = host.openWorkspace('herd-thread:' + rootId, {
-    title: 'Thread · ' + (channel.is_dm ? channel.name : '#' + channel.name),
+    title: 'Thread · ' + (isDirect(channel) ? dmLabel(channel, null) : '#' + channel.name),
     minWidth: '22rem',
     render: () => jsx(ThreadWorkspace, { channel, rootId }),
     onClose: () => threadTabs.delete(rootId)
@@ -1444,10 +1750,12 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   const openThreadId = useValue($thread)
   const $sharing = compact ? sharing.pane : sharing.page
   const isSharing = useValue($sharing) && channel.is_dm
+  // One more row than is shown: if it comes back, there is older history to load.
+  const limit = historyLimit.get(channel.id) || HISTORY_PAGE
   const { data, isLoading, isError } = useQuery({
     queryKey: KEYS.messages(channel.id),
     queryFn: () =>
-      api('/channels/' + encodeURIComponent(channel.id) + '/messages').then(rows => {
+      api('/channels/' + encodeURIComponent(channel.id) + '/messages?limit=' + ((historyLimit.get(channel.id) || HISTORY_PAGE) + 1)).then(rows => {
         // The channel is on screen, so it is read: move this gateway's cursor, then refresh the unread counts.
         api('/channels/' + encodeURIComponent(channel.id) + '/read', { method: 'POST' })
           .then(() => queryClient.invalidateQueries({ queryKey: KEYS.channels }))
@@ -1455,7 +1763,15 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
         return rows
       })
   })
-  const messages = Array.isArray(data) ? data : []
+  const loaded = Array.isArray(data) ? data : []
+  const hasOlder = loaded.length > limit
+  const messages = hasOlder ? loaded.slice(loaded.length - limit) : loaded
+  if (historyAnchor && historyAnchor.channel === channel.id && messages.length > historyAnchor.count) historyAnchor.ready = true
+  const loadOlder = () => {
+    historyAnchor = { channel: channel.id, id: messages.length ? messages[0].id : '', count: messages.length, ready: false }
+    historyLimit.set(channel.id, limit + HISTORY_PAGE)
+    queryClient.invalidateQueries({ queryKey: KEYS.messages(channel.id) })
+  }
   const title = threadTitle(channel, selfId)
   if (openThreadId && compact) {
     return jsx(ThreadView, { channel, rootId: openThreadId, selfId, status, $thread, compact }, openThreadId)
@@ -1471,7 +1787,20 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
   } else {
     body = jsx('div', {
       className: 'flex flex-col py-1',
-      children: messageRows(messages, { channelId: channel.id, onOpenThread: openThread }).concat(
+      children: (hasOlder
+        ? [
+            jsx(
+              'div',
+              {
+                className: 'flex justify-center py-1',
+                children: jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: loadOlder, children: 'Load older messages' })
+              },
+              'older'
+            )
+          ]
+        : []
+      ).concat(
+        messageRows(messages, { channelId: channel.id, onOpenThread: openThread, selfId }),
         jsx(NewestMarker, { listKey: 'channel:' + channel.id, messages, selfId }, 'newest')
       )
     })
@@ -1511,7 +1840,8 @@ function MessageView({ channel, selfId, status, $thread, $selected, compact }) {
         : null,
       jsx(WorkLine, { status }),
       jsx(ScrollArea, { className: 'min-h-0 flex-1', children: body }),
-      jsx(Composer, { channel, compact, placeholderName: channel.is_dm ? dmLabel(channel, selfId) : '#' + channel.name })
+      jsx(TypingLine, { channel, status }),
+      jsx(Composer, { channel, compact, placeholderName: isDirect(channel) ? dmLabel(channel, selfId) : '#' + channel.name })
     ]
   })
 }
@@ -1572,6 +1902,7 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
       // Clear the field and its saved draft. form.reset() would bring the draft back, since it resets to the default.
       if (form && form.elements.content) form.elements.content.value = ''
       writeDraft(draft, '')
+      typingSent.at = 0 // the next keystroke announces typing again straight away
       queryClient.invalidateQueries({ queryKey: KEYS.messages(channel.id) })
       queryClient.invalidateQueries({ queryKey: KEYS.threads })
       queryClient.invalidateQueries({ queryKey: KEYS.channels })
@@ -1624,6 +1955,7 @@ function Composer({ channel, compact, placeholderName, threadParentId, autoFocus
         onChange: e => {
           writeDraft(key, e.currentTarget.value)
           $mention.set(mentionAtCaret(e.currentTarget))
+          pingTyping(channel.id, e.currentTarget.value)
         },
         onClick: e => $mention.set(mentionAtCaret(e.currentTarget)),
         onBlur: () => $mention.set(null),
@@ -1770,7 +2102,7 @@ function SearchResults({ term, results, failed }) {
               children: [
                 jsx('span', {
                   className: 'truncate font-medium text-(--ui-text-secondary)',
-                  children: hit.type === 'dm' ? hit.channel_name : '#' + hit.channel_name
+                  children: hit.type === 'dm' || hit.is_dm ? hit.channel_name : '#' + hit.channel_name
                 }),
                 jsx('span', { className: 'truncate', children: hit.author_name }),
                 jsx('span', { className: 'shrink-0', children: timeLabel(hit.created_at) }),
@@ -1831,7 +2163,129 @@ function SearchBar() {
 // Pairing (Track 5): a one-time code instead of a long key. "Show" mints a code on this gateway; "Enter" exchanges a
 // teammate's code for their Herd secret. The secret is kept only in this atom and shown once, for the owner to paste
 // into Settings: Herd has no way to write Hermes's secret store, so it does not save the key for you.
-const pairingView = atom(null) // null | 'show' | 'enter'
+const pairingView = atom(null) // null | 'show' | 'enter' | 'room' (start a team room) | 'room-invite' (its link)
+// The team room's invite link while it is on screen. It holds the room key, so it is cleared with the panel.
+const roomInvite = atom('')
+const RELAY_KEY = 'relayAddress'
+// A team room link looks like https://relay.example/r/<room>#<key>; anything else pasted is a pairing invite.
+const ROOM_LINK = /^https?:\/\/[^\s#]+\/r\/[A-Za-z0-9_-]{8,64}\/?#[A-Za-z0-9_-]{16,}$/
+
+function isRoomLink(text) {
+  return ROOM_LINK.test(String(text || '').trim())
+}
+
+// Starting a team room, and handing out its link. A room is the easy way to connect: everyone pastes one link, and
+// nobody has to be reachable from anybody else.
+function RoomPanel({ status }) {
+  const view = useValue(pairingView)
+  const invite = useValue(roomInvite)
+  const room = (status && status.room) || {}
+  const create = useMutation({
+    mutationFn: relay => api('/room', { method: 'POST', body: { create: true, relay } }),
+    onSuccess: (made, relay) => {
+      if (ctx && relay) ctx.storage.set(RELAY_KEY, relay)
+      roomInvite.set((made && made.invite) || '')
+      if (made && made.invite) copyText(made.invite)
+      pairingView.set('room-invite')
+      refreshAll()
+    }
+  })
+  const fetchInvite = useMutation({
+    mutationFn: () => api('/room/invite'),
+    onSuccess: got => {
+      roomInvite.set((got && got.invite) || '')
+      if (got && got.invite) copyText(got.invite)
+    }
+  })
+  const leave = useMutation({
+    mutationFn: () => api('/room/leave', { method: 'POST' }),
+    onSuccess: () => {
+      roomInvite.set('')
+      pairingView.set(null)
+      refreshAll()
+    }
+  })
+  const close = () => {
+    roomInvite.set('')
+    pairingView.set(null)
+  }
+  const note = text => jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: text })
+  if (view === 'room') {
+    return jsxs('form', {
+      className: 'flex w-full flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
+      onSubmit: e => {
+        e.preventDefault()
+        const relay = String(new FormData(e.currentTarget).get('relay') || '').trim()
+        if (!create.isPending) create.mutate(relay)
+      },
+      children: [
+        jsx('div', { className: 'text-sm font-medium', children: 'Start a team room' }),
+        note('A room holds your team’s messages on a relay, so teammates join with one link and nobody has to be online at the same time.'),
+        jsx(Input, {
+          name: 'relay',
+          defaultValue: (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : '') || room.relay_default || '',
+          placeholder: 'Relay address, e.g. https://herd-relay.your-name.workers.dev',
+          'aria-label': 'Relay address',
+          autoComplete: 'off',
+          autoFocus: true,
+          className: 'h-7 text-xs'
+        }),
+        jsxs('div', {
+          className: 'flex flex-wrap items-center gap-1.5',
+          children: [
+            jsx(Button, { type: 'submit', size: 'xs', disabled: create.isPending, children: create.isPending ? 'Starting…' : 'Start room' }),
+            jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: close, children: 'Cancel' }),
+            jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => pairingView.set('show'), children: 'Link two gateways directly instead' })
+          ]
+        }),
+        create.isError ? note(errorText(create.error, "Couldn't start the room.")) : null
+      ]
+    })
+  }
+  // 'room-invite'
+  return jsxs('div', {
+    className: 'flex w-full flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
+    children: [
+      jsx('div', { className: 'text-sm font-medium', children: 'Invite a teammate' }),
+      invite
+        ? jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: invite })
+        : null,
+      invite
+        ? note((canCopy() ? 'Copied. ' : '') + 'Send this link to a teammate. In Herd they click + and then “Join with an invite”, and paste it. Anyone with the link can read and post in this room, so share it like a password.')
+        : room.can_invite === false
+          ? note('This room was set up in Settings, so Herd can’t show its link. Share the link you were given.')
+          : note('One link brings a teammate into this room.'),
+      fetchInvite.isError ? note(errorText(fetchInvite.error, "Couldn't get the link.")) : null,
+      jsxs('div', {
+        className: 'flex flex-wrap items-center gap-1.5',
+        children: [
+          room.can_invite === false
+            ? null
+            : jsx(Button, {
+                type: 'button',
+                size: 'xs',
+                disabled: fetchInvite.isPending,
+                onClick: () => (invite ? copyText(invite) : fetchInvite.mutate()),
+                children: invite ? 'Copy invite link' : 'Show invite link'
+              }),
+          jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: close, children: 'Close' }),
+          room.source === 'joined'
+            ? jsx(Button, {
+                type: 'button',
+                size: 'xs',
+                variant: 'ghost',
+                disabled: leave.isPending,
+                title: 'Stop syncing with this room. Your messages stay on this computer.',
+                onClick: () => leave.mutate(),
+                children: 'Leave room'
+              })
+            : null
+        ]
+      }),
+      leave.isError ? note(errorText(leave.error, "Couldn't leave the room.")) : null
+    ]
+  })
+}
 const pairingResult = atom(null) // { name, url, herd_secret } after a successful enter, until hidden
 // The inviter's own gateway address, typed once and remembered, so a code can go out as one line: address#code.
 const inviteLine = atom('')
@@ -1842,10 +2296,17 @@ function buildInvite(address, code) {
   return clean && code ? clean + '#' + code : ''
 }
 
-function PairingPanel() {
+function PairingPanel({ status }) {
   const view = useValue(pairingView)
   const result = useValue(pairingResult)
   const invite = useValue(inviteLine)
+  const joinRoom = useMutation({
+    mutationFn: link => api('/room', { method: 'POST', body: { invite: link } }),
+    onSuccess: () => {
+      pairingView.set(null)
+      refreshAll()
+    }
+  })
   const mint = useMutation({
     mutationFn: () => api('/pairing-code', { method: 'POST' })
   })
@@ -1865,6 +2326,7 @@ function PairingPanel() {
       ]
     })
   }
+  if (view === 'room' || view === 'room-invite') return jsx(RoomPanel, { status })
   if (view === 'show') {
     const minted = mint.data
     return jsxs('div', {
@@ -1923,19 +2385,24 @@ function PairingPanel() {
         const form = e.currentTarget
         const url = String(new FormData(form).get('url') || '').trim()
         const code = String(new FormData(form).get('code') || '').trim()
-        // One pasted invite (address#code) is enough; the address and the code typed separately still work.
-        if (url && (code || url.includes('#') || /\s/.test(url)) && !redeem.isPending) redeem.mutate({ url, code })
+        if (joinRoom.isPending || redeem.isPending) return
+        // A team room link joins the room in one step. Anything else is a pairing invite (address#code), or the
+        // address and the code typed separately.
+        if (isRoomLink(url)) joinRoom.mutate(url)
+        else if (url && (code || url.includes('#') || /\s/.test(url))) redeem.mutate({ url, code })
       },
       children: [
-        jsx(Input, { name: 'url', placeholder: 'Paste the invite, or https://teammate.tailnet-name.ts.net:8642', 'aria-label': 'Invite, or teammate’s gateway address', autoComplete: 'off', className: 'h-7 text-xs' }),
-        jsx(Input, { name: 'code', placeholder: 'Code (not needed with an invite)', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
+        jsx('div', { className: 'text-sm font-medium', children: 'Join with an invite' }),
+        jsx(Input, { name: 'url', placeholder: 'Paste the invite link a teammate sent you', 'aria-label': 'Invite link, or teammate’s gateway address', autoComplete: 'off', autoFocus: true, className: 'h-7 text-xs' }),
+        jsx(Input, { name: 'code', placeholder: 'Pairing code (only when linking two gateways directly)', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
         jsxs('div', {
           className: 'flex items-center gap-1.5',
           children: [
-            jsx(Button, { type: 'submit', size: 'xs', disabled: redeem.isPending, children: redeem.isPending ? 'Pairing…' : 'Pair' }),
+            jsx(Button, { type: 'submit', size: 'xs', disabled: redeem.isPending || joinRoom.isPending, children: redeem.isPending || joinRoom.isPending ? 'Joining…' : 'Join' }),
             btn('Cancel', () => pairingView.set(null))
           ]
         }),
+        joinRoom.isError ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(joinRoom.error, "Couldn't join that room.") }) : null,
         redeem.isError ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(redeem.error, "Couldn't pair.") }) : null
       ]
     })
@@ -1943,11 +2410,19 @@ function PairingPanel() {
   return jsxs('div', {
     className: 'flex flex-wrap items-center justify-center gap-2',
     children: [
-      btn('Show a pairing code', () => {
-        mint.reset && mint.reset()
-        pairingView.set('show')
-      }),
-      btn('Enter a pairing code', () => pairingView.set('enter'))
+      jsx(Button, { type: 'button', size: 'xs', onClick: () => pairingView.set('room'), children: 'Start a team room' }),
+      btn('Join with an invite', () => pairingView.set('enter')),
+      jsx(Button, {
+        type: 'button',
+        size: 'xs',
+        variant: 'ghost',
+        title: 'Link two gateways to each other with a one-time code, without a relay',
+        onClick: () => {
+          mint.reset && mint.reset()
+          pairingView.set('show')
+        },
+        children: 'Show a pairing code'
+      })
     ]
   })
 }
@@ -1966,6 +2441,80 @@ function copyText(text) {
   } catch (_err) {
     // the text is on screen either way
   }
+}
+
+// The one step Herd can't do for you: Hermes only lets a plugin start an agent turn when config.yaml says so. So
+// the banner hands you a prompt for your own agent, which makes the change, and a button to restart afterwards.
+const agentSetupCopied = atom(false)
+
+function AgentSetup({ wake }) {
+  const copied = useValue(agentSetupCopied)
+  const canRestart = typeof host.restartGateway === 'function'
+  const step = (n, text, extra) =>
+    jsxs(
+      'div',
+      {
+        className: 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1',
+        children: [
+          jsx('span', { className: 'shrink-0 font-medium text-(--ui-text-secondary)', children: n + '.' }),
+          jsx('span', { className: 'min-w-0', children: text })
+        ].concat(extra || [])
+      },
+      n
+    )
+  return jsxs('div', {
+    role: 'group',
+    'aria-label': 'Finish agent setup',
+    className: 'flex min-w-0 flex-col gap-1 border-b border-(--ui-stroke-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+    children: [
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(StatusDot, { tone: 'bad' }),
+          jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: 'One step left before your agent can answer @mentions' })
+        ]
+      }),
+      step(1, 'Copy the setup prompt.', [
+        canCopy()
+          ? jsx(Button, {
+              type: 'button',
+              size: 'xs',
+              onClick: () => {
+                copyText(wake.setup_prompt || wake.config_snippet || wake.config_line)
+                agentSetupCopied.set(true)
+              },
+              children: copied ? 'Copied' : 'Copy setup prompt'
+            }, 'copy')
+          : null
+      ]),
+      step(2, 'Paste it into any Hermes chat and send it. Your agent adds one line to config.yaml.'),
+      step(3, 'Restart the gateway.', [
+        canRestart
+          ? jsx(Button, {
+              type: 'button',
+              size: 'xs',
+              variant: 'secondary',
+              onClick: () => {
+                try {
+                  const done = host.restartGateway()
+                  if (done && typeof done.catch === 'function') done.catch(() => {})
+                } catch (_err) {
+                  // the step is still written here to do by hand
+                }
+              },
+              children: 'Restart gateway'
+            }, 'restart')
+          : null
+      ]),
+      jsxs('div', {
+        className: 'flex min-w-0 flex-wrap items-center gap-x-1.5',
+        children: [
+          jsx('span', { children: 'By hand: in config.yaml, under plugins → entries → herd, add' }),
+          jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
+        ]
+      })
+    ]
+  })
 }
 
 function WakeBanner({ status }) {
@@ -1999,14 +2548,7 @@ function WakeBanner({ status }) {
       })
     ])
   }
-  if (wake.blocked_reason === 'injection_not_allowed') {
-    return line('bad', wake.blocked_message, [
-      jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line }),
-      canCopy()
-        ? jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => copyText(wake.config_line), children: 'Copy' })
-        : null
-    ])
-  }
+  if (wake.blocked_reason === 'injection_not_allowed') return jsx(AgentSetup, { wake })
   if (wake.blocked_reason) return line('bad', wake.blocked_message)
   return line('good', 'Your agent answers @mentions in ' + wake.target_label + '.', [
     jsx(Button, {
@@ -2042,9 +2584,8 @@ function NoTeammate({ incoming }) {
           jsx('div', { className: 'text-sm font-medium', children: 'Nobody here yet.' }),
           jsx('div', {
             className: 'text-xs text-(--ui-text-tertiary)',
-            children: "Connect a teammate's Hermes to start a channel together."
-          }),
-          jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Connect a teammate' })
+            children: 'Start a team room and send your teammates its link, or paste a link one of them sent you.'
+          })
         ]
   })
 }
@@ -2061,7 +2602,8 @@ function HerdView({ compact }) {
   const { data, isLoading, isError } = useQuery({ queryKey: KEYS.channels, queryFn: () => api('/channels') })
   const channels = Array.isArray(data) ? data : []
   const selfId = status && status.self ? status.self.gateway_id : null
-  const hasPeer = Boolean(status && ((status.peers && status.peers.length) || refusedPeers(status).length))
+  const inRoom = Boolean(status && status.room && status.room.joined)
+  const hasPeer = Boolean(status && ((status.peers && status.peers.length) || refusedPeers(status).length || inRoom))
   const incoming = incomingUnlinked(status)
   const pairingOpen = useValue(pairingView)
   const pairingDone = useValue(pairingResult)
@@ -2088,10 +2630,10 @@ function HerdView({ compact }) {
     children: [
       statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
       statusQuery.isSuccess && (!hasPeer || pairingOpen || pairingDone)
-        ? jsx('div', { className: 'border-b border-(--ui-stroke-secondary) px-3 py-2', children: jsx(PairingPanel) })
+        ? jsx('div', { className: 'border-b border-(--ui-stroke-secondary) px-3 py-2', children: jsx(PairingPanel, { status }) })
         : null,
       statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
-      compact ? null : jsx(SearchBar),
+      compact ? null : jsx(SearchBar, {}),
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
         children: [
@@ -2160,6 +2702,15 @@ export default {
     pairingResult.set(null)
     inviteLine.set('')
     renaming.set(false)
+    roomInvite.set('')
+    editingMessage.set(null)
+    deletingMessage.set(null)
+    reactionMore.set(false)
+    agentSetupCopied.set(false)
+    historyLimit.clear()
+    historyAnchor = null
+    typingSent.channel = ''
+    typingSent.at = 0
     followState.last.clear()
     emojiTray.page.set(false)
     emojiTray.pane.set(false)
@@ -2170,6 +2721,7 @@ export default {
       rest = null
       ctx = null
       pairingResult.set(null) // a pairing key never outlives the panel that showed it
+      roomInvite.set('') // nor does a room link
     })
 
     ctx.registerMany([
@@ -2258,6 +2810,13 @@ export default {
     // Accelerator only: the phrase itself always arrives via the /status query (polled every 3 s).
     ctx.onEvent('plugin.herd.status.changed', () => {
       queryClient.invalidateQueries({ queryKey: KEYS.status })
+    })
+    // Someone started or stopped typing, or came online: both ride the status and people queries.
+    ctx.onEvent('plugin.herd.typing.changed', () => {
+      queryClient.invalidateQueries({ queryKey: KEYS.status })
+    })
+    ctx.onEvent('plugin.herd.presence.changed', () => {
+      queryClient.invalidateQueries({ queryKey: KEYS.participants })
     })
     ctx.onEvent('plugin.herd.settings.changed', () => {
       api('/sync', { method: 'POST' }).catch(() => {}).finally(refreshAll)

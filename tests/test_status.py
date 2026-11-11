@@ -241,8 +241,10 @@ class DesktopSourceTest(unittest.TestCase):
         events = re.findall(r"ctx\.onEvent\('plugin\.herd\.([a-z_.]+)'", SOURCE)
         # Four pre-existing handlers (message.created, reactions.changed, channels.changed,
         # settings.changed), status.changed (S-15) and incoming.messages (Track 2, notifications).
+        # typing.changed and presence.changed (team room) only invalidate queries the pane already polls.
         self.assertEqual(sorted(events), sorted(["message.created", "reactions.changed", "channels.changed",
-                                                 "settings.changed", "status.changed", "incoming.messages"]))
+                                                 "settings.changed", "status.changed", "incoming.messages",
+                                                 "typing.changed", "presence.changed"]))
         self.assertEqual(SOURCE.count("ctx.setInterval("), 2)
 
 
