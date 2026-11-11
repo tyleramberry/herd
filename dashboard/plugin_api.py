@@ -72,6 +72,13 @@ def get_search(q: str = Query(default=""), channel: Optional[str] = Query(defaul
     return {"query": str(q or "")[:store.SEARCH_MAX_CHARS], "results": results}
 
 
+@router.post("/profile")
+def post_profile(body: dict[str, Any]):
+    """Set this person's name from the Herd page (empty clears it). Returns the fresh status."""
+    _call(store.set_display_name, body.get("display_name"))
+    return _call(store.status)
+
+
 @router.post("/pairing-code")
 def post_pairing_code():
     """A new one-time code for a teammate to pair with this gateway (replaces any live code)."""
@@ -81,7 +88,7 @@ def post_pairing_code():
 @router.post("/pair")
 def post_pair(body: dict[str, Any]):
     """Exchange a teammate's code for their Herd secret. Returns it once, for the owner to paste into Settings."""
-    return _call(store.redeem_pairing, body.get("url"), body.get("code"))
+    return _call(store.redeem_pairing, body.get("invite") or body.get("url"), body.get("code"))
 
 
 @router.post("/wake-target")
@@ -146,8 +153,53 @@ def post_message(channel_id: str, body: dict[str, Any]):
     channel = _call(store.get_channel, channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="That channel doesn't exist.")
+    store.clear_typing()  # sent: this person is no longer "typing…" for anyone
     return _call(store.post_message, channel["id"], body.get("content"), author_type="human",
                  message_id=body.get("id"), thread_parent_id=body.get("thread_parent_id"))
+
+
+@router.post("/messages/{message_id}/edit")
+def post_edit(message_id: str, body: dict[str, Any]):
+    """Change the text of one of this person's own messages. The change reaches everyone through sync."""
+    return _call(store.edit_message, message_id, body.get("content"))
+
+
+@router.post("/messages/{message_id}/delete")
+def post_delete(message_id: str):
+    """Delete one of this person's own messages, here and (through sync) for everyone."""
+    return _call(store.delete_message, message_id)
+
+
+@router.post("/channels/{channel_id}/typing")
+def post_typing(channel_id: str):
+    """The composer says this person is typing here. Nothing is stored; teammates see it for a few seconds."""
+    return _call(store.set_typing, channel_id)
+
+
+@router.post("/groups")
+def post_group(body: dict[str, Any]):
+    """Open the group conversation with these people (two to four others), creating it the first time."""
+    return _call(store.open_group, body.get("participant_ids"))
+
+
+@router.post("/room")
+def post_room(body: dict[str, Any]):
+    """Join a team room from its invite link, or (``create``) start a new one on a relay. Returns the status,
+    and for a new room the invite link to hand to teammates."""
+    if body.get("create"):
+        return _call(store.create_room, body.get("relay"))
+    return {"status": _call(store.join_room, body.get("invite"))}
+
+
+@router.get("/room/invite")
+def get_room_invite():
+    """The invite link for the room this Herd joined, for the Copy button. Local to this computer."""
+    return _call(store.room_invite)
+
+
+@router.post("/room/leave")
+def post_room_leave():
+    return _call(store.leave_room)
 
 
 @router.get("/messages/{message_id}/thread")

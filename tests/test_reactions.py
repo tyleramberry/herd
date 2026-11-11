@@ -74,7 +74,7 @@ class LocalTests(Base):
         with self.A:
             mid = store.post_message("general", "hi")["id"]
             with self.assertRaises(store.HerdError) as c:
-                store.toggle_reaction("general", mid, "😀")
+                store.toggle_reaction("general", mid, "lol")  # a reaction is an emoji, never text
             self.assertEqual(c.exception.status, 422)
             with self.assertRaises(store.HerdError) as c:
                 store.toggle_reaction("general", "nope", UP)
@@ -111,7 +111,7 @@ class LocalTests(Base):
             mid = store.post_message("general", "hi")["id"]
             store.ingest({"reactions": [
                 "junk", 5, None,
-                {"message_id": mid, "emoji": "😀", "gateway_id": "p", "active": 1},
+                {"message_id": mid, "emoji": "not an emoji", "gateway_id": "p", "active": 1},
                 {"message_id": "ghost", "emoji": UP, "gateway_id": "p", "active": 1}]})
             self.assertEqual(store.list_messages("general")[0]["reactions"], [])
             with store.connect() as conn:
