@@ -53,7 +53,7 @@ if (rewired === source) throw new Error('import specifiers did not match — pro
 if (!rewired.includes('export default {')) throw new Error('default export not found — probe needs updating')
 const exposed = rewired.replace('export default {', 'const pluginDefault = {')
 writeFileSync(join(work, 'plugin.mjs'),
-  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, PairingPanel as probePairingPanel, pairingView as probePairingView, pairingResult as probePairingResult, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote, renderBody as probeRenderBody, followNewest as probeFollowNewest, followState as probeFollowState, continuesPrevious as probeContinues, messageRows as probeMessageRows, dayLabel as probeDayLabel, mentionCandidates as probeMentionCandidates, buildInvite as probeBuildInvite, inviteLine as probeInviteLine, PeopleList as probePeopleList, renaming as probeRenaming, PlusMenu as probePlusMenu, EditForm as probeEditForm, DeleteConfirm as probeDeleteConfirm, editingMessage as probeEditing, deletingMessage as probeDeleting, RoomPanel as probeRoomPanel, roomInvite as probeRoomInvite, isRoomLink as probeIsRoomLink, typingText as probeTypingText, pingTyping as probePingTyping, channelLabel as probeChannelLabel, NewDmPicker as probeNewDmPicker, AgentSetup as probeAgentSetup, keepPlace as probeKeepPlace, reactionMore as probeReactionMore, MessageView as probeMessageView, ChannelList as probeChannelList, PeerLine as probePeerLine, HISTORY_PAGE as probeHistoryPage }\n`)
+  `${exposed}\nexport { pluginDefault as probePlugin }\nexport { MessageRow as probeMessageRow, WakeBanner as probeWakeBanner, ReactionPicker as probeReactionPicker, reactionPicker as probePickerAtom, notifyIncoming as probeNotifyIncoming, UnreadCount as probeUnreadCount, ChannelButton as probeChannelButton, WorkLine as probeWorkLine, renderContent as probeRenderContent, Composer as probeComposer, TopicLine as probeTopicLine, NewChannelForm as probeNewChannelForm, insertAtCaret as probeInsertAtCaret, pickedMembers as probePickedMembers, emojiTray as probeEmojiTray, topicEditing as probeTopicEditing, composeRequest as probeComposeRequest, openThreadWorkspace as probeOpenThreadWorkspace, closeThreadWorkspace as probeCloseThreadWorkspace, threadTabs as probeThreadTabs, ThreadWorkspace as probeThreadWorkspace, ThreadPanel as probeThreadPanel, PairingPanel as probePairingPanel, pairingView as probePairingView, pairingResult as probePairingResult, SearchBar as probeSearchBar, SearchResults as probeSearchResults, snippetParts as probeSnippetParts, openHit as probeOpenHit, arriveAt as probeArriveAt, searchQuery as probeSearchQuery, scrollTarget as probeScrollTarget, selection as probeSelection, thread as probeThread, jumpNote as probeJumpNote, renderBody as probeRenderBody, followNewest as probeFollowNewest, followState as probeFollowState, continuesPrevious as probeContinues, messageRows as probeMessageRows, dayLabel as probeDayLabel, mentionCandidates as probeMentionCandidates, buildInvite as probeBuildInvite, inviteLine as probeInviteLine, PeopleList as probePeopleList, renaming as probeRenaming, PlusMenu as probePlusMenu, EditForm as probeEditForm, DeleteConfirm as probeDeleteConfirm, editingMessage as probeEditing, deletingMessage as probeDeleting, RoomPanel as probeRoomPanel, roomInvite as probeRoomInvite, isRoomLink as probeIsRoomLink, typingText as probeTypingText, pingTyping as probePingTyping, channelLabel as probeChannelLabel, NewDmPicker as probeNewDmPicker, AgentSetup as probeAgentSetup, keepPlace as probeKeepPlace, reactionMore as probeReactionMore, MessageView as probeMessageView, ChannelList as probeChannelList, PeerLine as probePeerLine, HISTORY_PAGE as probeHistoryPage, findRoomLink as probeFindRoomLink, inviteMessage as probeInviteMessage, SetupFix as probeSetupFix, finishSetup as probeFinishSetup, setupFixState as probeSetupFixState, agentSetupCopied as probeAgentSetupCopied, agentSetupOpened as probeAgentSetupOpened, joinedNote as probeJoinedNote }\n`)
 
 globalThis.__mutations = []
 globalThis.__navigations = []
@@ -84,7 +84,9 @@ const {
   probeMentionCandidates, probeBuildInvite, probeInviteLine, probePeopleList, probeRenaming,
   probeEditForm, probeDeleteConfirm, probeEditing, probeDeleting, probeRoomPanel, probeRoomInvite, probeIsRoomLink,
   probeTypingText, probePingTyping, probeChannelLabel, probeNewDmPicker, probeAgentSetup, probeKeepPlace,
-  probeReactionMore, probeMessageView, probeChannelList, probePeerLine, probeHistoryPage
+  probeReactionMore, probeMessageView, probeChannelList, probePeerLine, probeHistoryPage,
+  probeFindRoomLink, probeInviteMessage, probeSetupFix, probeFinishSetup, probeSetupFixState,
+  probeAgentSetupCopied, probeAgentSetupOpened, probeJoinedNote
 } = await import(pathToFileURL(join(work, 'plugin.mjs')).href)
 
 const failures = []
@@ -600,10 +602,14 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   probePairingResult.set(null)
   globalThis.__mintData = undefined
   const start = nodes(probePairingPanel({}))
-  check('pairing offers to show a code', Boolean(start.find(n => n.type === 'Button' && n.props.children === 'Show a pairing code')))
-  check('pairing offers to join with an invite', Boolean(start.find(n => n.type === 'Button' && n.props.children === 'Join with an invite')))
-  start.find(n => n.type === 'Button' && n.props.children === 'Join with an invite').props.onClick()
-  check('entering opens the form', probePairingView.get() === 'enter')
+  check('first run does not lead with pairing codes', !start.some(n => n.type === 'Button' && n.props.children === 'Show a pairing code'))
+  start.find(n => n.type === 'button' && n.props.children === 'Other ways to connect').props.onClick()
+  check('other ways to connect opens the advanced choices', probePairingView.get() === 'advanced')
+  const advanced = nodes(probePairingPanel({}))
+  check('advanced offers to show a code', advanced.some(n => n.type === 'Button' && n.props.children === 'Show a pairing code'))
+  check('advanced offers a relay of your own', advanced.some(n => n.type === 'Button' && n.props.children === 'Use my own relay'))
+  advanced.find(n => n.type === 'Button' && n.props.children === 'Enter a pairing code').props.onClick()
+  check('entering a code opens the form', probePairingView.get() === 'pair-enter')
   const form = probePairingPanel({})
   const fields = nodes(form).filter(n => n.type === 'Input').map(n => n.props.name)
   check('the form asks for the address and the code', fields.includes('url') && fields.includes('code'), JSON.stringify(fields))
@@ -650,7 +656,11 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
 
 // ---- the list follows the newest message ------------------------------------------------
 {
-  const box = { scrollHeight: 1000, scrollTop: 0, clientHeight: 300, parentElement: null }
+  // The list tracks whether the reader is pinned to the bottom from its own scroll events.
+  const listeners = []
+  const box = { scrollHeight: 1000, scrollTop: 0, clientHeight: 300, parentElement: null, addEventListener (_t, fn) { listeners.push(fn) } }
+  const scrollTo = top => { box.scrollTop = top; listeners.forEach(fn => fn()) }
+  globalThis.requestAnimationFrame = globalThis.requestAnimationFrame || (() => 0)
   const mk = () => { const n = { parentElement: box, scrolled: 0, scrollIntoView () { n.scrolled += 1 } }; return n }
   probeFollowState.last.clear()
   const first = mk()
@@ -658,11 +668,12 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('a list opens at its newest message', first.scrolled === 1)
   probeFollowNewest(first, 'channel:x', 'm1', false)
   check('a re-render with nothing new leaves the scroll alone', first.scrolled === 1)
+  scrollTo(0)
   probeFollowNewest(first, 'channel:x', 'm2', false)
   check('reading history, a teammate\'s new message does not yank the view', first.scrolled === 1)
   probeFollowNewest(first, 'channel:x', 'm3', true)
   check('your own message always comes into view', first.scrolled === 2)
-  box.scrollTop = 650
+  scrollTo(650)
   probeFollowNewest(first, 'channel:x', 'm4', false)
   check('near the bottom, a new message is followed', first.scrolled === 3)
   const again = mk()
@@ -723,7 +734,7 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('making an invite remembers the address', globalThis.__drafts.gatewayAddress === 'https://my-mac.ts.net:8642')
   check('the invite is shown as one line', nodes(probePairingPanel({})).some(n => n.type === 'code' && n.props.children === 'https://my-mac.ts.net:8642#ABCDE-FGHJK'))
   globalThis.__mintData = undefined
-  probePairingView.set('enter')
+  probePairingView.set('pair-enter')
   globalThis.__mutations.length = 0
   const enter = probePairingPanel({})
   enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { url: ['https://my-mac.ts.net:8642#ABCDE-FGHJK'], code: [] } } })
@@ -880,33 +891,76 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('a room link is recognised', probeIsRoomLink(link) && probeIsRoomLink('  ' + link + ' '))
   check('a pairing invite is not a room link', !probeIsRoomLink('https://riley.ts.net:8642#ABCDE-FGHJK') && !probeIsRoomLink('hello'))
 
+  const message = probeInviteMessage(link)
+  check('the invite message carries the link', message.includes(link))
+  check('the link is found inside a whole pasted message', probeFindRoomLink('hey!\n' + message) === link)
+  check('a bare link is found too', probeFindRoomLink('  ' + link + '  ') === link.trim())
+  check('text with no link finds nothing', probeFindRoomLink('https://riley.ts.net:8642#ABCDE-FGHJK') === '')
+
   probePairingResult.set(null)
   probePairingView.set(null)
-  const start = nodes(probePairingPanel({ status: { room: { joined: false } } }))
-  check('first run leads with starting a team room', start.find(n => n.type === 'Button').props.children === 'Start a team room')
-  start.find(n => n.type === 'Button' && n.props.children === 'Start a team room').props.onClick()
-  check('which opens the room form', probePairingView.get() === 'room')
+  const welcome = probePairingPanel({ status: { room: { joined: false }, self: { name_chosen: true, display_name: 'tyler' } } })
+  const start = nodes(welcome)
+  check('first run leads with inviting a teammate', start.find(n => n.type === 'Button').props.children === 'Invite a teammate')
+  check('first run has one box to paste an invite', start.filter(n => n.type === 'Input').length === 1)
+  check('first run shows no relay address, secret or gateway URL',
+    !texts(welcome).join(' ').match(/relay address|secret|gateway URL/i))
+  globalThis.__mutations.length = 0
+  start.find(n => n.type === 'Button' && n.props.children === 'Invite a teammate').props.onClick()
+  check('inviting needs no typing', globalThis.__mutations.length === 1 && globalThis.__mutations[0] === '', JSON.stringify(globalThis.__mutations))
+
+  const named = nodes(probePairingPanel({ status: { room: { joined: false }, self: { name_chosen: false, display_name: 'tylers-macbook-air', suggested_name: 'Tyler' } } }))
+  const nameBox = named.find(n => n.type === 'Input' && n.props.name === 'display_name')
+  check('a first run with no name asks once, prefilled with a friendly name', nameBox && nameBox.props.value === 'Tyler')
+  globalThis.__mutations.length = 0
+  named.find(n => n.type === 'Button' && n.props.children === 'Invite a teammate').props.onClick()
+  check('inviting saves that name first', globalThis.__mutations[0] === 'Tyler', JSON.stringify(globalThis.__mutations))
+
+  // Pasting an invite into the welcome box joins at once.
+  const box = start.find(n => n.type === 'Input' && n.props.name === 'invite')
+  globalThis.__mutations.length = 0
+  let prevented = false
+  const target = { value: '', form: null }
+  box.props.onPaste({ clipboardData: { getData: () => message }, preventDefault () { prevented = true }, currentTarget: target })
+  check('pasting a whole invite message joins the room', globalThis.__mutations[0] === link, JSON.stringify(globalThis.__mutations))
+  check('and keeps just the link in the box', prevented && target.value === link)
+  globalThis.__mutations.length = 0
+  box.props.onPaste({ clipboardData: { getData: () => 'hello' }, preventDefault () {}, currentTarget: { value: '' } })
+  check('pasting something else does nothing yet', globalThis.__mutations.length === 0)
+
+  probePairingView.set('room')
   const form = probePairingPanel({ status: { room: { joined: false, relay_default: 'https://relay.default.example' } } })
   const roomForm = find(form, n => n.type === 'form')
-  check('the form offers the default relay', find(form, n => n.type === 'Input').props.defaultValue === 'https://relay.default.example')
+  check('the own-relay form offers the default relay', find(form, n => n.type === 'Input').props.defaultValue === 'https://relay.default.example')
   globalThis.__mutations.length = 0
   roomForm.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { relay: ['https://relay.mine.example'] } } })
   check('starting a room sends the relay address', globalThis.__mutations[0] === 'https://relay.mine.example')
 
   probePairingView.set('enter')
-  const enter = probePairingPanel({ status: {} })
+  const enter = find(probePairingPanel({ status: {} }), n => n.type === 'form')
+  check('the join box is one field', nodes(enter).filter(n => n.type === 'Input').length === 1)
   globalThis.__mutations.length = 0
-  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { url: [link], code: [] } } })
-  check('pasting a room link joins the room in one step', globalThis.__mutations.length === 1 && globalThis.__mutations[0] === link)
+  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { invite: [link] } } })
+  check('a room link joins the room in one step', globalThis.__mutations.length === 1 && globalThis.__mutations[0] === link)
+  globalThis.__mutations.length = 0
+  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { invite: [message] } } })
+  check('so does the whole invite message', globalThis.__mutations[0] === link, JSON.stringify(globalThis.__mutations))
+  globalThis.__mutations.length = 0
+  enter.props.onSubmit({ preventDefault () {}, currentTarget: { __values: { invite: ['https://riley.ts.net:8642#ABCDE-FGHJK'] } } })
+  check('a pairing invite still pairs', JSON.stringify(globalThis.__mutations[0]) === JSON.stringify({ url: 'https://riley.ts.net:8642#ABCDE-FGHJK', code: '' }))
 
   probePairingView.set('room-invite')
   probeRoomInvite.set(link)
   globalThis.__copied.length = 0
   const invite = probePairingPanel({ status: { room: { joined: true, source: 'joined', can_invite: true } } })
   check('the invite panel shows the link', nodes(invite).some(n => n.type === 'code' && n.props.children === link))
-  find(invite, n => n.type === 'Button' && n.props.children === 'Copy invite link').props.onClick()
-  check('one button copies it', globalThis.__copied[0] === link)
-  check('it warns the link is a key', texts(invite).join(' ').includes('share it like a password'))
+  find(invite, n => n.type === 'Button' && n.props.children === 'Copy invite again').props.onClick()
+  check('one button copies the invite message', globalThis.__copied[0] === message)
+  check('it warns the link is a key', texts(invite).join(' ').includes('only send it to people on your team'))
+  check('it says it is waiting for the teammate', texts(invite).join(' ').includes('Waiting for your teammate'))
+  globalThis.__query = { data: [{ id: 'me', is_self: true, display_name: 'Tyler' }, { id: 'r', is_self: false, display_name: 'Riley' }] }
+  check('and says who joined', texts(probePairingPanel({ status: { room: { joined: true, source: 'joined', can_invite: true } } })).join(' ').includes('Connected with Riley'))
+  globalThis.__query = null
   find(invite, n => n.type === 'Button' && n.props.children === 'Close').props.onClick()
   check('closing the panel forgets the link', probeRoomInvite.get() === '' && probePairingView.get() === null)
 
@@ -920,22 +974,51 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
 // ---- agent setup -----------------------------------------------------------------------------
 {
   const wake = { ...base, blocked_reason: 'injection_not_allowed', blocked_message: 'needs injection', config_line: 'allow_gateway_injection: true', config_snippet: 'plugins:\n  entries:\n    hermes-multiplayer:\n      allow_gateway_injection: true', setup_prompt: 'Please finish setting up the Hermes Multiplayer plugin' }
+  probeAgentSetupCopied.set(false)
+  probeAgentSetupOpened.set(false)
   const setup = banner(wake)
   const all = texts(setup).join(' ')
-  check('agent setup is three numbered steps', ['1.', '2.', '3.'].every(n => texts(setup).includes(n)))
-  check('it says what the step is for', all.includes('One step left before your agent can answer @mentions'))
-  const copyButtons = findAll(setup, n => n.type === 'Button' && String(n.props.children).startsWith('Cop'))
-  check('there is exactly one copy button', copyButtons.length === 1 && copyButtons[0].props.children === 'Copy setup prompt', JSON.stringify(copyButtons.map(b => b.props.children)))
+  check('agent setup is one button', findAll(setup, n => n.type === 'Button').map(b => b.props.children).join('|') === 'Set up my agent')
+  check('it says what the step is for', all.includes('answer when teammates @mention you'))
+  check('there is no restart step', !all.toLowerCase().includes('restart'))
+  check('the by-hand line is still there', find(setup, n => n.type === 'code').props.children === 'allow_gateway_injection: true')
   globalThis.__copied.length = 0
-  copyButtons[0].props.onClick()
-  check('it copies the prompt for your agent', globalThis.__copied[0] === 'Please finish setting up the Hermes Multiplayer plugin')
-  check('and confirms', findAll(banner(wake), n => n.type === 'Button').some(b => b.props.children === 'Copied'))
-  check('no restart button when the app has none', !findAll(setup, n => n.type === 'Button').some(b => b.props.children === 'Restart gateway'))
+  await find(setup, n => n.type === 'Button' && n.props.children === 'Set up my agent').props.onClick()
+  check('without a chat door it copies the request', globalThis.__copied[0] === 'Please finish setting up the Hermes Multiplayer plugin')
+  check('and says what to do with it', texts(banner(wake)).join(' ').includes('Paste it into any Hermes chat'))
+  probeAgentSetupCopied.set(false)
+  const drafts = []
+  sdkHost.newChat = () => { drafts.push('new chat') }
+  sdkHost.composer = { setDraft: async (id, text) => { drafts.push([id, text]); return true } }
+  await find(banner(wake), n => n.type === 'Button' && n.props.children === 'Set up my agent').props.onClick()
+  check('with one, it opens a new chat with the request written', drafts[0] === 'new chat' && drafts[1][0] === 'new' && drafts[1][1] === 'Please finish setting up the Hermes Multiplayer plugin', JSON.stringify(drafts))
+  check('and says to press Enter', texts(banner(wake)).join(' ').includes('Press Enter'))
+  delete sdkHost.newChat
+  delete sdkHost.composer
+}
+
+// ---- backend off: one click, not a dead end ------------------------------------------------
+{
+  probeSetupFixState.set('')
+  const fix = probeSetupFix({})
+  check('a backend that is off offers Finish setup', Boolean(find(fix, n => n.type === 'Button' && n.props.children === 'Finish setup')))
+  check('and never tells a person to edit files', !texts(fix).join(' ').match(/config\.yaml|terminal/i))
+  const calls = []
+  sdkHost.request = async (method, params) => { calls.push([method, params]); return { ok: true, restart_required: false } }
+  await probeFinishSetup()
+  check('it switches the plugin on through Hermes', calls[0][0] === 'plugins.manage' && calls[0][1].action === 'toggle' && calls[0][1].enable === true)
   let restarted = 0
-  sdkHost.restartGateway = () => { restarted += 1 }
-  find(banner(wake), n => n.type === 'Button' && n.props.children === 'Restart gateway').props.onClick()
-  check('Restart gateway restarts it', restarted === 1)
+  sdkHost.request = async () => ({ ok: true, unchanged: true })
+  sdkHost.restartGateway = async () => { restarted += 1 }
+  await probeFinishSetup()
+  check('and restarts Hermes when switching on was not enough', restarted === 1)
+  sdkHost.request = async () => { throw new Error('no') }
   delete sdkHost.restartGateway
+  await probeFinishSetup()
+  check('with no way to fix it, it says where to go', probeSetupFixState.get() === 'failed' &&
+    texts(probeSetupFix({})).join(' ').includes('Capabilities → Plugins'))
+  delete sdkHost.request
+  probeSetupFixState.set('')
 }
 
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nall checks passed')
