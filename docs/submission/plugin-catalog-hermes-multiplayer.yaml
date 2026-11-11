@@ -10,7 +10,7 @@ description: >-
   up to four teammates, and each of your Hermes agents work in one place. No
   server to host — or one small relay when teammates can't reach each other.
 repo: https://github.com/tyleramberry/hermes-multiplayer
-sha: f2cc8ace6c41da8c80b059423678783294de031e
+sha: a60c87a31515b36f3ef4054ed54634247b91be7d
 tier: community
 category: desktop
 maintainer: tyleramberry
