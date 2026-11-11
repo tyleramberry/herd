@@ -978,7 +978,9 @@ const kinds = root => [...new Set(nodes(root).filter(n => typeof n.type === 'str
   check('one button copies the invite message', globalThis.__copied[0] === message)
   check('it warns the link is a key', texts(invite).join(' ').includes('only send it to people on your team'))
   check('it says it is waiting for the teammate', texts(invite).join(' ').includes('Waiting for your teammate'))
-  globalThis.__query = { data: [{ id: 'me', is_self: true, display_name: 'Tyler' }, { id: 'r', is_self: false, display_name: 'Riley' }] }
+  globalThis.__query = { data: [{ id: 'me', is_self: true, display_name: 'Tyler' }, { id: 'b', is_self: false, display_name: 'Brooklyn' }] }
+  check('someone known only from an old direct link is not called connected', texts(probePairingPanel({ status: { room: { joined: true, source: 'joined', can_invite: true } } })).join(' ').includes('Waiting for your teammate'))
+  globalThis.__query = { data: [{ id: 'me', is_self: true, display_name: 'Tyler' }, { id: 'r', is_self: false, display_name: 'Riley', in_room: true }] }
   check('and says who joined', texts(probePairingPanel({ status: { room: { joined: true, source: 'joined', can_invite: true } } })).join(' ').includes('Connected with Riley'))
   globalThis.__query = null
   find(invite, n => n.type === 'Button' && n.props.children === 'Close').props.onClick()

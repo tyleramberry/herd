@@ -2434,7 +2434,7 @@ function RoomPanel({ status }) {
     }
   })
   const { data: people } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants'), refetchInterval: REFRESH_MS })
-  const others = (Array.isArray(people) ? people : []).filter(p => p && !p.is_self)
+  const others = (Array.isArray(people) ? people : []).filter(p => p && !p.is_self && p.in_room)
   const leave = useMutation({
     mutationFn: () => api('/room/leave', { method: 'POST' }),
     onSuccess: () => {
