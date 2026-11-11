@@ -437,8 +437,22 @@ function NewDmPicker({ onDone }) {
     return jsxs('div', {
       className: 'flex flex-col gap-1',
       children: [
-        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Nobody here yet. Connect a teammate first.' }),
-        jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => onDone(null), children: 'Cancel' })
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: 'Nobody to message yet. Invite a teammate and they’ll show up here.' }),
+        jsxs('div', {
+          className: 'flex items-center gap-1.5',
+          children: [
+            jsx(Button, {
+              type: 'button',
+              size: 'xs',
+              onClick: () => {
+                onDone(null)
+                openInvite()
+              },
+              children: 'Invite a teammate'
+            }),
+            jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => onDone(null), children: 'Cancel' })
+          ]
+        })
       ]
     })
   }
@@ -641,6 +655,17 @@ function SidebarSection({ id, label, onAdd, addLabel, children }) {
 // seconds. Clicking a teammate opens your DM with them; your own row renames you, without a trip to Settings.
 const renaming = atom(false)
 
+// Every "invite" button lands here: this room's invite if we're in one, otherwise the welcome card (Invite a
+// teammate / paste an invite). Never the own-relay form: that is an Advanced choice, not where an invite starts.
+function openInvite(status) {
+  const st = status || (typeof queryClient.getQueryData === 'function' ? queryClient.getQueryData(KEYS.status) : null)
+  inviteLine.set('')
+  roomInvite.set('')
+  pairingView.set(st && st.room && st.room.joined ? 'room-invite' : 'welcome')
+}
+
+const INVITE_ROW_STYLE = { display: 'flex', minWidth: 0, alignItems: 'center', gap: 8, padding: '3px 10px', border: 0, borderRadius: 6, background: 'transparent', textAlign: 'left', fontSize: 13, color: 'var(--ui-text-tertiary, inherit)', cursor: 'pointer' }
+
 function PeopleList({ status, onSelect }) {
   const { data } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants') })
   const people = Array.isArray(data) ? data.filter(p => p && p.id) : []
@@ -720,6 +745,17 @@ function PeopleList({ status, onSelect }) {
           p.id
         )
       }),
+      jsxs(
+        'button',
+        {
+          type: 'button',
+          title: 'Invite someone to your team',
+          onClick: () => openInvite(status),
+          style: INVITE_ROW_STYLE,
+          children: [jsx(Codicon, { name: 'add', size: '0.75rem' }), jsx('span', { className: 'truncate', children: 'Invite people' })]
+        },
+        'invite-people'
+      ),
       rename.isError
         ? jsx('div', { className: 'px-2.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(rename.error, "Couldn't change your name.") })
         : null
@@ -737,7 +773,8 @@ function ChannelList({ channels, selfId, selectedId, onSelect, compact, $composi
       inviteLine.set('')
       roomInvite.set('')
       // Inviting goes through the team room: its link if this Hermes Multiplayer is in one, the form to start one if not.
-      pairingView.set(value === 'join' ? 'enter' : status && status.room && status.room.joined ? 'room-invite' : 'room')
+      if (value === 'join') pairingView.set('enter')
+      else openInvite(status)
       return
     }
     $composing.set(value)
@@ -2329,7 +2366,8 @@ function SearchBar() {
 // teammate's code for their Hermes Multiplayer secret. The secret is kept only in this atom and shown once, for the owner to paste
 // into Settings: Hermes Multiplayer has no way to write Hermes's secret store, so it does not save the key for you.
 // null (first run: the welcome card) | 'enter' (one box: paste an invite) | 'room-invite' (this room's link) |
-// 'advanced' (other ways to connect) | 'room' (a room on your own relay) | 'show' / 'pair-enter' (direct pairing codes)
+// 'welcome' (the welcome card, opened from an Invite button) | 'advanced' (other ways to connect) |
+// 'room' (a room on your own relay) | 'show' / 'pair-enter' (direct pairing codes)
 const pairingView = atom(null)
 // The team room's invite link while it is on screen. It holds the room key, so it is cleared with the panel.
 const roomInvite = atom('')
@@ -2643,7 +2681,7 @@ function PairingPanel({ status }) {
       ]
     })
   }
-  return jsx(Welcome, { status, joinRoom })
+  return jsx(Welcome, { status, joinRoom, onClose: view === 'welcome' ? () => pairingView.set(null) : null })
 }
 
 // The one box a teammate pastes an invite into. A team room link (or a whole invite message holding one) joins
@@ -2703,7 +2741,7 @@ function JoinBox({ joinRoom, redeem, onCancel, getName, embedded }) {
 
 // First run: two things only. Invite (starts a room on the built-in relay and copies the invite) or paste an
 // invite. Asks for a name once, prefilled with the person's first name, so nobody shows up as a hostname.
-function Welcome({ status, joinRoom }) {
+function Welcome({ status, joinRoom, onClose }) {
   const self = (status && status.self) || {}
   const askName = self.name_chosen === false
   const redeem = useMutation({
@@ -2785,7 +2823,8 @@ function Welcome({ status, joinRoom }) {
         className: 'self-start text-[0.6875rem] text-(--ui-text-quaternary) hover:text-(--ui-accent)',
         onClick: () => pairingView.set('advanced'),
         children: 'Other ways to connect'
-      })
+      }),
+      onClose ? jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: onClose, children: 'Close' }) : null
     ]
   })
 }
@@ -3086,7 +3125,9 @@ function MultiplayerView({ compact }) {
   const channels = Array.isArray(data) ? data : []
   const selfId = status && status.self ? status.self.gateway_id : null
   const inRoom = Boolean(status && status.room && status.room.joined)
-  const hasPeer = Boolean(status && ((status.peers && status.peers.length) || refusedPeers(status).length || inRoom))
+  // Only a teammate this gateway has actually exchanged with counts. A direct link that is saved in Settings but has
+  // never connected (an old setup, a typo) must not hide the welcome card and its Invite button.
+  const hasPeer = Boolean(status && (inRoom || (status.peers || []).some(p => p && (p.connected || p.last_ok))))
   const incoming = incomingUnlinked(status)
   const pairingOpen = useValue(pairingView)
   const pairingDone = useValue(pairingResult)
