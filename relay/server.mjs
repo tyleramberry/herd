@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { MAX_BODY_BYTES, Room, bearer, route, validKey } from './src/core.js'
+import { pageFor } from './src/pages.js'
 
 function arg(name, fallback) {
   const at = process.argv.indexOf(`--${name}`)
@@ -46,6 +47,11 @@ export function createRelay({ dataDir = '', holdMs } = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://relay.local')
     if (url.pathname === '/' || url.pathname === '/health') return send(res, 200, { ok: true, service: 'hermes-multiplayer-relay' })
+    const human = pageFor(req.method, url.pathname)
+    if (human) {
+      res.writeHead(human.status, { ...human.headers, 'Content-Length': Buffer.byteLength(human.html) })
+      return res.end(req.method === 'HEAD' ? undefined : human.html)
+    }
     const target = route(url.pathname)
     if (!target) return send(res, 404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(req.headers.authorization)

@@ -1,6 +1,7 @@
 // Hermes Multiplayer team room on Cloudflare: one Durable Object per room, with its own SQLite database.
 import { DurableObject } from 'cloudflare:workers'
 import { MAX_BODY_BYTES, Room, bearer, route, validKey } from './core.js'
+import { pageFor } from './pages.js'
 
 const json = (status, body) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
 
@@ -35,6 +36,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
     if (url.pathname === '/' || url.pathname === '/health') return json(200, { ok: true, service: 'hermes-multiplayer-relay' })
+    const human = pageFor(request.method, url.pathname)
+    if (human) return new Response(request.method === 'HEAD' ? null : human.html, { status: human.status, headers: human.headers })
     const target = route(url.pathname)
     if (!target) return json(404, { error: 'Not a Hermes Multiplayer relay path.' })
     const key = bearer(request.headers.get('Authorization'))

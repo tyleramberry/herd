@@ -18,93 +18,7 @@ config_schema:
     type: str
     default: ""
     label: Your name
-    description: How you appear to your teammate in Hermes Multiplayer. Defaults to this computer's name.
-  peer_name:
-    type: str
-    default: ""
-    label: Teammate's name
-    description: A label for the other Hermes, e.g. brooklyn.
-  peer_url:
-    type: str
-    default: ""
-    label: Teammate's gateway URL
-    description: "Their Hermes API server address, e.g. https://brooklyn-mac.tailnet-name.ts.net:8642 — prefer https:// (or your VPN/tailnet address). A plain http:// URL is accepted only for this machine (127.0.0.1, localhost, ::1)."
-  multiplayer_secret:
-    type: secret
-    env: HERMES_MULTIPLAYER_SECRET
-    label: This gateway's Hermes Multiplayer secret
-    description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Hermes Multiplayer access only, never your gateway's API key.
-  peer_key:
-    type: secret
-    env: HERMES_MULTIPLAYER_PEER_KEY
-    label: Teammate's Hermes Multiplayer secret
-    description: Your teammate's Hermes Multiplayer secret (the value they set as their HERMES_MULTIPLAYER_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
-  peer_name_2:
-    type: str
-    default: ""
-    label: Teammate 2's name
-    description: Optional. A second teammate (up to four in total, so five gateways). Give each teammate a different name.
-  peer_url_2:
-    type: str
-    default: ""
-    label: Teammate 2's gateway URL
-    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
-  peer_key_2:
-    type: secret
-    env: HERMES_MULTIPLAYER_PEER_KEY_2
-    label: Teammate 2's Hermes Multiplayer secret
-    description: Teammate 2's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 2.
-  peer_name_3:
-    type: str
-    default: ""
-    label: Teammate 3's name
-    description: Optional. Give each teammate a different name.
-  peer_url_3:
-    type: str
-    default: ""
-    label: Teammate 3's gateway URL
-    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
-  peer_key_3:
-    type: secret
-    env: HERMES_MULTIPLAYER_PEER_KEY_3
-    label: Teammate 3's Hermes Multiplayer secret
-    description: Teammate 3's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 3.
-  peer_name_4:
-    type: str
-    default: ""
-    label: Teammate 4's name
-    description: Optional. Give each teammate a different name.
-  peer_url_4:
-    type: str
-    default: ""
-    label: Teammate 4's gateway URL
-    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
-  peer_key_4:
-    type: secret
-    env: HERMES_MULTIPLAYER_PEER_KEY_4
-    label: Teammate 4's Hermes Multiplayer secret
-    description: Teammate 4's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 4.
-  peers:
-    type: list
-    default: []
-    label: Teammates (advanced)
-    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Hermes Multiplayer secret slot (HERMES_MULTIPLAYER_PEER_KEY, HERMES_MULTIPLAYER_PEER_KEY_2, HERMES_MULTIPLAYER_PEER_KEY_3 or HERMES_MULTIPLAYER_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
-  relay_url:
-    type: str
-    default: ""
-    label: Team room address
-    description: "Optional. The address of a Hermes Multiplayer team room, e.g. https://hermes-multiplayer-relay.your-name.workers.dev/r/<room>. Easier: join from the Hermes Multiplayer page with an invite link and leave this blank."
-  relay_key:
-    type: secret
-    env: HERMES_MULTIPLAYER_RELAY_KEY
-    label: Team room key
-    description: The part of a team room link after the '#'. Only needed when the address above is set here rather than joined from the Hermes Multiplayer page.
-  allow_cleartext_peer:
-    type: bool
-    default: false
-    env: HERMES_MULTIPLAYER_ALLOW_CLEARTEXT
-    label: Send the peer key in cleartext (unsafe)
-    description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."
+    description: How you appear to your teammates. You can also set it from the Hermes Multiplayer page. Everything marked Advanced below is only for running your own relay or linking computers directly; most teams leave it blank and use Invite a teammate on the Hermes Multiplayer page.
   notify_messages:
     type: bool
     default: false
@@ -115,3 +29,89 @@ config_schema:
     default: true
     label: Let my agent answer @mentions
     description: On by default. When a teammate's message mentions @your-name or @your-name-hermes, hand it to the chat you pick (the pane's "Answer @mentions here" button, or /multiplayer-listen). Also needs allow_gateway_injection (see README). Turn off to stop wakes; mentions still show why they weren't answered.
+  peer_name:
+    type: str
+    default: ""
+    label: "Advanced · Teammate's name"
+    description: A label for the other Hermes, e.g. brooklyn.
+  peer_url:
+    type: str
+    default: ""
+    label: "Advanced · Teammate's gateway URL"
+    description: "Their Hermes API server address, e.g. https://brooklyn-mac.tailnet-name.ts.net:8642 — prefer https:// (or your VPN/tailnet address). A plain http:// URL is accepted only for this machine (127.0.0.1, localhost, ::1)."
+  multiplayer_secret:
+    type: secret
+    env: HERMES_MULTIPLAYER_SECRET
+    label: "Advanced · This gateway's Hermes Multiplayer secret"
+    description: A long random value this gateway requires from peers. Give it to your teammate — they store it as their peer key. It grants Hermes Multiplayer access only, never your gateway's API key.
+  peer_key:
+    type: secret
+    env: HERMES_MULTIPLAYER_PEER_KEY
+    label: "Advanced · Teammate's Hermes Multiplayer secret"
+    description: Your teammate's Hermes Multiplayer secret (the value they set as their HERMES_MULTIPLAYER_SECRET — not their gateway API key). Stored in Hermes's secret store, never in config.yaml.
+  peer_name_2:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 2's name"
+    description: Optional. A second teammate (up to four in total, so five gateways). Give each teammate a different name.
+  peer_url_2:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 2's gateway URL"
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_2:
+    type: secret
+    env: HERMES_MULTIPLAYER_PEER_KEY_2
+    label: "Advanced · Teammate 2's Hermes Multiplayer secret"
+    description: Teammate 2's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 2.
+  peer_name_3:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 3's name"
+    description: Optional. Give each teammate a different name.
+  peer_url_3:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 3's gateway URL"
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_3:
+    type: secret
+    env: HERMES_MULTIPLAYER_PEER_KEY_3
+    label: "Advanced · Teammate 3's Hermes Multiplayer secret"
+    description: Teammate 3's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 3.
+  peer_name_4:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 4's name"
+    description: Optional. Give each teammate a different name.
+  peer_url_4:
+    type: str
+    default: ""
+    label: "Advanced · Teammate 4's gateway URL"
+    description: Their Hermes API server address, as for teammate 1. Leave blank to not link them.
+  peer_key_4:
+    type: secret
+    env: HERMES_MULTIPLAYER_PEER_KEY_4
+    label: "Advanced · Teammate 4's Hermes Multiplayer secret"
+    description: Teammate 4's Hermes Multiplayer secret. Stored in Hermes's secret store, read only for teammate 4.
+  peers:
+    type: list
+    default: []
+    label: "Advanced · Teammates list"
+    description: 'Optional, in place of the numbered Teammate fields. A list of {name, url, key_env}, where key_env names the teammate''s Hermes Multiplayer secret slot (HERMES_MULTIPLAYER_PEER_KEY, HERMES_MULTIPLAYER_PEER_KEY_2, HERMES_MULTIPLAYER_PEER_KEY_3 or HERMES_MULTIPLAYER_PEER_KEY_4). Each name and URL must be unique; at most four teammates.'
+  relay_url:
+    type: str
+    default: ""
+    label: "Advanced · Team room address"
+    description: "Optional. The address of a Hermes Multiplayer team room, e.g. https://hermes-multiplayer-relay.your-name.workers.dev/r/<room>. Easier: join from the Hermes Multiplayer page with an invite link and leave this blank."
+  relay_key:
+    type: secret
+    env: HERMES_MULTIPLAYER_RELAY_KEY
+    label: "Advanced · Team room key"
+    description: The part of a team room link after the '#'. Only needed when the address above is set here rather than joined from the Hermes Multiplayer page.
+  allow_cleartext_peer:
+    type: bool
+    default: false
+    env: HERMES_MULTIPLAYER_ALLOW_CLEARTEXT
+    label: "Advanced · Send the peer key in cleartext (unsafe)"
+    description: "A plain http:// URL sends your peer secret in the clear to anyone on the network path, who could also forge sync replies. Prefer https, a VPN/tailnet, or a TLS proxy. Only turn this on if you accept that risk."

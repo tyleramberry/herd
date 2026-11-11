@@ -2351,15 +2351,14 @@ function findRoomLink(text) {
   return match ? match[0] : ''
 }
 
-const INSTALL_HELP_URL = 'https://github.com/tyleramberry/hermes-multiplayer#install'
-
-// What "Invite a teammate" copies: the link, plus one line for a teammate who has never seen Hermes Multiplayer.
-// The join box finds the link inside the whole message, so they can paste all of it.
+// What "Invite a teammate" copies: the link, plus what to do with it. Opened in a browser, the link itself is a
+// two-step page on the relay (install, then paste), so a teammate who has never seen Hermes Multiplayer can start
+// there. The join box finds the link inside the whole message, so they can paste all of it.
 function inviteMessage(link) {
   return (
     'Join my team on Hermes Multiplayer: ' + link + '\n\n' +
-    'In Hermes, open Hermes Multiplayer and paste this whole message into the invite box. ' +
-    'Don’t have it yet? Install it first: ' + INSTALL_HELP_URL
+    'Already have it? In Hermes, open Hermes Multiplayer and paste this whole message into the invite box. ' +
+    'New to it? Open the link for two quick setup steps.'
   )
 }
 
@@ -3112,7 +3111,8 @@ function MultiplayerView({ compact }) {
       statusQuery.isSuccess && (!hasPeer || pairingOpen || pairingDone)
         ? jsx('div', { className: 'border-b border-(--ui-stroke-secondary) px-3 py-2', children: jsx(PairingPanel, { status }) })
         : null,
-      statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
+      // First run shows only the welcome card; agent setup comes once a teammate is connected.
+      statusQuery.isSuccess && status && status.wake && hasPeer ? jsx(WakeBanner, { status }) : null,
       compact ? null : jsx(SearchBar, {}),
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
