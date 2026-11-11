@@ -367,10 +367,12 @@ class MentionWakeTest(unittest.TestCase):
         store.SETTINGS_OVERRIDE = None
         self.tmp.cleanup()
 
-    def peer_msg(self, content, mid, author_type="human", gw="other-gw"):
-        return {"from": {"gateway_id": gw, "display_name": "Brooklyn"}, "channels": [], "messages": [
-            {"id": mid, "channel_id": "general", "author_type": author_type, "author_name": "Brooklyn",
-             "gateway_id": gw, "gateway_name": "Brooklyn", "content": content, "created_at": "2026-11-05T00:00:00Z"}]}
+    def peer_msg(self, content, mid, author_type="human", gw="other-gw", thread=None):
+        row = {"id": mid, "channel_id": "general", "author_type": author_type, "author_name": "Brooklyn",
+               "gateway_id": gw, "gateway_name": "Brooklyn", "content": content, "created_at": "2026-11-05T00:00:00Z"}
+        if thread:
+            row["thread_parent_id"] = thread
+        return {"from": {"gateway_id": gw, "display_name": "Brooklyn"}, "channels": [], "messages": [row]}
 
     def test_handles(self):
         self.assertEqual(store.mention_handles("Tyler Amberry"), {"tyler-amberry", "tyler-amberry-hermes"})
@@ -388,9 +390,15 @@ class MentionWakeTest(unittest.TestCase):
         self.assertIn("> @tyler-hermes please check the build", text)
         self.assertIn("approvals", text)
 
-    def test_agent_authored_never_wakes(self):
-        store.ingest(self.peer_msg("@tyler-hermes loop?", "m2", author_type="agent"))
-        self.assertEqual(self.woken, [])
+    def test_agent_authored_wakes_but_chain_is_capped(self):
+        store.ingest(self.peer_msg("@tyler-hermes your turn", "m2", author_type="agent"))
+        self.assertEqual(len(self.woken), 1)
+        self.assertIn("(an agent)", self.woken[0][1])
+        # a long run of agent-only replies in one thread stops waking; a person restarts it
+        store.ingest(self.peer_msg("@tyler-hermes root", "root1"))
+        for i in range(store.AGENT_CHAIN_MAX + 3):
+            store.ingest(self.peer_msg("@tyler-hermes ping", f"c{i}", author_type="agent", thread="root1"))
+        self.assertEqual(store.wake_skips_for([f"c{store.AGENT_CHAIN_MAX + 2}"]).get(f"c{store.AGENT_CHAIN_MAX + 2}"), "agent_author")
 
     def test_off_by_default_and_needs_target_and_mention(self):
         store.ingest(self.peer_msg("no mention here", "m3"))
@@ -615,7 +623,6 @@ class WakeContextTest(MentionWakeTest):
         self.assertEqual(self.woken, [])
 
     def test_guards_unchanged_with_new_text(self):
-        store.ingest(self.peer_msg("@tyler hi", "g1", author_type="agent"))
         store.ingest(self.peer_msg("no mention", "g2"))
         self.assertEqual(self.woken, [])
         store.ingest(self.peer_msg("@tyler hi", "g3"))

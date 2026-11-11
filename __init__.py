@@ -160,6 +160,24 @@ def _listen_command(raw_args: str, session_key: str = "", **_kw) -> str:
             f"Mention wake is {on}. It also needs allow_gateway_injection: true for hermes-multiplayer in config.yaml.")
 
 
+def _gateway_route_key(session_key: str) -> str:
+    """The desktop pane stores the chat's bare id (``local-<hash>``), but the gateway files sessions under their
+    route key (``agent:main:local:dm:local-<hash>``). A bare id is admitted and then silently dropped at dispatch
+    ("injection was not routed"), so build the real key with the gateway's own function. Anything already a
+    route key, or anything we cannot resolve, passes through unchanged."""
+    key = (session_key or "").strip()
+    if not key or key.startswith("agent:"):
+        return key
+    try:
+        from gateway.config import Platform
+        from gateway.session import SessionSource, build_session_key
+
+        return build_session_key(SessionSource(platform=Platform.LOCAL, chat_id=key, chat_type="dm"))
+    except Exception:  # noqa: BLE001 — older/newer hosts: hand over the key as stored
+        logger.debug("hermes-multiplayer: could not build a route key for %r", key, exc_info=True)
+        return key
+
+
 def register(ctx):
     """Wire schemas to handlers and the peer endpoint. Never touches the network or the db."""
     ctx.register_tool(name="multiplayer_list_channels", toolset="hermes-multiplayer",
@@ -178,6 +196,6 @@ def register(ctx):
                          args_hint="[off]")
 
     def _wake(session_key: str, text: str) -> bool:
-        return bool(ctx.inject_message(text, role="user", session_key=session_key))
+        return bool(ctx.inject_message(text, role="user", session_key=_gateway_route_key(session_key)))
 
     _store().WAKE_HANDLER = _wake

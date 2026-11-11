@@ -43,9 +43,10 @@ class PairingRaceTest(PairingTest):
 class RecordedReasonsTest(_Base):
     def test_an_agent_mention_records_why_it_did_not_wake(self):
         store.set_mention_target("ses_x")
-        store.ingest(peer_msg("@tyler from another agent", "ag1", author_type="agent"))
-        self.assertEqual(self.woken, [])
-        self.assertEqual(self.skip_of("ag1"), "agent_author")
+        store.ingest(peer_msg("@tyler root", "r0"))
+        for i in range(store.AGENT_CHAIN_MAX + 1):
+            store.ingest(peer_msg("@tyler from another agent", f"ag{i}", author_type="agent", thread="r0"))
+        self.assertEqual(self.skip_of(f"ag{store.AGENT_CHAIN_MAX}"), "agent_author")
 
     def test_a_history_mention_records_why_it_did_not_wake(self):
         store.set_mention_target("ses_x")
