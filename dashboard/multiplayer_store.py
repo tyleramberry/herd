@@ -563,8 +563,35 @@ def identity() -> dict:
     default_name = socket.gethostname().split(".")[0] or "me"
     # A name set from the Hermes Multiplayer page wins; then the Settings field; then the computer's name.
     picked = _clean_name(chosen[0] if chosen else "", "")
+    configured = _clean_name(settings().get("display_name"), "")
     return {"gateway_id": gateway_id,
-            "display_name": picked or _clean_name(settings().get("display_name"), default_name)}
+            "display_name": picked or configured or default_name,
+            # Whether the person ever chose a name. The first-run screen asks once when they have not, prefilled
+            # with suggested_name (their first name from the OS account, not the computer's hostname).
+            "name_chosen": bool(picked or configured)}
+
+
+def suggested_name() -> str:
+    """A friendly first-run name: the first word of the OS account's full name, else the login, else the host."""
+    login = ""
+    try:
+        import getpass
+        login = getpass.getuser() or ""
+    except Exception:  # noqa: BLE001: no login name is a normal state in a container
+        login = ""
+    full = ""
+    if login:
+        try:
+            import pwd  # not on Windows
+            full = (pwd.getpwnam(login).pw_gecos or "").split(",")[0]
+        except Exception:  # noqa: BLE001
+            full = ""
+    first = full.strip().split(" ")[0] if full.strip() else ""
+    for candidate in (first, login, socket.gethostname().split(".")[0]):
+        clean = _clean_name(re.sub(r"[^\w .'-]+", "", candidate or ""), "")
+        if clean and clean.lower() not in {"root", "user", "admin", "localhost"}:
+            return clean[:1].upper() + clean[1:]
+    return ""
 
 
 def set_display_name(name: Any) -> dict:
@@ -1794,7 +1821,7 @@ _wake_blocked: dict = {"reason": None, "at": None}  # most recent refused inject
 WAKE_REASONS = {
     "wake_off": "Agent doesn't answer @mentions yet: turn on \"Let my agent answer @mentions\" in Settings > Plugins > Hermes Multiplayer.",
     "no_target": "Agent doesn't answer @mentions yet: no chat is set. Use \"Answer @mentions here\" in the Hermes Multiplayer pane, or type /multiplayer-listen in the chat.",
-    "injection_not_allowed": "Agent doesn't answer @mentions yet: gateway injection is off. Add allow_gateway_injection: true under plugins: entries: hermes-multiplayer in config.yaml, then restart the gateway.",
+    "injection_not_allowed": "Agent doesn't answer @mentions yet: gateway injection is off. Click \"Set up my agent\" in the Hermes Multiplayer pane (it adds allow_gateway_injection: true under plugins: entries: hermes-multiplayer in config.yaml).",
     "host_refused": "The gateway refused to start the agent's turn. Check allow_gateway_injection, and that the chat is still open.",
     "rate_limited": "Not handed to the agent: too many @mentions in one minute (limit 6). Read it in the channel.",
     "no_channel": "Not handed to the agent: its channel is missing here, so there is nowhere to reply.",
@@ -1812,7 +1839,7 @@ INJECTION_SETUP_PROMPT = (
     "2. Under plugins -> entries -> hermes-multiplayer, set allow_gateway_injection to true. Keep every other line exactly as "
     "it is, and create the plugins/entries/hermes-multiplayer keys only if they are missing. The result should contain:\n\n"
     + INJECTION_CONFIG_SNIPPET + "\n\n"
-    "3. Show me the lines you changed, then tell me to restart the gateway (Hermes Multiplayer has a Restart gateway button)."
+    "3. Show me the lines you changed. No restart is needed: Hermes reads this setting fresh each time."
 )
 
 
@@ -2957,16 +2984,65 @@ def _forget_room_state(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE participants SET relay_seen = ''")
 
 
+RELAY_HEALTH_CHECK = True  # tests that point at a fake relay switch this off
+RELAY_HEALTH_TIMEOUT_S = 8.0
+RELAY_UNREACHABLE = ("Couldn't reach the team room server. Check that this computer is online, then try again. "
+                     "If it keeps happening, the server may be down for a moment.")
+RELAY_NOT_A_RELAY = "That address isn't a Hermes Multiplayer team room server. Check the link and try again."
+_INVITE_LINK_RE = re.compile(r"https?://[^\s<>\"'`]+/r/[A-Za-z0-9_-]{8,64}/?#[A-Za-z0-9_-]{16,128}")
+
+
+def find_room_link(text: Any) -> str:
+    """The room link inside whatever was pasted: the bare link, or the whole invite message around it."""
+    raw = str(text or "")
+    if parse_room_link(raw.strip())[0]:
+        return raw.strip()
+    match = _INVITE_LINK_RE.search(raw)
+    return match.group(0) if match else ""
+
+
+def _relay_base(room_url: str) -> str:
+    """``https://relay.example`` from ``https://relay.example/r/<room>`` (keeps a path prefix, if any)."""
+    head, _sep, _room = str(room_url).rpartition("/r/")
+    return head
+
+
+def check_relay(base: str) -> None:
+    """Ask the relay's ``/health`` before trusting it, so a dead or wrong address fails now, in plain words, and
+    not later as a sync error. Sends no key: the health route needs none."""
+    if not RELAY_HEALTH_CHECK:
+        return
+    try:
+        with _OPEN_PEER(urllib.request.Request(base.rstrip("/") + "/health", method="GET",
+                                               headers={"User-Agent": "hermes-multiplayer/0.1"}),
+                        timeout=RELAY_HEALTH_TIMEOUT_S) as resp:
+            body = json.loads(resp.read(4096).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise MultiplayerError(502, RELAY_NOT_A_RELAY) from None
+    except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError, OSError):
+        raise MultiplayerError(502, RELAY_UNREACHABLE) from None
+    except ValueError:
+        raise MultiplayerError(502, RELAY_NOT_A_RELAY) from None
+    if not (isinstance(body, dict) and body.get("ok") is True):
+        raise MultiplayerError(502, RELAY_NOT_A_RELAY)
+
+
 def join_room(link: Any) -> dict:
-    """Join the team room an invite link points at. Saves the link in hermes-multiplayer.db and starts syncing with the room."""
-    url, key = parse_room_link(link)
+    """Join the team room an invite link points at. Saves the link in hermes-multiplayer.db and starts syncing with the room.
+
+    Takes the bare link or a whole pasted invite message, and checks the room's server answers before saving."""
+    found = find_room_link(link)
+    url, key = parse_room_link(found or link)
     if not url:
-        raise MultiplayerError(422, "That doesn't look like a team room link. It looks like https://…/r/…#…")
+        raise MultiplayerError(422, "That isn't an invite link. Ask your teammate to send it again: it starts with "
+                                    "https:// and has /r/ in the middle.")
     if not key:
-        raise MultiplayerError(422, "That link is missing its key (the part after #). Copy the whole link again.")
+        raise MultiplayerError(422, "That link is missing its last part (after the #). Copy the whole link again.")
     refusal = _peer_url_refusal(url)
     if refusal:
         raise MultiplayerError(422, "A team room link must start with https://.")
+    check_relay(_relay_base(url))
     with connect() as conn:
         if _meta_get(conn, "room_link", "") != f"{url}#{key}":
             _forget_room_state(conn)
@@ -2982,6 +3058,11 @@ def create_room(relay_address: Any = "") -> dict:
     The room does not exist anywhere until this gateway's first sync reaches the relay, which creates it and
     binds it to the key made here."""
     base = str(relay_address or "").strip().rstrip("/") or DEFAULT_RELAY_URL
+    # "Invite a teammate" twice must not split a team across two rooms: already in a room joined from this page,
+    # hand out that room's link again. Only an explicit relay address starts a different room.
+    cfg = relay_config()
+    if cfg and cfg.get("source") == "joined" and cfg.get("key") and not str(relay_address or "").strip():
+        return {"invite": f"{cfg['url']}#{cfg['key']}", "status": status(), "existing": True}
     try:
         parts = urllib.parse.urlsplit(base)
         ok = parts.scheme.lower() in ("http", "https") and bool(parts.hostname) and not parts.query \
@@ -3377,6 +3458,8 @@ def status() -> dict:
             "connected": bool(st.get("last_ok")) and not st.get("last_error"),
         })
     refused = refused_peers()
+    if not me.get("name_chosen"):
+        me = {**me, "suggested_name": suggested_name() or me["display_name"]}
     return {"self": me, "peers": out, "refused": refused, "incoming": incoming, "protocol": PROTOCOL_VERSION,
             "agent_status": agent_status(), "mention_wake": wake_status(), "wake": wake_block(),
             "peer_status": peer_status_list(), "notify": notify_enabled(),

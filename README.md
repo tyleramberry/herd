@@ -24,35 +24,55 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 
 What it doesn't do (yet): more than five gateways; private channels (the only restriction is the member list above, set when a channel is created); renaming a channel (its name is its identity across the mesh, so a rename would orphan its history); attachments; custom emoji. Agents answer @mentions once you point them at a chat (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
-## Install
+## Get started (about a minute, no setup knowledge needed)
 
-```bash
-hermes plugins install tyleramberry/hermes-multiplayer --no-enable
-hermes plugins enable hermes-multiplayer
-```
+Both of you do step 1. Then one person invites and the other pastes.
 
-Then in the desktop app, turn on Hermes Multiplayer's desktop half in **Capabilities → Plugins** (it ships off by default) and restart the gateway so the backend loads. Hermes Multiplayer shows up as **Hermes Multiplayer** in the sidebar and as a right-hand pane.
+1. **Install.** Open **[the install page](https://hermes-multiplayer-relay.homeroom-app.workers.dev/install)** and click **Install in Hermes**. Hermes opens and asks you to confirm: click **Install**. (No button? Paste `hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1` into your browser's address bar.)
+2. **Invite.** In Hermes, click **Hermes Multiplayer** in the sidebar. Check your name, then click **Invite a teammate**. An invite is copied: text, email or Slack it to your teammate.
+3. **Join.** Your teammate opens the invite link (it walks them through step 1 if they haven't installed yet), then pastes the invite into the box in Hermes Multiplayer. You're connected, and you'll both see each other in **People**.
 
-## The easy way: a team room
+**Optional: let your agent answer when someone @mentions you.** Click **Set up my agent** in the Hermes Multiplayer pane. A chat opens with the request already written: press Enter and approve the one-line change. No restart.
+
+Prefer a terminal? `hermes plugins install tyleramberry/hermes-multiplayer --enable`, then in Hermes open **Capabilities → Plugins** and switch on Hermes Multiplayer's desktop half (Hermes ships every plugin's desktop half switched off, and only its own install dialog switches it on for you).
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| Hermes Multiplayer isn't in the sidebar | Open **Capabilities → Plugins** and switch Hermes Multiplayer on. |
+| **Almost ready** with a **Finish setup** button | Click it. It switches the plugin on and restarts Hermes if needed. |
+| "Couldn't reach the team room server" | Check this computer is online and try again. |
+| "That isn't an invite link" | Ask your teammate to send the whole invite again. |
+| "The team room refused this invite link" | The invite is wrong or old. Ask for a fresh one. |
+| Your agent doesn't answer @mentions | The line at the top of the pane says exactly what is missing, with a button to fix it. |
+
+Invites are keys: anyone with one can read and post in your room, so only send them to your team.
+
+## Advanced
+
+Most teams never need anything below. It covers running your own relay, linking two computers directly without a relay, and the details of agent @mentions.
+
+### How the team room works
 
 A team room is a small relay that holds your team's messages. Everyone joins with one link, nobody has to be reachable from anybody else, and a message written while your computer is asleep is waiting when you come back.
 
-1. **Deploy the relay once** (free Cloudflare account): `cd relay && npm install && npx wrangler deploy`. Note the address it prints, like `https://hermes-multiplayer-relay.your-name.workers.dev`. To run it on your own machine instead: `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+), behind https.
-2. **Start a room:** in Hermes Multiplayer click **+ → Invite a teammate**, paste the relay address, **Start room**. The invite link is copied.
-3. **Teammates join:** **+ → Join with an invite**, paste the link. That is all.
+**Invite a teammate** starts a room on the built-in relay (`https://hermes-multiplayer-relay.homeroom-app.workers.dev`). Invite again later with **+ → Invite a teammate**; it hands out the same room's invite, so your team never splits across two rooms. Starting or joining a room checks the relay answers first, so a dead relay fails right away with a plain message.
+
+**Your own relay.** To keep your team's messages on a relay you run: deploy it once (free Cloudflare account) with `cd relay && npm install && npx wrangler deploy`, or run `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+) behind https. Then in Hermes Multiplayer use **Other ways to connect → Use my own relay**, paste its address, and **Start room**.
 
 With a room you also get delivery in about a second, "is typing…", and who is online. Edits, deletes, reactions, threads, DMs, groups and private channels all travel through it. DMs and private channels are only handed to their members, and each Hermes Multiplayer proves itself to the room with its own token, so one member cannot ask for another's DMs.
 
-The older ways below (linking two gateways directly) still work, and can be mixed with a room.
+Linking two gateways directly (below) still works, and can be mixed with a room.
 
-## Connect with a teammate
+### Link two gateways directly (no relay)
 
 Only one of you needs to do this. Say Tyler connects to Brooklyn:
 
 1. **On Brooklyn's machine**, with the Hermes Multiplayer plugin enabled:
    - Open **Settings → Plugins → Hermes Multiplayer** and set *This gateway's Hermes Multiplayer secret* (`HERMES_MULTIPLAYER_SECRET`) to a long random value. This is Hermes Multiplayer's own credential: it only opens Hermes Multiplayer's `/hermes-multiplayer/v1/*` routes, never the rest of the gateway. Tell Tyler this value — and only this value. Never share your `API_SERVER_KEY`.
    - Make the Hermes API server reachable from Tyler's machine (port `8642` by default). Prefer a tailnet/VPN address; if you set `API_SERVER_HOST=0.0.0.0` in `~/.hermes/.env`, know that this opens the **whole** Hermes API surface to your network, and the Hermes Multiplayer secret does **not** protect any of it — only `/hermes-multiplayer/v1/*`. Keep `API_SERVER_KEY` set to its own long random key, and firewall the port to your teammate if you can. Restart the gateway.
-2. **On Tyler's machine**, open **Settings → Plugins → Hermes Multiplayer** (or click **Connect a teammate** in the Hermes Multiplayer pane) and fill in:
+2. **On Tyler's machine**, open **Settings → Plugins → Hermes Multiplayer**  and fill in:
    - *Teammate's name*: `brooklyn`
    - *Teammate's gateway URL*: `https://brooklyn-mac.tailnet-name.ts.net:8642` (prefer `https://`, or your VPN/tailnet address — a plain `http://` URL to another machine is refused by default; see the warning below)
    - *Teammate's Hermes Multiplayer secret* (`HERMES_MULTIPLAYER_PEER_KEY`): the Hermes Multiplayer secret Brooklyn set in step 1 (masked; stored in Hermes's secret store, never in `config.yaml`)
@@ -65,17 +85,17 @@ Within a few seconds the pane header shows **Connected to brooklyn**, and each o
 
 > **Already linked before this change?** A *Teammate's Hermes Multiplayer secret* saved by an older Hermes Multiplayer still holds their old `API_SERVER_KEY`, which their gateway no longer accepts on `/hermes-multiplayer/v1/*`. Each side sets a new *This gateway's Hermes Multiplayer secret*, tells the other that value only, and the link recovers — the error line names which side is still missing one.
 
-## Or pair with a short code
+#### Or pair with a short code
 
 Instead of reading a long secret aloud, the one who already has Hermes Multiplayer can make a code:
 
-1. **On the machine that holds the secret** (with Hermes Multiplayer set up and a Hermes Multiplayer secret saved), press **Show a pairing code** on the Hermes Multiplayer page, or **+ → Invite a teammate** at any time. You get a 10-character code (like `ABCDE-FGHJK`) that is valid for ten minutes and for one use. Type this gateway's address under it once (Hermes Multiplayer remembers it) and press **Copy invite**: the invite is one line, `https://brooklyn-mac.tailnet-name.ts.net:8642#ABCDE-FGHJK`.
-2. **On your teammate's machine**, press **Enter a pairing code** (or **+ → Join with an invite**), paste the invite, then **Pair**. The address and the code typed separately work too. Hermes Multiplayer fetches the Hermes Multiplayer secret and shows it once.
+1. **On the machine that holds the secret** (with Hermes Multiplayer set up and a Hermes Multiplayer secret saved), open **Other ways to connect → Show a pairing code** on the Hermes Multiplayer page. You get a 10-character code (like `ABCDE-FGHJK`) that is valid for ten minutes and for one use. Type this gateway's address under it once (Hermes Multiplayer remembers it) and press **Copy invite**: the invite is one line, `https://brooklyn-mac.tailnet-name.ts.net:8642#ABCDE-FGHJK`.
+2. **On your teammate's machine**, open **Other ways to connect → Enter a pairing code** (or paste the one-line invite into the invite box), then **Pair**. The address and the code typed separately work too. Hermes Multiplayer fetches the Hermes Multiplayer secret and shows it once.
 3. Paste that key into **Settings → Plugins → Hermes Multiplayer → Teammate's Hermes Multiplayer secret**, with the name and address as in the section above. Hermes Multiplayer cannot save it for you yet: Hermes's secret store has no write door for plugins.
 
 Five wrong codes pause pairing for ten minutes and kill the live code. A new code replaces the old one. Pairing refuses a plain `http://` address to another machine, the same as the manual route. **Only give a code to someone you would give the Hermes Multiplayer secret to:** a correct code gets that secret in the reply.
 
-## More than two of you (up to five gateways)
+#### More than two of you (up to five gateways)
 
 Each teammate you link is one more gateway. You can link up to four teammates, so the mesh is five gateways at most.
 
@@ -86,12 +106,12 @@ Each teammate you link is one more gateway. You can link up to four teammates, s
 
 Every teammate has its own status line in the pane (connected, can't reach, or needs a secret), so one that is offline never hides the others.
 
-## Let your agent answer @mentions
+### Agent @mentions in detail
 
 Wake is on by default. When a teammate writes `@tyler` or `@tyler-hermes` (your name from *Your name*), Hermes Multiplayer hands that message to your agent as a normal chat turn, so it runs under your usual approvals. Two things must be in place, because this lets another person's message start an agent turn on your machine:
 
-1. In `~/.hermes/config.yaml`, allow Hermes Multiplayer to start turns: under `plugins: entries: hermes-multiplayer:` set `allow_gateway_injection: true`.
-2. Choose the chat that answers. In the Hermes Multiplayer pane, open the chat your agent should answer in and click **Answer @mentions here**; or type `/multiplayer-listen` in that chat. (`/multiplayer-listen off`, or **Stop** in the pane, clears it.)
+1. Hermes must allow Hermes Multiplayer to start turns: `allow_gateway_injection: true` under `plugins: entries: hermes-multiplayer:` in `~/.hermes/config.yaml`. A plugin may not grant itself that, so **Set up my agent** opens a chat with the request written for your own agent, which makes the change once you approve it. Hermes reads the setting fresh, so no restart is needed.
+2. A chat that answers. The chat you have open is used by default; **Use this chat instead** picks another, and `/multiplayer-listen` in a chat does the same. **Stop** (or `/multiplayer-listen off`) clears it, and it stays off until you pick a chat again.
 
 **Tagging your own agent.** You don't need a teammate to try it: type `@hermes` (or `@your-name-hermes`) in any channel on your own Hermes Multiplayer and your agent gets the message the same way, with the same two requirements. `@hermes` only ever means the agent on the machine it was typed on; it never wakes a teammate's agent. Writing your own name alone (`@tyler`) is not a request to your agent.
 
@@ -120,7 +140,7 @@ Once the first sync lands, the other side's Hermes Multiplayer shows "{name} is 
 
 ## What Hermes Multiplayer does on your machine (disclosures)
 
-- **Network calls:** only to the teammate gateway URLs you enter (up to four), at `POST <url>/hermes-multiplayer/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. The peer client ignores ambient `http_proxy`/`HTTP_PROXY` (it builds its opener with an explicitly empty proxy map), so the peer key is never handed to a proxy. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that.
+- **Network calls:** only to the teammate gateway URLs you enter (up to four), at `POST <url>/hermes-multiplayer/v1/sync`, about every 3 seconds while the gateway runs. No third-party services, no telemetry. The peer client ignores ambient `http_proxy`/`HTTP_PROXY` (it builds its opener with an explicitly empty proxy map), so the peer key is never handed to a proxy. A plain `http://` URL to another machine is refused before any request is built (loopback `http://` is fine); the setting **Send the peer key in cleartext (unsafe)** overrides that. Starting or joining a team room first sends one `GET <relay>/health` (no key, no data) to check the relay answers.
 - **Inbound endpoint:** adds `POST /hermes-multiplayer/v1/sync` and `GET /hermes-multiplayer/v1/ping` to your Hermes API server. Both require **this gateway's Hermes Multiplayer secret** (`HERMES_MULTIPLAYER_SECRET`, Hermes Multiplayer's own credential, read through Hermes's secret store and compared in constant time). With no Hermes Multiplayer secret set, both routes refuse every request (fail closed). Your gateway's `API_SERVER_KEY` is **not** accepted on `/hermes-multiplayer/v1/*`, and the credential you hand a teammate is Hermes Multiplayer-scoped — it is no longer your gateway API key, so it cannot reach the rest of your API server. Outbound sync never follows a redirect: a 3xx from your teammate's gateway is refused, so the key is never re-sent to another host (a redirected peer shows as "The peer answered HTTP 30x" instead of being followed).
 - **Background work:** a sync loop runs inside the gateway process while the API server is up (every 3 seconds; it does nothing when no teammate is configured). The desktop pane polls its own backend every 3 seconds and asks it to sync every 10 seconds.
 - **Pairing codes:** a code is kept on your gateway only as a keyed digest, in hermes-multiplayer.db. The exchange is `POST <url>/hermes-multiplayer/v1/pair` on the teammate's gateway, which needs no Hermes Multiplayer secret, only a live code: it returns your teammate's Hermes Multiplayer secret to a correct code, once. Wrong, used and expired codes get one reply. The key the pairing shows is held in the pane's memory until you hide it and is never written to storage.
@@ -135,6 +155,7 @@ Once the first sync lands, the other side's Hermes Multiplayer shows "{name} is 
 - **Your name:** a name you set from the Hermes Multiplayer page is kept in hermes-multiplayer.db (`meta.display_name`) and sent with your messages, exactly as the *Your name* setting is.
 - **Clipboard:** **Copy invite** and the **Copy** button beside the config line write that one line to your clipboard through Hermes (`ctx.os.writeClipboard`), only when you press them. The gateway address you type for an invite is kept in the plugin's desktop storage.
 - **Agent status:** an agent may set one short phrase (multiplayer_set_status, e.g. "writing the code") that the pane shows beside its work. Each sync request carries this gateway's phrase and the agent's name, and nothing else, so teammates see it while your gateway is running. A teammate's phrase is kept in memory on your side only, shows for five minutes after their last sync, and is never passed on to anyone else. Nothing about status is written to hermes-multiplayer.db, and it clears when the gateway restarts.
+- **Setup buttons (only when you click them):** **Finish setup** asks Hermes to switch this plugin on (the same switch as Capabilities → Plugins) and, if Hermes says it needs one, restarts the gateway. **Set up my agent** opens a new Hermes chat with the setup request typed into the box; nothing is sent until you press Enter, and your agent's edit to `config.yaml` goes through your usual approvals. If the app can't open a chat, the request is copied to your clipboard instead.
 - **Shell commands:** none.
 
 ## Upgrading from Herd

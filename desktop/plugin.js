@@ -207,7 +207,8 @@ function PeerLine({ status }) {
   const room = roomLine(status)
   if (room && peers.length === 0 && refusedPeers(status).length === 0) return room
   // Only an explicit false: older/partial status payloads without the key render as before.
-  if (status && status.multiplayer_secret_set === false) {
+  // It only matters for the direct route: a team room needs no secret, so a first-run user never sees it.
+  if (status && status.multiplayer_secret_set === false && peers.length > 0) {
     return jsxs('div', {
       className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
       title: "Teammates can't sync with this gateway until it has a Hermes Multiplayer secret.",
@@ -2327,7 +2328,9 @@ function SearchBar() {
 // Pairing (Track 5): a one-time code instead of a long key. "Show" mints a code on this gateway; "Enter" exchanges a
 // teammate's code for their Hermes Multiplayer secret. The secret is kept only in this atom and shown once, for the owner to paste
 // into Settings: Hermes Multiplayer has no way to write Hermes's secret store, so it does not save the key for you.
-const pairingView = atom(null) // null | 'show' | 'enter' | 'room' (start a team room) | 'room-invite' (its link)
+// null (first run: the welcome card) | 'enter' (one box: paste an invite) | 'room-invite' (this room's link) |
+// 'advanced' (other ways to connect) | 'room' (a room on your own relay) | 'show' / 'pair-enter' (direct pairing codes)
+const pairingView = atom(null)
 // The team room's invite link while it is on screen. It holds the room key, so it is cleared with the panel.
 const roomInvite = atom('')
 const RELAY_KEY = 'relayAddress'
@@ -2337,6 +2340,37 @@ const ROOM_LINK = /^https?:\/\/[^\s#]+\/r\/[A-Za-z0-9_-]{8,64}\/?#[A-Za-z0-9_-]{
 function isRoomLink(text) {
   return ROOM_LINK.test(String(text || '').trim())
 }
+
+// The room link inside whatever was pasted: the bare link, or the whole invite message a teammate sent.
+const ROOM_LINK_IN_TEXT = /https?:\/\/[^\s<>"'`]+\/r\/[A-Za-z0-9_-]{8,64}\/?#[A-Za-z0-9_-]{16,128}/
+
+function findRoomLink(text) {
+  const raw = String(text || '')
+  if (isRoomLink(raw)) return raw.trim()
+  const match = ROOM_LINK_IN_TEXT.exec(raw)
+  return match ? match[0] : ''
+}
+
+// What "Invite a teammate" copies: the link, plus what to do with it. Opened in a browser, the link itself is a
+// two-step page on the relay (install, then paste), so a teammate who has never seen Hermes Multiplayer can start
+// there. The join box finds the link inside the whole message, so they can paste all of it.
+function inviteMessage(link) {
+  return (
+    'Join my team on Hermes Multiplayer: ' + link + '\n\n' +
+    'Already have it? In Hermes, open Hermes Multiplayer and paste this whole message into the invite box. ' +
+    'New to it? Open the link for two quick setup steps.'
+  )
+}
+
+// Save the first-run name (if the welcome card asked for one) before inviting or joining, so teammates
+// see a real name, not the computer's hostname, from the very first message.
+async function saveFirstName(name) {
+  const clean = String(name || '').trim()
+  if (clean) await api('/profile', { method: 'POST', body: { display_name: clean } })
+}
+
+const joinedNote = atom('') // "You're in." after a join, until the next panel opens
+const welcomeName = atom(null) // the first-run name field while it is being typed (null: not touched yet)
 
 // Starting a team room, and handing out its link. A room is the easy way to connect: everyone pastes one link, and
 // nobody has to be reachable from anybody else.
@@ -2349,7 +2383,7 @@ function RoomPanel({ status }) {
     onSuccess: (made, relay) => {
       if (ctx && relay) ctx.storage.set(RELAY_KEY, relay)
       roomInvite.set((made && made.invite) || '')
-      if (made && made.invite) copyText(made.invite)
+      if (made && made.invite) copyText(inviteMessage(made.invite))
       pairingView.set('room-invite')
       refreshAll()
     }
@@ -2358,9 +2392,11 @@ function RoomPanel({ status }) {
     mutationFn: () => api('/room/invite'),
     onSuccess: got => {
       roomInvite.set((got && got.invite) || '')
-      if (got && got.invite) copyText(got.invite)
+      if (got && got.invite) copyText(inviteMessage(got.invite))
     }
   })
+  const { data: people } = useQuery({ queryKey: KEYS.participants, queryFn: () => api('/participants'), refetchInterval: REFRESH_MS })
+  const others = (Array.isArray(people) ? people : []).filter(p => p && !p.is_self)
   const leave = useMutation({
     mutationFn: () => api('/room/leave', { method: 'POST' }),
     onSuccess: () => {
@@ -2383,8 +2419,8 @@ function RoomPanel({ status }) {
         if (!create.isPending) create.mutate(relay)
       },
       children: [
-        jsx('div', { className: 'text-sm font-medium', children: 'Start a team room' }),
-        note('A room holds your team’s messages on a relay, so teammates join with one link and nobody has to be online at the same time.'),
+        jsx('div', { className: 'text-sm font-medium', children: 'Start a team room on your own relay' }),
+        note('Only needed if you run your own relay. “Invite a teammate” already uses the built-in one.'),
         jsx(Input, {
           name: 'relay',
           defaultValue: (ctx ? String(ctx.storage.get(RELAY_KEY, '') || '') : '') || room.relay_default || '',
@@ -2398,8 +2434,7 @@ function RoomPanel({ status }) {
           className: 'flex flex-wrap items-center gap-1.5',
           children: [
             jsx(Button, { type: 'submit', size: 'xs', disabled: create.isPending, children: create.isPending ? 'Starting…' : 'Start room' }),
-            jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: close, children: 'Cancel' }),
-            jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => pairingView.set('show'), children: 'Link two gateways directly instead' })
+            jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: () => pairingView.set('advanced'), children: 'Back' })
           ]
         }),
         create.isError ? note(errorText(create.error, "Couldn't start the room.")) : null
@@ -2415,11 +2450,22 @@ function RoomPanel({ status }) {
         ? jsx('code', { className: 'break-all rounded bg-(--ui-surface-secondary) px-1.5 py-1 font-mono', children: invite })
         : null,
       invite
-        ? note((canCopy() ? 'Copied. ' : '') + 'Send this link to a teammate. In Hermes Multiplayer they click + and then “Join with an invite”, and paste it. Anyone with the link can read and post in this room, so share it like a password.')
+        ? note(
+            (canCopy() ? 'Copied an invite to your clipboard. ' : '') +
+              'Send it to your teammate in a text, email or Slack. They paste it into Hermes Multiplayer and you’re connected. ' +
+              'Anyone with the link can read and post here, so only send it to people on your team.'
+          )
         : room.can_invite === false
           ? note('This room was set up in Settings, so Hermes Multiplayer can’t show its link. Share the link you were given.')
           : note('One link brings a teammate into this room.'),
       fetchInvite.isError ? note(errorText(fetchInvite.error, "Couldn't get the link.")) : null,
+      jsxs('div', {
+        className: 'flex min-w-0 items-center gap-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+        'aria-live': 'polite',
+        children: others.length
+          ? [jsx(StatusDot, { tone: 'good' }), jsx('span', { children: 'Connected with ' + others.map(p => p.display_name).join(', ') + '.' })]
+          : [jsx(StatusDot, { tone: 'muted' }), jsx('span', { children: 'Waiting for your teammate to join…' })]
+      }),
       jsxs('div', {
         className: 'flex flex-wrap items-center gap-1.5',
         children: [
@@ -2429,8 +2475,8 @@ function RoomPanel({ status }) {
                 type: 'button',
                 size: 'xs',
                 disabled: fetchInvite.isPending,
-                onClick: () => (invite ? copyText(invite) : fetchInvite.mutate()),
-                children: invite ? 'Copy invite link' : 'Show invite link'
+                onClick: () => (invite ? copyText(inviteMessage(invite)) : fetchInvite.mutate()),
+                children: invite ? 'Copy invite again' : 'Show invite link'
               }),
           jsx(Button, { type: 'button', size: 'xs', variant: 'secondary', onClick: close, children: 'Close' }),
           room.source === 'joined'
@@ -2468,6 +2514,7 @@ function PairingPanel({ status }) {
     mutationFn: link => api('/room', { method: 'POST', body: { invite: link } }),
     onSuccess: () => {
       pairingView.set(null)
+      joinedNote.set('You’re in. Say hi in #general.')
       refreshAll()
     }
   })
@@ -2491,6 +2538,31 @@ function PairingPanel({ status }) {
     })
   }
   if (view === 'room' || view === 'room-invite') return jsx(RoomPanel, { status })
+  if (view === 'enter') return jsx(JoinBox, { joinRoom, redeem, onCancel: () => pairingView.set(null) })
+  if (view === 'advanced') {
+    return jsxs('div', {
+      className: 'flex flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
+      children: [
+        jsx('div', { className: 'text-sm font-medium', children: 'Other ways to connect' }),
+        jsx('div', {
+          className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+          children: 'For people who run their own relay, or link two computers directly over a VPN. Most teams never need these.'
+        }),
+        jsxs('div', {
+          className: 'flex flex-wrap items-center gap-1.5',
+          children: [
+            btn('Use my own relay', () => pairingView.set('room')),
+            btn('Show a pairing code', () => {
+              mint.reset && mint.reset()
+              pairingView.set('show')
+            }),
+            btn('Enter a pairing code', () => pairingView.set('pair-enter')),
+            jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: () => pairingView.set(null), children: 'Back' })
+          ]
+        })
+      ]
+    })
+  }
   if (view === 'show') {
     const minted = mint.data
     return jsxs('div', {
@@ -2541,7 +2613,7 @@ function PairingPanel({ status }) {
       ]
     })
   }
-  if (view === 'enter') {
+  if (view === 'pair-enter') {
     return jsxs('form', {
       className: 'flex w-full flex-col gap-1.5',
       onSubmit: e => {
@@ -2556,14 +2628,14 @@ function PairingPanel({ status }) {
         else if (url && (code || url.includes('#') || /\s/.test(url))) redeem.mutate({ url, code })
       },
       children: [
-        jsx('div', { className: 'text-sm font-medium', children: 'Join with an invite' }),
-        jsx(Input, { name: 'url', placeholder: 'Paste the invite link a teammate sent you', 'aria-label': 'Invite link, or teammate’s gateway address', autoComplete: 'off', autoFocus: true, className: 'h-7 text-xs' }),
-        jsx(Input, { name: 'code', placeholder: 'Pairing code (only when linking two gateways directly)', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
+        jsx('div', { className: 'text-sm font-medium', children: 'Enter a pairing code' }),
+        jsx(Input, { name: 'url', placeholder: 'Teammate’s gateway address (or address#CODE)', 'aria-label': 'Teammate’s gateway address', autoComplete: 'off', autoFocus: true, className: 'h-7 text-xs' }),
+        jsx(Input, { name: 'code', placeholder: 'Pairing code, like ABCDE-FGHJK', 'aria-label': 'Pairing code', autoComplete: 'off', className: 'h-7 font-mono text-xs' }),
         jsxs('div', {
           className: 'flex items-center gap-1.5',
           children: [
             jsx(Button, { type: 'submit', size: 'xs', disabled: redeem.isPending || joinRoom.isPending, children: redeem.isPending || joinRoom.isPending ? 'Joining…' : 'Join' }),
-            btn('Cancel', () => pairingView.set(null))
+            btn('Back', () => pairingView.set('advanced'))
           ]
         }),
         joinRoom.isError ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(joinRoom.error, "Couldn't join that room.") }) : null,
@@ -2571,21 +2643,148 @@ function PairingPanel({ status }) {
       ]
     })
   }
-  return jsxs('div', {
-    className: 'flex flex-wrap items-center justify-center gap-2',
+  return jsx(Welcome, { status, joinRoom })
+}
+
+// The one box a teammate pastes an invite into. A team room link (or a whole invite message holding one) joins
+// the room; an address#CODE pairing invite still works here too, for the direct route.
+function JoinBox({ joinRoom, redeem, onCancel, getName, embedded }) {
+  const busy = joinRoom.isPending || redeem.isPending
+  const submit = text => {
+    if (busy) return
+    const link = findRoomLink(text)
+    const go = () => {
+      if (link) joinRoom.mutate(link)
+      else if (String(text).includes('#')) redeem.mutate({ url: String(text).trim(), code: '' })
+      else joinRoom.mutate(String(text).trim()) // the backend says, in words, why it isn't an invite
+    }
+    const name = getName ? String(getName() || '').trim() : ''
+    // The name can be fixed later from the People list; joining matters more, so a failed save still joins.
+    if (name) saveFirstName(name).then(go, go)
+    else go()
+  }
+  return jsxs('form', {
+    className: 'flex w-full flex-col gap-1.5 text-xs text-(--ui-text-secondary)',
+    onSubmit: e => {
+      e.preventDefault()
+      const text = String(new FormData(e.currentTarget).get('invite') || '')
+      if (text.trim()) submit(text)
+    },
     children: [
-      jsx(Button, { type: 'button', size: 'xs', onClick: () => pairingView.set('room'), children: 'Start a team room' }),
-      btn('Join with an invite', () => pairingView.set('enter')),
-      jsx(Button, {
+      embedded ? null : jsx('div', { className: 'text-sm font-medium', children: 'Join with an invite' }),
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx(Input, {
+            name: 'invite',
+            placeholder: 'Paste the invite your teammate sent you',
+            'aria-label': 'Invite from a teammate',
+            autoComplete: 'off',
+            autoFocus: !embedded,
+            className: 'h-7 min-w-0 flex-1 text-xs',
+            // Pasting a real invite joins at once: no second click to find.
+            onPaste: e => {
+              const text = e.clipboardData ? e.clipboardData.getData('text') : ''
+              if (!findRoomLink(text)) return
+              e.preventDefault()
+              e.currentTarget.value = findRoomLink(text)
+              submit(text)
+            }
+          }),
+          jsx(Button, { type: 'submit', size: 'xs', disabled: busy, children: busy ? 'Joining…' : 'Join' }),
+          onCancel ? jsx(Button, { type: 'button', size: 'xs', variant: 'ghost', onClick: onCancel, children: 'Cancel' }) : null
+        ]
+      }),
+      joinRoom.isError ? jsx('div', { role: 'alert', className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(joinRoom.error, "Couldn't join. Check the invite and try again.") }) : null,
+      redeem.isError ? jsx('div', { role: 'alert', className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(redeem.error, "Couldn't pair.") }) : null
+    ]
+  })
+}
+
+// First run: two things only. Invite (starts a room on the built-in relay and copies the invite) or paste an
+// invite. Asks for a name once, prefilled with the person's first name, so nobody shows up as a hostname.
+function Welcome({ status, joinRoom }) {
+  const self = (status && status.self) || {}
+  const askName = self.name_chosen === false
+  const redeem = useMutation({
+    mutationFn: ({ url, code }) => api('/pair', { method: 'POST', body: { url, code } }),
+    onSuccess: r => pairingResult.set(r)
+  })
+  const invite = useMutation({
+    mutationFn: async name => {
+      await saveFirstName(name)
+      return api('/room', { method: 'POST', body: { create: true } })
+    },
+    onSuccess: made => {
+      roomInvite.set((made && made.invite) || '')
+      if (made && made.invite) copyText(inviteMessage(made.invite))
+      pairingView.set('room-invite')
+      refreshAll()
+    }
+  })
+  const typed = useValue(welcomeName)
+  const nameValue = typed === null ? self.suggested_name || self.display_name || '' : typed
+  const nameInput = askName
+    ? jsxs('label', {
+        className: 'flex flex-col gap-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: [
+          jsx('span', { children: 'Your name, as your team will see it' }),
+          jsx(Input, {
+            name: 'display_name',
+            value: nameValue,
+            onChange: e => welcomeName.set(e.currentTarget.value),
+            maxLength: 64,
+            autoComplete: 'off',
+            'aria-label': 'Your name',
+            className: 'h-7 text-xs'
+          })
+        ]
+      })
+    : null
+  const readName = () => (askName ? nameValue : '')
+  return jsxs('div', {
+    className: 'flex w-full flex-col gap-2.5 text-xs text-(--ui-text-secondary)',
+    children: [
+      jsxs('div', {
+        className: 'flex flex-col gap-0.5',
+        children: [
+          jsx('div', { className: 'text-sm font-medium', children: 'Connect with a teammate' }),
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: 'One of you invites, the other pastes the invite. That’s it: no accounts, keys or network setup.'
+          })
+        ]
+      }),
+      nameInput,
+      jsxs('div', {
+        className: 'flex flex-col gap-1',
+        children: [
+          jsx(Button, {
+            type: 'button',
+            size: 'sm',
+            disabled: invite.isPending,
+            onClick: () => invite.mutate(readName()),
+            children: invite.isPending ? 'Creating your invite…' : 'Invite a teammate'
+          }),
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: 'Copies an invite you can text or email to them.'
+          }),
+          invite.isError ? jsx('div', { role: 'alert', className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: errorText(invite.error, "Couldn't create the invite. Check that you're online and try again.") }) : null
+        ]
+      }),
+      jsx('div', { className: 'text-center text-[0.6875rem] text-(--ui-text-quaternary)', children: 'or, if a teammate invited you' }),
+      jsx(JoinBox, {
+        joinRoom,
+        redeem,
+        getName: readName,
+        embedded: true
+      }),
+      jsx('button', {
         type: 'button',
-        size: 'xs',
-        variant: 'ghost',
-        title: 'Link two gateways to each other with a one-time code, without a relay',
-        onClick: () => {
-          mint.reset && mint.reset()
-          pairingView.set('show')
-        },
-        children: 'Show a pairing code'
+        className: 'self-start text-[0.6875rem] text-(--ui-text-quaternary) hover:text-(--ui-accent)',
+        onClick: () => pairingView.set('advanced'),
+        children: 'Other ways to connect'
       })
     ]
   })
@@ -2607,82 +2806,108 @@ function copyText(text) {
   }
 }
 
-// The one step Hermes Multiplayer can't do for you: Hermes only lets a plugin start an agent turn when config.yaml says so. So
-// the banner hands you a prompt for your own agent, which makes the change, and a button to restart afterwards.
+// The one step Hermes Multiplayer can't do for you: Hermes only lets a plugin start an agent turn when config.yaml says so,
+// and a plugin may not grant itself that. So one button opens a new chat with the request already written; the person
+// presses Enter and approves the edit. Hermes reads config.yaml fresh, so no restart is needed afterwards.
 const agentSetupCopied = atom(false)
+const agentSetupOpened = atom(false)
+const WAKE_STOPPED_KEY = 'wakeStopped' // the owner pressed Stop: never re-pick a chat for them
+
+function wakeStopped() {
+  return Boolean(ctx && ctx.storage && ctx.storage.get(WAKE_STOPPED_KEY, false))
+}
+
+function setWakeStopped(value) {
+  if (ctx && ctx.storage) ctx.storage.set(WAKE_STOPPED_KEY, Boolean(value))
+}
+
+async function openAgentSetupChat(prompt) {
+  const composer = host.composer
+  if (typeof host.newChat !== 'function' || !composer || typeof composer.setDraft !== 'function') return false
+  try {
+    host.newChat()
+    // The fresh draft mounts a moment after newChat; try a few times before falling back to the clipboard.
+    for (let i = 0; i < 10; i++) {
+      await new Promise(resolve => (ctx ? ctx.setTimeout(resolve, 150) : setTimeout(resolve, 150)))
+      if (await composer.setDraft('new', prompt)) return true
+      if (await composer.setDraft(null, prompt)) return true
+    }
+  } catch (_err) {
+    // fall through to the clipboard
+  }
+  return false
+}
 
 function AgentSetup({ wake }) {
   const copied = useValue(agentSetupCopied)
-  const canRestart = typeof host.restartGateway === 'function'
-  const step = (n, text, extra) =>
-    jsxs(
-      'div',
-      {
-        className: 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1',
-        children: [
-          jsx('span', { className: 'shrink-0 font-medium text-(--ui-text-secondary)', children: n + '.' }),
-          jsx('span', { className: 'min-w-0', children: text })
-        ].concat(extra || [])
-      },
-      n
-    )
+  const opened = useValue(agentSetupOpened)
+  const prompt = wake.setup_prompt || wake.config_snippet || wake.config_line
+  const start = async () => {
+    if (await openAgentSetupChat(prompt)) {
+      agentSetupOpened.set(true)
+      return
+    }
+    copyText(prompt)
+    agentSetupCopied.set(true)
+  }
   return jsxs('div', {
     role: 'group',
-    'aria-label': 'Finish agent setup',
+    'aria-label': 'Let your agent answer @mentions',
     className: 'flex min-w-0 flex-col gap-1 border-b border-(--ui-stroke-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-tertiary)',
     children: [
       jsxs('div', {
-        className: 'flex items-center gap-1.5',
+        className: 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1',
         children: [
-          jsx(StatusDot, { tone: 'bad' }),
-          jsx('span', { className: 'font-medium text-(--ui-text-secondary)', children: 'One step left before your agent can answer @mentions' })
+          jsx(StatusDot, { tone: 'muted' }),
+          jsx('span', {
+            className: 'min-w-0 font-medium text-(--ui-text-secondary)',
+            children: 'Want your agent to answer when teammates @mention you?'
+          }),
+          jsx(Button, { type: 'button', size: 'xs', onClick: start, children: 'Set up my agent' })
         ]
       }),
-      step(1, 'Copy the setup prompt.', [
-        canCopy()
-          ? jsx(Button, {
-              type: 'button',
-              size: 'xs',
-              onClick: () => {
-                copyText(wake.setup_prompt || wake.config_snippet || wake.config_line)
-                agentSetupCopied.set(true)
-              },
-              children: copied ? 'Copied' : 'Copy setup prompt'
-            }, 'copy')
-          : null
-      ]),
-      step(2, 'Paste it into any Hermes chat and send it. Your agent adds one line to config.yaml.'),
-      step(3, 'Restart the gateway.', [
-        canRestart
-          ? jsx(Button, {
-              type: 'button',
-              size: 'xs',
-              variant: 'secondary',
-              onClick: () => {
-                try {
-                  const done = host.restartGateway()
-                  if (done && typeof done.catch === 'function') done.catch(() => {})
-                } catch (_err) {
-                  // the step is still written here to do by hand
-                }
-              },
-              children: 'Restart gateway'
-            }, 'restart')
-          : null
-      ]),
-      jsxs('div', {
-        className: 'flex min-w-0 flex-wrap items-center gap-x-1.5',
+      opened
+        ? jsx('span', { children: 'A new chat opened with the request written for you. Press Enter, then approve the change it asks for. This line turns green by itself.' })
+        : copied
+          ? jsx('span', { children: 'Copied the request. Paste it into any Hermes chat, press Enter, and approve the change. This line turns green by itself.' })
+          : jsx('span', { children: 'One click: your own agent makes a one-line settings change, and you approve it.' }),
+      jsxs('details', {
         children: [
-          jsx('span', { children: 'By hand: in config.yaml, under plugins → entries → hermes-multiplayer, add' }),
-          jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
+          jsx('summary', { className: 'cursor-pointer', children: 'Do it by hand instead' }),
+          jsxs('div', {
+            className: 'flex min-w-0 flex-wrap items-center gap-x-1.5 pt-1',
+            children: [
+              jsx('span', { children: 'In config.yaml, under plugins → entries → hermes-multiplayer, add' }),
+              jsx('code', { className: 'rounded bg-(--ui-surface-secondary) px-1 font-mono', children: wake.config_line })
+            ]
+          })
         ]
       })
     ]
   })
 }
 
+// With no chat chosen yet, the chat the owner has open answers @mentions: the setup chat itself, usually. Runs once
+// per chat through React Query (the plugin has no effect hook), and never after the owner pressed Stop.
+function useAutoWakeTarget(status, activeSession) {
+  const wake = status && status.wake
+  const want = Boolean(wake && wake.enabled && wake.blocked_reason === 'no_target' && activeSession && !wakeStopped())
+  useQuery({
+    queryKey: [PLUGIN_ID, 'auto-wake-target', activeSession || ''],
+    queryFn: async () => {
+      await api('/wake-target', { method: 'POST', body: { session_key: activeSession, label: 'your open chat' } })
+      refreshAll()
+      return true
+    },
+    enabled: want,
+    staleTime: Infinity,
+    retry: false
+  })
+}
+
 function WakeBanner({ status }) {
   const activeSession = useValue(host.state.activeSessionId)
+  useAutoWakeTarget(status, activeSession)
   const wake = status.wake
   const setTarget = useMutation({
     mutationFn: sessionKey =>
@@ -2695,34 +2920,127 @@ function WakeBanner({ status }) {
         'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--ui-stroke-secondary) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
       children: [jsx(StatusDot, { tone }), jsx('span', { className: 'min-w-0', children: text })].concat(extra || [])
     })
+  const here = label =>
+    jsx(Button, {
+      type: 'button',
+      size: 'xs',
+      variant: 'secondary',
+      disabled: !activeSession || setTarget.isPending,
+      title: activeSession ? 'Answer @mentions in the chat you have open' : 'Open the chat your agent should answer in first',
+      onClick: () => {
+        setWakeStopped(false)
+        setTarget.mutate(activeSession)
+      },
+      children: label
+    })
   if (!wake.enabled) {
     return line('muted', 'Your agent doesn’t answer @mentions. Turn on “Let my agent answer @mentions” in Settings.', [
       jsx(Button, { type: 'button', size: 'xs', onClick: openSettings, children: 'Settings' })
     ])
   }
   if (wake.blocked_reason === 'no_target') {
-    return line('muted', 'Your agent isn’t answering @mentions yet.', [
-      jsx(Button, {
-        type: 'button',
-        size: 'xs',
-        disabled: !activeSession || setTarget.isPending,
-        title: activeSession ? 'Answer @mentions in the chat you have open' : 'Open the chat your agent should answer in first',
-        onClick: () => setTarget.mutate(activeSession),
-        children: 'Answer @mentions here'
-      })
-    ])
+    return line(
+      'muted',
+      wakeStopped() ? 'Your agent isn’t answering @mentions.' : 'Open any Hermes chat and your agent answers @mentions there.',
+      [here('Answer @mentions here')]
+    )
   }
   if (wake.blocked_reason === 'injection_not_allowed') return jsx(AgentSetup, { wake })
   if (wake.blocked_reason) return line('bad', wake.blocked_message)
   return line('good', 'Your agent answers @mentions in ' + wake.target_label + '.', [
+    here('Use this chat instead'),
     jsx(Button, {
       type: 'button',
       size: 'xs',
+      variant: 'ghost',
       disabled: setTarget.isPending,
-      onClick: () => setTarget.mutate(''),
+      onClick: () => {
+        setWakeStopped(true)
+        setTarget.mutate('')
+      },
       children: 'Stop'
     })
   ])
+}
+
+function JoinedNote() {
+  const text = useValue(joinedNote)
+  if (!text) return null
+  return jsxs('div', {
+    role: 'status',
+    className: 'flex items-center gap-1.5 border-b border-(--ui-stroke-secondary) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+    children: [
+      jsx(StatusDot, { tone: 'good' }),
+      jsx('span', { className: 'min-w-0 flex-1', children: text }),
+      jsx('button', { type: 'button', className: 'hover:text-(--ui-accent)', onClick: () => joinedNote.set(''), children: 'Dismiss' })
+    ]
+  })
+}
+
+// The pane loaded but its backend didn't answer: the agent half is off, or Hermes hasn't loaded it yet. Instead of
+// a dead end, one button turns it on (the same switch as Capabilities → Plugins) and restarts Hermes if needed.
+const setupFixState = atom('') // '' | 'working' | 'restarting' | 'failed'
+
+async function finishSetup() {
+  setupFixState.set('working')
+  let needsRestart = true
+  try {
+    const out = await host.request('plugins.manage', { action: 'toggle', key: PLUGIN_ID, enable: true })
+    // Hermes loads a plugin it just switched on without a restart when it can, and says when it couldn't.
+    needsRestart = !out || Boolean(out.restart_required) || Boolean(out.unchanged)
+  } catch (_err) {
+    needsRestart = true
+  }
+  if (!needsRestart) {
+    refreshAll()
+    if (ctx) ctx.setTimeout(() => setupFixState.set(''), 4000)
+    return
+  }
+  if (typeof host.restartGateway !== 'function') {
+    setupFixState.set('failed')
+    return
+  }
+  setupFixState.set('restarting')
+  try {
+    const done = host.restartGateway()
+    if (done && typeof done.then === 'function') await done
+  } catch (_err) {
+    setupFixState.set('failed')
+    return
+  }
+  refreshAll()
+}
+
+function SetupFix() {
+  const state = useValue(setupFixState)
+  const busy = state === 'working' || state === 'restarting'
+  return jsxs('div', {
+    className: 'flex flex-col items-center gap-2 px-4 py-6 text-center',
+    children: [
+      jsx('div', { className: 'text-sm font-medium', children: 'Almost ready' }),
+      jsx('div', {
+        className: 'max-w-80 text-xs text-(--ui-text-tertiary)',
+        children:
+          state === 'restarting'
+            ? 'Restarting Hermes. This takes a few seconds, and this page comes back by itself.'
+            : 'Hermes Multiplayer is installed, but Hermes hasn’t switched it on yet. One click finishes it.'
+      }),
+      jsx(Button, {
+        type: 'button',
+        size: 'sm',
+        disabled: busy,
+        onClick: () => finishSetup(),
+        children: state === 'working' ? 'Turning it on…' : state === 'restarting' ? 'Restarting…' : 'Finish setup'
+      }),
+      state === 'failed'
+        ? jsx('div', {
+            role: 'alert',
+            className: 'max-w-80 text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: 'That didn’t work from here. Open Capabilities → Plugins, switch Hermes Multiplayer on, then quit and reopen Hermes.'
+          })
+        : null
+    ]
+  })
 }
 
 function NoTeammate({ incoming }) {
@@ -2776,12 +3094,7 @@ function MultiplayerView({ compact }) {
   if (isLoading) {
     return jsx('div', { className: 'p-3 text-xs text-(--ui-text-tertiary)', children: 'Loading Hermes Multiplayer…' })
   }
-  if (isError) {
-    return jsx(EmptyState, {
-      title: 'Hermes Multiplayer is installed but its backend is off.',
-      description: 'Enable the Hermes Multiplayer plugin for this profile (Capabilities → Plugins), then restart the gateway.'
-    })
-  }
+  if (isError) return jsx(SetupFix, {})
   const selected =
     channels.find(c => c.id === selectedId) || channels.find(c => c.id === 'general') || channels[0] || null
   // The route's thread panel is a column of its own, so the channel column and the messages stay in view.
@@ -2793,11 +3106,13 @@ function MultiplayerView({ compact }) {
   return jsxs('div', {
     className: 'flex h-full min-h-0 flex-col',
     children: [
-      statusQuery.isSuccess && !hasPeer ? jsx(NoTeammate, { incoming }) : null,
+      statusQuery.isSuccess && !hasPeer && incoming ? jsx(NoTeammate, { incoming }) : null,
+      jsx(JoinedNote, {}),
       statusQuery.isSuccess && (!hasPeer || pairingOpen || pairingDone)
         ? jsx('div', { className: 'border-b border-(--ui-stroke-secondary) px-3 py-2', children: jsx(PairingPanel, { status }) })
         : null,
-      statusQuery.isSuccess && status && status.wake ? jsx(WakeBanner, { status }) : null,
+      // First run shows only the welcome card; agent setup comes once a teammate is connected.
+      statusQuery.isSuccess && status && status.wake && hasPeer ? jsx(WakeBanner, { status }) : null,
       compact ? null : jsx(SearchBar, {}),
       jsxs('div', {
         className: compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1',
@@ -2874,10 +3189,14 @@ export default {
     inviteLine.set('')
     renaming.set(false)
     roomInvite.set('')
+    joinedNote.set('')
+    welcomeName.set(null)
+    setupFixState.set('')
     editingMessage.set(null)
     deletingMessage.set(null)
     reactionMore.set(false)
     agentSetupCopied.set(false)
+    agentSetupOpened.set(false)
     historyLimit.clear()
     historyAnchor = null
     typingSent.channel = ''
