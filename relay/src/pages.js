@@ -1,4 +1,4 @@
-// The two pages a person (not a Hermes Multiplayer) can open on the relay: the install page, and the page an invite
+// The two pages a person (not a Hermes Multiplayer) can open on the relay: the page an invite
 // link opens in a browser. Plain HTML with no outside resources. The room key lives after the '#' of an invite link,
 // which a browser never sends to the server, so this code never sees it; only the page's own script reads it to
 // offer a copy button.
@@ -91,7 +91,6 @@ ${installStep('Install Hermes Multiplayer (skip if you have it)')}
 /** The page for a browser GET of `pathname`, or null when it is a relay path (or nothing). */
 export function pageFor(method, pathname) {
   if (method !== 'GET' && method !== 'HEAD') return null
-  if (pathname === '/install' || pathname === '/install/') return { status: 200, headers: HEADERS, html: installPage() }
   if (/^\/r\/[A-Za-z0-9_-]{8,64}\/?$/.test(pathname)) return { status: 200, headers: HEADERS, html: invitePage() }
   return null
 }

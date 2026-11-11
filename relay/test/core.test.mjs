@@ -89,10 +89,8 @@ test('small helpers', () => {
 
 test('people get pages; relay paths and the key never do', async () => {
   const { pageFor, INSTALL_DEEP_LINK } = await import('../src/pages.js')
-  const install = pageFor('GET', '/install')
-  assert.equal(install.status, 200)
-  assert.match(install.html, /Install in Hermes/)
-  assert.ok(install.html.includes(INSTALL_DEEP_LINK))
+  // The install page moved to GitHub Pages; the relay no longer serves /install.
+  assert.equal(pageFor('GET', '/install'), null)
   const invite = pageFor('GET', '/r/0123456789abcdef0123')
   assert.match(invite.html, /invited/)
   assert.match(invite.headers['Content-Security-Policy'], /default-src 'none'/)
