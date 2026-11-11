@@ -916,7 +916,7 @@ function messageRows(messages, rowProps) {
   return rows
 }
 
-const REACTION_EMOJIS = ['👍', '❤️', '👁️', '🎉']
+const REACTION_EMOJIS = ['👍', '❤️', '👀', '🎉']
 
 // The reaction affordance. It is always in the row: faded in on hover and on keyboard focus (opacity, not
 // display, so the trigger stays tabbable). The trigger opens a picker; arrow keys move between the emoji,

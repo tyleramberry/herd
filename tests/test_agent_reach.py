@@ -102,10 +102,21 @@ class PickupMark(_Base):
         store.ingest(peer_msg("@tyler take a look", "m-ack"))
         self.assertEqual(len(self.woken), 1)
         shown = [m for m in store.list_messages("general") if m["id"] == "m-ack"][0]
-        self.assertEqual(shown["reactions"], [{"emoji": "👁️", "count": 1, "mine": True}])
+        self.assertEqual(shown["reactions"], [{"emoji": "👀", "count": 1, "mine": True}])
         out = store.export_batch(0, viewer_gateway="other-gw")
         self.assertEqual([(r["message_id"], r["emoji"], r["active"]) for r in out["reactions"]],
-                         [("m-ack", "👁️", 1)])
+                         [("m-ack", "👀", 1)])
+
+    def test_the_old_eye_reaction_from_earlier_builds_still_shows(self):
+        store.ingest(peer_msg("hello", "m-old"))
+        batch = {"from": {"gateway_id": "other-gw", "display_name": "Brooklyn"}, "channels": [], "messages": [],
+                 "reactions": [{"message_id": "m-old", "emoji": "👁️", "gateway_id": "other-gw", "active": 1,
+                                "created_at": "2026-11-05T00:00:01Z"}]}
+        store.ingest(batch)
+        shown = [m for m in store.list_messages("general") if m["id"] == "m-old"][0]
+        self.assertEqual([r["emoji"] for r in shown["reactions"]], ["👁️"])
+        self.assertNotIn("👁️", store.REACTIONS)
+        self.assertIn("👀", store.REACTIONS)
 
     def test_an_undelivered_mention_gets_no_mark(self):
         store.set_mention_target("")
@@ -116,7 +127,7 @@ class PickupMark(_Base):
     def test_your_own_tag_is_marked_too(self):
         m = store.post_message("general", "@hermes mark me")
         shown = [x for x in store.list_messages("general") if x["id"] == m["id"]][0]
-        self.assertEqual([r["emoji"] for r in shown["reactions"]], ["👁️"])
+        self.assertEqual([r["emoji"] for r in shown["reactions"]], ["👀"])
 
 
 class ThreadAnswers(_Base):

@@ -76,7 +76,11 @@ _PEER_SLOTS = (  # (name field, url field, key slot) — the numbered Settings f
 # for this exact text in a peer's 401 body to tell "they have no secret" from "our secret is wrong".
 NO_LOCAL_SECRET = "This gateway has no Herd secret set (HERD_SECRET)."
 
-REACTIONS = ["👍", "❤️", "👁️", "🎉"]
+# 👀 is the one the picker offers and the mark an agent leaves on a mention it picked up. 👁️ was offered before it
+# and stays accepted (LEGACY_REACTIONS, shown after the others) so reactions already stored still show.
+REACTIONS = ["👍", "❤️", "👀", "🎉"]
+LEGACY_REACTIONS = ["👁️"]
+_ACCEPTED_REACTIONS = REACTIONS + LEGACY_REACTIONS
 
 _CHANNEL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 # Gateway ids are plain identifier strings (a uuid4 hex in this codebase). A DM whose member id is not
@@ -1079,11 +1083,11 @@ def _reaction_map(conn: sqlite3.Connection, channel_id: str, me: Optional[str] =
         args.append(message_id)
     out: dict[str, list[dict]] = {}
     for r in conn.execute(sql + " GROUP BY message_id, emoji", args).fetchall():
-        if r["emoji"] in REACTIONS:
+        if r["emoji"] in _ACCEPTED_REACTIONS:
             out.setdefault(r["message_id"], []).append(
                 {"emoji": r["emoji"], "count": r["n"], "mine": bool(r["mine"])})
     for items in out.values():
-        items.sort(key=lambda x: REACTIONS.index(x["emoji"]))
+        items.sort(key=lambda x: _ACCEPTED_REACTIONS.index(x["emoji"]))
     return out
 
 
@@ -1102,7 +1106,7 @@ def toggle_reaction(channel_ref: str, message_id: str, emoji: Any) -> dict:
         if not conn.execute("SELECT 1 FROM messages WHERE id = ? AND channel_id = ?",
                             (mid, channel["id"])).fetchone():
             raise HerdError(404, "No message with that id.")
-    if emoji not in REACTIONS:
+    if emoji not in _ACCEPTED_REACTIONS:
         raise HerdError(422, "Pick one of " + " ".join(REACTIONS) + ".")
     me = identity()["gateway_id"]
     rid = f"{mid}|{emoji}|{me}"
@@ -1173,7 +1177,7 @@ def _valid_reaction(r: Any) -> Optional[dict]:
     if not isinstance(r, dict):
         return None
     emoji = r.get("emoji")
-    if emoji not in REACTIONS:
+    if emoji not in _ACCEPTED_REACTIONS:
         return None
     mid = str(r.get("message_id") or "")[:64]
     gateway_id = str(r.get("gateway_id") or "")[:64]
@@ -1731,11 +1735,11 @@ def _maybe_wake(messages: list[dict], history: bool = False) -> None:
         logger.debug("herd: mention wake failed", exc_info=True)
 
 
-WAKE_ACK_EMOJI = "👁️"
+WAKE_ACK_EMOJI = "👀"
 
 
 def _ack_wake(m: dict, me_id: str) -> None:
-    """Mark a mention this gateway's agent picked up with 👁️. It is an ordinary reaction row, so it syncs: the
+    """Mark a mention this gateway's agent picked up with 👀. It is an ordinary reaction row, so it syncs: the
     person who tagged sees on their own screen that the agent has the message. Never raises."""
     try:
         rid = f"{m['id']}|{WAKE_ACK_EMOJI}|{me_id}"
