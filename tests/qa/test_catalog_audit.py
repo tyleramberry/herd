@@ -69,7 +69,7 @@ README = "# Hermes Multiplayer\n\n## Disclosures\nNetwork calls: peer gateways o
 
 ENTRY = """\
 name: hermes-multiplayer
-repo: https://github.com/tyleramberry/herd
+repo: https://github.com/tyleramberry/hermes-multiplayer
 sha: {sha}
 description: Multiplayer Hermes.
 maintainer: tyleramberry

@@ -26,7 +26,7 @@ Confirm each home has no `plugins/herd`, no `desktop-plugins/herd`, no herd data
 On **each** side:
 
 ```bash
-HERMES_HOME=$QA/a hermes plugins install tyleramberry/herd --no-enable
+HERMES_HOME=$QA/a hermes plugins install tyleramberry/hermes-multiplayer --no-enable
 HERMES_HOME=$QA/a hermes plugins enable herd
 HERMES_HOME=$QA/a hermes plugins list --json | grep -A3 '"herd"'     # recorded SHA == freeze SHA
 HERMES_HOME=$QA/a hermes plugins doctor herd

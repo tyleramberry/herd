@@ -3,7 +3,7 @@ version: 0.1.0
 description: Hermes Multiplayer — channels and DMs shared between up to five Hermes gateways, for humans and agents.
 author: Tyler Amberry
 license: MIT
-homepage: https://github.com/tyleramberry/herd
+homepage: https://github.com/tyleramberry/hermes-multiplayer
 requires_hermes: ">=0.22.0"
 manifest_version: 2
 api_version: 1

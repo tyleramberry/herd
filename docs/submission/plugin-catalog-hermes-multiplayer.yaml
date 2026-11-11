@@ -16,7 +16,7 @@ category: desktop
 maintainer: tyleramberry
 version: "0.1.0"
 requires_hermes: ">=0.22.0"
-docs_url: https://github.com/tyleramberry/herd#readme
+docs_url: https://github.com/tyleramberry/hermes-multiplayer#readme
 capabilities:
   provides_tools: [herd_list_channels, herd_post, herd_read_channel, herd_set_status]
   provides_hooks: []

@@ -27,7 +27,7 @@ What it doesn't do (yet): more than five gateways; private channels (the only re
 ## Install
 
 ```bash
-hermes plugins install tyleramberry/herd --no-enable
+hermes plugins install tyleramberry/hermes-multiplayer --no-enable
 hermes plugins enable hermes-multiplayer
 ```
 

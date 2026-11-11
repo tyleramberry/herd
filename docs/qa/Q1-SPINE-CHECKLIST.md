@@ -38,7 +38,7 @@ Two independent Hermes instances. Either topology is valid:
 Setup steps (per gateway):
 
 ```
-hermes plugins install tyleramberry/herd --no-enable   # or install by local path
+hermes plugins install tyleramberry/hermes-multiplayer --no-enable   # or install by local path
 hermes plugins enable herd                              # backend import gate (plugins.enabled)
 ```
 

@@ -56,20 +56,20 @@ title: Herd
 description: >-
   Multiplayer Hermes. Channels and DMs where you, a teammate, and both of
   your Hermes agents work together across two machines.  # N-3 copy
-repo: https://github.com/tyleramberry/herd
+repo: https://github.com/tyleramberry/hermes-multiplayer
 sha: REPIN_AT_OPEN_ORIGIN_MAIN  # NOT FINAL — swap to the frozen origin/main when the PR opens (runbook §A). Supersedes cd6d46c (scanned) and the pre-S-24 head 047a5b09; Q-13 re-verifies the S-24 head.
 tier: community
 category: desktop  # shelf options: desktop|memory|platform|web|tools|voice|automation|models|general. Herd is a desktop pane, so "desktop" (was "platform", which is the messaging-platform shelf)
 maintainer: tyleramberry
 version: "0.1.0"  # QUOTED; must match plugin.yaml at the pinned commit
 requires_hermes: ">=0.22.0"  # Sentry, Nov 5: oldest release verified to have every core API Herd uses (Tyler's Mac runs 0.22.0). VERIFIED Nov 5: plugin.yaml on main carries the same floor (PRs #10/#11, rule 14)
-docs_url: https://github.com/tyleramberry/herd#readme
+docs_url: https://github.com/tyleramberry/hermes-multiplayer#readme
 # platforms: omit unless macOS-only
 # subdir: omit (plugin at repo root)
-# image: https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/banner.png  # DEFAULT = OMITTED. docs/media is EMPTY on main (audit WARN 5); a link to a file missing at the pin is a broken gallery.
+# image: https://raw.githubusercontent.com/tyleramberry/hermes-multiplayer/<sha>/docs/media/banner.png  # DEFAULT = OMITTED. docs/media is EMPTY on main (audit WARN 5); a link to a file missing at the pin is a broken gallery.
 # screenshots:  # add ONLY if real files are committed to docs/media/ before the freeze commit, pinned to the same sha
-#   - https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/channel-two-machines.png
-#   - https://raw.githubusercontent.com/tyleramberry/herd/<sha>/docs/media/agent-posts-to-channel.png
+#   - https://raw.githubusercontent.com/tyleramberry/hermes-multiplayer/<sha>/docs/media/channel-two-machines.png
+#   - https://raw.githubusercontent.com/tyleramberry/hermes-multiplayer/<sha>/docs/media/agent-posts-to-channel.png
 capabilities:
   # Key names per the live entry schema: provides_tools / provides_hooks / provides_middleware / requires_env
   # (draft v1 used tools/hooks/middleware, which is wrong). Must match what the plugin registers at the pin (rule 6).
