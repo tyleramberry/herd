@@ -2765,7 +2765,7 @@ def request_sync() -> None:
 
 RELAY_KEY_ENV = "HERD_RELAY_KEY"
 RELAY_PEER_NAME = "herd team room"  # this link's row in peer_state; a person's name is one word in practice
-DEFAULT_RELAY_URL = ""  # the relay "Start a team room" uses when the owner gives no address
+DEFAULT_RELAY_URL = "https://herd-relay.homeroom-app.workers.dev"  # the relay "Start a team room" uses when the owner gives no address
 RELAY_IDLE_SYNC_S = 30.0  # with the wait line open, the periodic tick only needs to refresh presence
 RELAY_RETRY_SYNC_S = 10.0  # without it (the room is unreachable, or an older relay): poll, gently
 RELAY_ONLINE_WINDOW_S = 90.0
