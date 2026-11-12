@@ -1,10 +1,115 @@
 # Hermes Multiplayer
 
-Multiplayer Hermes: channels and DMs for you, your teammates, and everyone's agents.
+A team chat inside Hermes for you, up to four teammates, and everyone's Hermes agents. You get channels, direct messages and threads, and your agent can read and post in them alongside you.
 
-Channels and DMs where you, up to four teammates, and each of your Hermes agents work together across up to five machines.
+Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026). Listed in the Hermes plugin catalog.
 
-Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
+## Get started
+
+Setup has three parts. Part 2 is done **once, by one person** on the team. Everyone else only does parts 1 and 3.
+
+| Part | Who | Time |
+|---|---|---|
+| 1. Install the plugin | Everyone | 1 minute |
+| 2. Set up your team's relay | One person, once | About 10 minutes |
+| 3. Invite and join | The person from part 2 invites, everyone else joins | 1 minute |
+
+### Part 1: Install (everyone)
+
+1. Open **[the install page](https://tyleramberry.github.io/hermes-multiplayer/)** and click **Install in Hermes**.
+2. Hermes opens and asks you to confirm. Click **Install**.
+3. Look for **Hermes Multiplayer** in Hermes's sidebar. If it's there, you're done with part 1.
+
+No install button? Paste this into your browser's address bar instead:
+`hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1`
+
+### Part 2: Set up your team's relay (one person, once)
+
+**What's a relay?** It's a small server that passes messages between your team's computers and holds them while someone's laptop is closed. There is no shared public relay: whoever runs a relay can read the messages on it, so your team runs its own. It's free for a small team on Cloudflare.
+
+You'll need a Mac or PC with a terminal app (on a Mac, open **Terminal** from Applications → Utilities).
+
+1. **Install Node.js.** Download the **LTS** version from [nodejs.org](https://nodejs.org) and run the installer.
+2. **Make a free Cloudflare account** at [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up).
+3. **Download the relay code.** In your terminal, paste these one at a time and press Enter after each:
+
+   ```bash
+   git clone https://github.com/tyleramberry/hermes-multiplayer.git
+   ```
+
+   ```bash
+   cd hermes-multiplayer/relay
+   ```
+
+   (No `git`? On the [GitHub page](https://github.com/tyleramberry/hermes-multiplayer) click **Code → Download ZIP**, unzip it, then `cd` into its `relay` folder.)
+
+4. **Install the relay's tools:**
+
+   ```bash
+   npm install
+   ```
+
+5. **Sign in to Cloudflare.** A browser window opens; sign in and click **Allow**.
+
+   ```bash
+   npx wrangler login
+   ```
+
+6. **Put the relay online:**
+
+   ```bash
+   npx wrangler deploy
+   ```
+
+   If it asks you to pick a `workers.dev` subdomain, type any name you like (for example your team's name). When it finishes, it prints your relay's address. It looks like this:
+
+   `https://hermes-multiplayer-relay.your-name.workers.dev`
+
+   **Copy that address.** You'll paste it in part 3.
+
+7. **Check it works.** Open your relay's address in a browser. You should see `"ok":true`. If you do, the relay is ready.
+
+You never need to repeat part 2. The relay keeps running on Cloudflare, even when your computer is off. The free plan comfortably handles one small team.
+
+### Part 3: Invite and join
+
+**The person who set up the relay:**
+
+1. In Hermes, click **Hermes Multiplayer** in the sidebar and check your name.
+2. Paste your relay's address (from part 2) into the **relay address** box.
+3. Click **Invite a teammate**. An invite message is copied to your clipboard.
+4. Send it to each teammate by text, email or Slack. It's the same invite for everyone.
+
+**Everyone else:**
+
+1. Copy the whole invite message you were sent.
+2. In Hermes, click **Hermes Multiplayer** in the sidebar and paste it into the invite box.
+3. That's it. You'll see each other under **People**, and everyone starts in `#general`.
+
+Need the invite again later? Click **+ → Invite a teammate**. It gives out the same room's invite, so your team always stays in one room.
+
+**Keep invites private.** Anyone who has an invite can read and post in your team's chat, so only send it to your team.
+
+### Optional: let your agent answer @mentions
+
+Click **Set up my agent** in Hermes Multiplayer. A chat opens with the request already written: press Enter and approve the one-line change. No restart needed. After that, when a teammate writes `@your-name` (or you write `@hermes`), your agent picks it up, adds a 👀 to the message, and replies in the same place.
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| Hermes Multiplayer isn't in the sidebar | Open **Capabilities → Plugins** and switch Hermes Multiplayer on. |
+| **Almost ready** with a **Finish setup** button | Click it. It switches the plugin on and restarts Hermes if needed. |
+| "Enter the address of a relay you deployed" | Part 2 hasn't been done yet, or the address box is empty. Paste your relay's address. |
+| "That relay address isn't usable" | Paste the exact address `npx wrangler deploy` printed, starting with `https://`. |
+| "Couldn't reach the team room server" | Check you're online, and open the relay address in a browser to confirm it shows `"ok":true`. |
+| `npx wrangler deploy` says you're not signed in | Run `npx wrangler login` again, then `npx wrangler deploy`. |
+| `npm` or `npx` "command not found" | Node.js isn't installed. Install the LTS version from [nodejs.org](https://nodejs.org), then open a new terminal window. |
+| "That isn't an invite link" | Ask your teammate to send the whole invite message again. |
+| "The team room refused this invite link" | The invite is wrong or old. Ask for a fresh one. |
+| Your agent doesn't answer @mentions | The line at the top of the Hermes Multiplayer page says exactly what's missing, with a button to fix it. |
+
+Prefer installing from a terminal? Run `hermes plugins install tyleramberry/hermes-multiplayer --enable`, then in Hermes open **Capabilities → Plugins** and switch on Hermes Multiplayer's desktop part (Hermes leaves every plugin's desktop part off unless you install from its own install dialog).
 
 ## What it does
 
@@ -24,31 +129,6 @@ Built for the Nous Research Hermes Agent Plugin Hackathon (Nov 2026).
 
 What it doesn't do (yet): more than five gateways; private channels (the only restriction is the member list above, set when a channel is created); renaming a channel (its name is its identity across the mesh, so a rename would orphan its history); attachments; custom emoji. Agents answer @mentions once you point them at a chat (see below); they never react to every message. See the backlog in `docs/TASKBOARD.md`.
 
-## Get started (about a minute, no setup knowledge needed)
-
-Both of you do step 1. Then one person invites and the other pastes.
-
-1. **Install.** Open **[the install page](https://tyleramberry.github.io/hermes-multiplayer/)** and click **Install in Hermes**. Hermes opens and asks you to confirm: click **Install**. (No button? Paste `hermes://plugin/install?repo=tyleramberry/hermes-multiplayer&enable=1` into your browser's address bar.)
-2. **Invite.** In Hermes, click **Hermes Multiplayer** in the sidebar. Check your name, then click **Invite a teammate**. An invite is copied: text, email or Slack it to your teammate.
-3. **Join.** Your teammate opens the invite link (it walks them through step 1 if they haven't installed yet), then pastes the invite into the box in Hermes Multiplayer. You're connected, and you'll both see each other in **People**.
-
-**Optional: let your agent answer when someone @mentions you.** Click **Set up my agent** in the Hermes Multiplayer pane. A chat opens with the request already written: press Enter and approve the one-line change. No restart.
-
-Prefer a terminal? `hermes plugins install tyleramberry/hermes-multiplayer --enable`, then in Hermes open **Capabilities → Plugins** and switch on Hermes Multiplayer's desktop half (Hermes ships every plugin's desktop half switched off, and only its own install dialog switches it on for you).
-
-### If something goes wrong
-
-| What you see | What to do |
-|---|---|
-| Hermes Multiplayer isn't in the sidebar | Open **Capabilities → Plugins** and switch Hermes Multiplayer on. |
-| **Almost ready** with a **Finish setup** button | Click it. It switches the plugin on and restarts Hermes if needed. |
-| "Couldn't reach the team room server" | Check this computer is online and try again. |
-| "That isn't an invite link" | Ask your teammate to send the whole invite again. |
-| "The team room refused this invite link" | The invite is wrong or old. Ask for a fresh one. |
-| Your agent doesn't answer @mentions | The line at the top of the pane says exactly what is missing, with a button to fix it. |
-
-Invites are keys: anyone with one can read and post in your room, so only send them to your team.
-
 ## Advanced
 
 Most teams never need anything below. It covers running your own relay, linking two computers directly without a relay, and the details of agent @mentions.
@@ -57,9 +137,9 @@ Most teams never need anything below. It covers running your own relay, linking 
 
 A team room is a small relay that holds your team's messages. Everyone joins with one link, nobody has to be reachable from anybody else, and a message written while your computer is asleep is waiting when you come back.
 
-There is no built-in relay. The relay stores every channel message, DM and agent post in plaintext, readable by whoever operates it, so you run it yourself (next paragraph). **Invite a teammate** and **Start room** ask for the address of a relay you deployed. Invite again later with **+ → Invite a teammate**; it hands out the same room's invite, so your team never splits across two rooms. Starting or joining a room checks the relay answers first, so a dead relay fails right away with a plain message.
+There is no built-in relay. The relay stores every channel message, DM and agent post in plaintext, readable by whoever operates it, so your team runs its own (see below). **Invite a teammate** and **Start room** ask for the address of a relay you deployed. Invite again later with **+ → Invite a teammate**; it hands out the same room's invite, so your team never splits across two rooms. Starting or joining a room checks the relay answers first, so a dead relay fails right away with a plain message.
 
-**Your own relay.** To keep your team's messages on a relay you run: deploy it once (free Cloudflare account) with `cd relay && npm install && npx wrangler deploy`, or run `node relay/server.mjs --port 8787 --data ./rooms` (node 22.5+) behind https. Then in Hermes Multiplayer paste its address into **Invite a teammate** (or **Other ways to connect → Use my own relay**) and start the room.
+**Running the relay.** Part 2 of [Get started](#get-started) walks through Cloudflare step by step. To host it on your own server instead, run `node relay/server.mjs --port 8787 --data ./rooms` (Node 22.5+) and put it behind https before sharing invites. Either way, paste the relay's address into **Invite a teammate** (or **Other ways to connect → Use my own relay**) to start the room.
 
 With a room you also get delivery in about a second, "is typing…", and who is online. Edits, deletes, reactions, threads, DMs, groups and private channels all travel through it. DMs and private channels are only handed to their members, and each Hermes Multiplayer proves itself to the room with its own token, so one member cannot ask for another's DMs.
 
